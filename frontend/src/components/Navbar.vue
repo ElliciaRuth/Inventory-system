@@ -37,10 +37,19 @@ const isNotifDropdownOpen = ref(false)
 const dropdownRef = ref(null)
 const openMenu = ref('')
 const menuRef = ref(null)
+// Phones / tablets: the links, user and logout move into a panel behind the ☰ button
+const mobileOpen = ref(false)
+const headerRef = ref(null)
 
-// Inventory navigation per access level (Technical Staff uses its own links below)
+// Navigation per access level
 const menu = computed(() => {
   const level = authStore.levelId
+  if (isAdminAccount.value) {
+    return [
+      { label: 'User Management', to: '/admin' },
+      { label: 'Notifications', to: '/notifications', badge: notificationStore.unreadCount },
+    ]
+  }
   if (level === 1) {
     return [
       { label: 'Dashboard', to: '/' },
@@ -88,9 +97,15 @@ function toggleMenu(label) {
   openMenu.value = openMenu.value === label ? '' : label
 }
 
-// Close dropdown menus after navigating
+function toggleMobileMenu() {
+  mobileOpen.value = !mobileOpen.value
+  closeDropdown()
+}
+
+// Close menus after navigating
 watch(() => route.fullPath, () => {
   openMenu.value = ''
+  mobileOpen.value = false
 })
 
 function handleManualReload() {
@@ -141,6 +156,9 @@ function handleClickOutside(event) {
   if (menuRef.value && !menuRef.value.contains(event.target)) {
     openMenu.value = ''
   }
+  if (headerRef.value && !headerRef.value.contains(event.target)) {
+    mobileOpen.value = false
+  }
 }
 
 onMounted(() => {
@@ -155,7 +173,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="navbar">
+  <header ref="headerRef" class="navbar">
     <div class="navbar-inner">
       <router-link to="/" class="brand-section">
         <div class="brand-logo-badge">
@@ -169,50 +187,30 @@ onUnmounted(() => {
         </div>
       </router-link>
 
-      <nav ref="menuRef">
+      <nav ref="menuRef" class="desktop-nav">
         <ul class="nav-links">
-          <!-- Administrator Navigation Links -->
-          <template v-if="isAdminAccount">
-            <li>
-              <router-link to="/admin" class="nav-link">
-                <span>User Management</span>
-              </router-link>
-            </li>
-            <li>
-              <router-link to="/notifications" class="nav-link">
-                <span>Notifications</span>
-                <span v-if="notificationStore.unreadCount > 0" class="nav-badge" title="Unread notifications">
-                  {{ notificationStore.unreadCount }}
-                </span>
-              </router-link>
-            </li>
-          </template>
-
-          <!-- Inventory navigation (levels 1–3) -->
-          <template v-else>
-            <li v-for="item in menu" :key="item.label" class="nav-item">
-              <router-link v-if="item.to" :to="item.to" class="nav-link">
-                <span>{{ item.label }}</span>
-                <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
-              </router-link>
-              <template v-else>
-                <button
-                  type="button"
-                  class="nav-link nav-group-btn"
-                  :class="{ 'router-link-active': isGroupActive(item) }"
-                  :aria-expanded="openMenu === item.label"
-                  @click.stop="toggleMenu(item.label)"
-                >
-                  <span>{{ item.label }}</span><span class="nav-caret">▾</span>
-                </button>
-                <ul v-if="openMenu === item.label" class="nav-submenu" @click.stop>
-                  <li v-for="child in item.children" :key="child.to">
-                    <router-link :to="child.to" class="nav-submenu-link">{{ child.label }}</router-link>
-                  </li>
-                </ul>
-              </template>
-            </li>
-          </template>
+          <li v-for="item in menu" :key="item.label" class="nav-item">
+            <router-link v-if="item.to" :to="item.to" class="nav-link">
+              <span>{{ item.label }}</span>
+              <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+            </router-link>
+            <template v-else>
+              <button
+                type="button"
+                class="nav-link nav-group-btn"
+                :class="{ 'router-link-active': isGroupActive(item) }"
+                :aria-expanded="openMenu === item.label"
+                @click.stop="toggleMenu(item.label)"
+              >
+                <span>{{ item.label }}</span><span class="nav-caret">▾</span>
+              </button>
+              <ul v-if="openMenu === item.label" class="nav-submenu" @click.stop>
+                <li v-for="child in item.children" :key="child.to">
+                  <router-link :to="child.to" class="nav-submenu-link">{{ child.label }}</router-link>
+                </li>
+              </ul>
+            </template>
+          </li>
         </ul>
       </nav>
 
@@ -306,7 +304,7 @@ onUnmounted(() => {
         <!-- Theme Toggle Button -->
         <button
           type="button"
-          class="theme-btn"
+          class="theme-btn desktop-only"
           @click="themeStore.cycleTheme()"
           :title="`Current theme: ${themeLabel}. Click to switch.`"
         >
@@ -314,7 +312,7 @@ onUnmounted(() => {
         </button>
 
         <!-- User Profile Pill -->
-        <router-link to="/change-password" class="user-chip" title="Change password">
+        <router-link to="/change-password" class="user-chip desktop-only" title="Change password">
           <div class="user-avatar">
             {{ (authStore.userName || 'A').charAt(0).toUpperCase() }}
           </div>
@@ -327,18 +325,184 @@ onUnmounted(() => {
         <!-- Logout Action -->
         <button
           type="button"
-          class="btn btn-sm btn-secondary"
+          class="btn btn-sm btn-secondary desktop-only"
           @click="handleLogout"
           style="background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.25); color: #fff;"
         >
           Logout
         </button>
+
+        <button
+          type="button"
+          class="theme-btn nav-toggle"
+          :aria-expanded="mobileOpen"
+          aria-controls="mobile-menu"
+          :title="mobileOpen ? 'Close menu' : 'Open menu'"
+          @click.stop="toggleMobileMenu"
+        >
+          <span style="font-size: 1.2rem; line-height: 1;">{{ mobileOpen ? '✕' : '☰' }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Phone / tablet menu panel -->
+    <div v-if="mobileOpen" id="mobile-menu" class="mobile-menu">
+      <router-link to="/change-password" class="mobile-user">
+        <div class="user-avatar">{{ (authStore.userName || 'A').charAt(0).toUpperCase() }}</div>
+        <div class="mobile-user-info">
+          <strong>{{ authStore.userName }}</strong>
+          <span>{{ authStore.role }} · Change password</span>
+        </div>
+      </router-link>
+
+      <ul class="mobile-links">
+        <template v-for="item in menu" :key="item.label">
+          <li v-if="item.to">
+            <router-link :to="item.to" class="mobile-link">
+              <span>{{ item.label }}</span>
+              <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+            </router-link>
+          </li>
+          <li v-else>
+            <span class="mobile-group">{{ item.label }}</span>
+            <ul class="mobile-sublinks">
+              <li v-for="child in item.children" :key="child.to">
+                <router-link :to="child.to" class="mobile-link">{{ child.label }}</router-link>
+              </li>
+            </ul>
+          </li>
+        </template>
+      </ul>
+
+      <div class="mobile-actions">
+        <button type="button" class="btn btn-secondary" @click="themeStore.cycleTheme()">
+          {{ themeIcon }} {{ themeLabel }}
+        </button>
+        <button type="button" class="btn btn-primary" @click="handleLogout">Log out</button>
       </div>
     </div>
   </header>
 </template>
 
 <style scoped>
+.nav-toggle {
+  display: none;
+}
+
+.mobile-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-xl);
+  z-index: 999;
+}
+
+.mobile-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  color: inherit;
+  text-decoration: none;
+}
+
+.mobile-user-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mobile-user-info span {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.mobile-links,
+.mobile-sublinks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mobile-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 0.75rem;
+  border-radius: 10px;
+  color: var(--text-main);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.mobile-link.router-link-exact-active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.mobile-group {
+  display: block;
+  padding: 0.85rem 0.75rem 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mobile-sublinks .mobile-link {
+  padding-left: 1.25rem;
+  font-weight: 500;
+}
+
+.mobile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.mobile-actions .btn {
+  justify-content: center;
+}
+
+/* Phones and tablets: compact one-row header, everything else in the panel */
+@media (max-width: 1199px) {
+  .navbar-inner {
+    flex-wrap: nowrap;
+    height: 64px;
+    padding: 0 1rem;
+    gap: 0.75rem;
+  }
+
+  .desktop-nav,
+  .desktop-only {
+    display: none !important;
+  }
+
+  .nav-toggle {
+    display: flex;
+  }
+
+  .nav-actions {
+    gap: 0.5rem;
+  }
+}
+
+
 .nav-item {
   position: relative;
 }
@@ -597,5 +761,29 @@ onUnmounted(() => {
 
 .flyout-view-all:hover {
   text-decoration: underline;
+}
+
+/* Phone overrides — kept last so they win over the base rules above */
+@media (max-width: 640px) {
+  .brand-title {
+    font-size: 1rem;
+  }
+
+  .brand-subtitle {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Notification flyout spans the screen instead of hanging off the bell */
+  .notif-flyout {
+    position: fixed;
+    top: 72px;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    max-width: none;
+  }
 }
 </style>

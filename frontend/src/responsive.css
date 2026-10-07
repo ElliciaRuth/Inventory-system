@@ -1,0 +1,314 @@
+/*
+ * Phone and tablet adjustments, loaded after style.css.
+ * Breakpoints: 1200px (navbar collapses), 900px (tablet portrait), 640px (phone).
+ */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+/* Disabled buttons must look disabled (style.css has no rule for it) */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Shared form grids (collapse on small screens) ─────────────────────── */
+.form-grid-2,
+.form-grid-3 {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* ── Wide tables: show a shadow at the edge that can still be scrolled ── */
+.table-responsive {
+  -webkit-overflow-scrolling: touch;
+  background:
+    linear-gradient(to right, var(--bg-surface) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--bg-surface) 30%, transparent) right / 24px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.14), transparent) left / 10px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.14), transparent) right / 10px 100% no-repeat scroll;
+}
+
+/* ── Login / register ──────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .login-shell,
+  .login-shell-register {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .login-page-screen {
+    padding: 16px !important;
+  }
+
+  .login-brand-panel {
+    padding: 22px 20px !important;
+    border-radius: 22px !important;
+  }
+
+  .login-brand-title {
+    font-size: 1.6rem !important;
+  }
+
+  /* The form matters more than the feature blurbs on a phone */
+  .login-feature-list {
+    display: none !important;
+  }
+
+  .login-card {
+    padding: 26px 20px !important;
+    border-radius: 22px !important;
+  }
+}
+
+/* ── Tablet portrait and below ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .main-content {
+    padding: 1.25rem 1rem 3rem;
+  }
+
+  .page-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .page-hero > div:last-child:not(:first-child) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .panel-header {
+    padding: 1rem 1.15rem;
+  }
+
+  .form-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.85rem;
+  }
+}
+
+/* ── Phones ────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .main-content {
+    padding: 0.85rem 0.75rem 2.5rem;
+  }
+
+  .page-hero {
+    padding: 1.15rem 1.1rem;
+    gap: 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .hero-title {
+    font-size: 1.55rem !important;
+    line-height: 1.15;
+  }
+
+  .hero-subtitle {
+    font-size: 0.9rem;
+  }
+
+  .page-hero > div:last-child:not(:first-child),
+  .page-hero > div:last-child:not(:first-child) > .btn,
+  .page-hero > .btn,
+  .page-hero > a.btn {
+    width: 100%;
+  }
+
+  .page-hero .btn {
+    justify-content: center;
+  }
+
+  .panel {
+    border-radius: var(--radius-md);
+  }
+
+  .panel-header {
+    padding: 0.85rem 0.9rem;
+  }
+
+  .panel-header .form-input,
+  .panel-header .form-select {
+    max-width: none !important;
+    flex: 1 1 100%;
+  }
+
+  .form-grid-2,
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.6rem 0.7rem;
+    font-size: 0.8rem;
+  }
+
+  /* Modals become bottom sheets that use the whole width */
+  .modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-card {
+    max-width: 100% !important;
+    max-height: 94dvh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .modal-header,
+  .modal-body {
+    padding: 1rem;
+  }
+
+  .modal-footer {
+    padding: 0.85rem 1rem calc(0.85rem + env(safe-area-inset-bottom));
+  }
+
+  .modal-footer .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .toast-container {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Touch screens ─────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  .btn,
+  .form-input,
+  .form-select {
+    min-height: 42px;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  /* 16px stops iOS Safari from zooming into a field on focus */
+  input,
+  select,
+  textarea,
+  .form-input,
+  .form-select,
+  .form-textarea,
+  .login-field-input {
+    font-size: 16px !important;
+  }
+}
+
+/* ── Tables that become cards on phones (add class "stack-mobile"
+ *    and a data-label on each cell) ────────────────────────────────────── */
+@media (max-width: 640px) {
+  .data-table.stack-mobile thead {
+    display: none;
+  }
+
+  .data-table.stack-mobile,
+  .data-table.stack-mobile tbody,
+  .data-table.stack-mobile tr,
+  .data-table.stack-mobile td {
+    display: block;
+    width: 100%;
+  }
+
+  .data-table.stack-mobile tr {
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .data-table.stack-mobile td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.3rem 0;
+    border: 0;
+    text-align: right !important;
+    font-size: 0.875rem;
+  }
+
+  .data-table.stack-mobile td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .data-table.stack-mobile td:not([data-label])::before,
+  .data-table.stack-mobile td[data-label='']::before {
+    content: none;
+  }
+
+  /* First cell is the card title, last cell holds the actions */
+  .data-table.stack-mobile td.cell-title {
+    order: -1;
+    display: block;
+    text-align: left !important;
+    font-size: 0.95rem;
+    padding-bottom: 0.4rem;
+  }
+
+  .data-table.stack-mobile td.cell-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-top: 0.6rem;
+  }
+
+  .data-table.stack-mobile td.cell-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    margin-left: 0 !important;
+  }
+
+  /* Loading / empty rows keep their centered message */
+  .data-table.stack-mobile td[colspan] {
+    display: block;
+    text-align: center !important;
+  }
+}

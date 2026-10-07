@@ -128,7 +128,7 @@ onMounted(load)
         <button type="button" class="btn btn-primary" :disabled="!!busy" @click="approveAll(request)">Accept All</button>
       </div>
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table stack-mobile">
           <thead>
             <tr>
               <th>Item</th>
@@ -142,14 +142,14 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="item in request.items" :key="item.item_ids">
-              <td>
+              <td class="cell-title">
                 <strong>{{ item.item_name }}</strong>
                 <div v-if="item.copy_label" style="font-size: 0.8rem; color: var(--text-muted);">{{ item.copy_label }}</div>
                 <div v-if="Number(item.copy_unit_cost) > 0" style="font-size: 0.8rem; color: var(--color-success);">₱{{ peso(item.copy_unit_cost) }}</div>
               </td>
-              <td>{{ item.unit }}</td>
-              <td>{{ item.description }}</td>
-              <td>
+              <td data-label="Unit">{{ item.unit || '—' }}</td>
+              <td data-label="Description">{{ item.description || '—' }}</td>
+              <td data-label="Qty Requested">
                 <div v-if="editingId === itemId(item)" style="display: flex; gap: 0.4rem;">
                   <input v-model="editQty" type="number" min="1" step="1" :max="Number(item.current_stock)" class="form-input" style="width: 90px;" @keydown.enter.prevent="saveEdit(item)" />
                   <button type="button" class="btn btn-sm btn-primary" :disabled="!!busy" @click="saveEdit(item)">✓</button>
@@ -157,9 +157,9 @@ onMounted(load)
                 </div>
                 <strong v-else>{{ Number(item.quantity) }}</strong>
               </td>
-              <td><span class="badge" :class="stockBadge(item).cls">{{ stockBadge(item).text }}</span></td>
-              <td><span class="badge badge-neutral" style="text-transform: capitalize;">{{ item.status }}</span></td>
-              <td style="text-align: right; white-space: nowrap;">
+              <td data-label="Stock Available"><span class="badge" :class="stockBadge(item).cls">{{ stockBadge(item).text }}</span></td>
+              <td data-label="Status"><span class="badge badge-neutral" style="text-transform: capitalize;">{{ item.status }}</span></td>
+              <td class="cell-actions" style="text-align: right; white-space: nowrap;">
                 <template v-if="item.status === 'pending' && editingId !== itemId(item)">
                   <button type="button" class="btn btn-sm btn-secondary" @click="startEdit(item)">Edit</button>
                   <button

@@ -236,7 +236,7 @@ async function handleSubmit() {
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-grid-2">
             <div class="form-group">
               <label class="form-label">Transaction Type *</label>
               <select v-model.number="form.transaction_type_id" class="form-select" required>
@@ -271,7 +271,7 @@ async function handleSubmit() {
             </small>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-grid-2">
             <div class="form-group" v-if="isReceipt">
               <label class="form-label">Unit Cost (₱) *</label>
               <input v-model.number="form.unit_cost" type="number" step="any" min="0.01" class="form-input" placeholder="0.00" required />
@@ -304,7 +304,7 @@ async function handleSubmit() {
             <input v-model="form.expiration_date" type="date" class="form-input" />
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-grid-2">
             <div class="form-group">
               <label class="form-label">Office / Destination</label>
               <input v-model="form.office" list="stockOfficeList" class="form-input" placeholder="Select or type an office" />

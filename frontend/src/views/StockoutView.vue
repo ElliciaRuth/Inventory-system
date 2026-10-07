@@ -243,7 +243,7 @@ onMounted(loadItems)
         <input v-model="tableSearch" type="text" class="form-input" placeholder="Search products…" style="max-width: 280px;" />
       </div>
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table stack-mobile">
           <thead>
             <tr>
               <th>Product</th>
@@ -257,11 +257,11 @@ onMounted(loadItems)
             <tr v-if="loading"><td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">Loading products…</td></tr>
             <tr v-else-if="!filteredItems.length"><td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">No products found.</td></tr>
             <tr v-for="item in filteredItems" :key="item.product_id">
-              <td style="font-weight: 600;">{{ item.product }}</td>
-              <td>{{ item.unit_name || '' }}</td>
-              <td>{{ item.description || '' }}</td>
-              <td style="text-align: right;"><span class="badge" :class="stockBadge(item.current_stock)">{{ Number(item.current_stock) }}</span></td>
-              <td style="text-align: right;">
+              <td class="cell-title" style="font-weight: 600;">{{ item.product }}</td>
+              <td data-label="Unit">{{ item.unit_name || '—' }}</td>
+              <td data-label="Description">{{ item.description || '—' }}</td>
+              <td data-label="Current Stock" style="text-align: right;"><span class="badge" :class="stockBadge(item.current_stock)">{{ Number(item.current_stock) }}</span></td>
+              <td class="cell-actions" style="text-align: right;">
                 <button type="button" class="btn btn-sm btn-secondary" :disabled="Number(item.current_stock) <= 0" @click="selectProduct(item)">Select</button>
               </td>
             </tr>

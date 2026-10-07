@@ -149,7 +149,7 @@ onMounted(() => {
 
       <!-- Products Data Table -->
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table stack-mobile">
           <thead>
             <tr>
               <th style="width: 80px;">No.</th>
@@ -158,37 +158,39 @@ onMounted(() => {
               <th>Category</th>
               <th>Unit / Spec</th>
               <th style="text-align: right;">Total Stock</th>
-              <th style="width: 140px; text-align: center;">Actions</th>
+              <th v-if="authStore.canManageStock" style="width: 140px; text-align: center;">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="p in paginatedProducts" :key="p.product_id">
-              <td>
+              <td data-label="No.">
                 <span class="badge badge-neutral" style="font-family: var(--font-mono);">
                   #{{ p.product_no }}
                 </span>
               </td>
-              <td style="font-family: var(--font-mono); font-size: 0.825rem; font-weight: 600; color: var(--text-muted);">
+              <td data-label="Stock Code" style="font-family: var(--font-mono); font-size: 0.825rem; font-weight: 600; color: var(--text-muted);">
                 {{ p.stock_no || '—' }}
               </td>
-              <td>
+              <td class="cell-title">
                 <div style="font-weight: 700; color: var(--text-main);">{{ p.product }}</div>
                 <div v-if="p.product_description" style="font-size: 0.775rem; color: var(--text-muted);">
                   {{ p.product_description }}
                 </div>
               </td>
-              <td>
+              <td data-label="Category">
                 <span class="badge badge-info">{{ p.type_name || 'General' }}</span>
               </td>
-              <td>
-                <span style="font-size: 0.85rem; color: var(--text-main);">
-                  {{ p.unit_name || 'pcs' }}
-                </span>
-                <span v-if="p.measurement" style="font-size: 0.75rem; color: var(--text-subtle); display: block;">
-                  {{ p.measurement }}
-                </span>
+              <td data-label="Unit / Spec">
+                <div>
+                  <span style="font-size: 0.85rem; color: var(--text-main);">
+                    {{ p.unit_name || 'pcs' }}
+                  </span>
+                  <span v-if="p.measurement" style="font-size: 0.75rem; color: var(--text-subtle); display: block;">
+                    {{ p.measurement }}
+                  </span>
+                </div>
               </td>
-              <td style="text-align: right;">
+              <td data-label="Total Stock" style="text-align: right;">
                 <span
                   class="badge"
                   :class="Number(p.total_stock) <= 0 ? 'badge-danger' : 'badge-success'"
@@ -197,8 +199,8 @@ onMounted(() => {
                   {{ p.total_stock }} {{ p.unit_name }}
                 </span>
               </td>
-              <td style="text-align: center;">
-                <div v-if="authStore.canManageStock" style="display: inline-flex; gap: 0.4rem;">
+              <td v-if="authStore.canManageStock" class="cell-actions" style="text-align: center;">
+                <div style="display: inline-flex; gap: 0.4rem;">
                   <button
                     type="button"
                     class="btn btn-sm btn-secondary"
@@ -221,12 +223,12 @@ onMounted(() => {
             </tr>
 
             <tr v-if="loading">
-              <td colspan="7" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td :colspan="authStore.canManageStock ? 7 : 6" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 Loading inventory catalog...
               </td>
             </tr>
             <tr v-else-if="!paginatedProducts.length">
-              <td colspan="7" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td :colspan="authStore.canManageStock ? 7 : 6" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 No matching products found.
               </td>
             </tr>

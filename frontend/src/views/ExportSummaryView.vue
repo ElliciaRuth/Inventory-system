@@ -68,7 +68,7 @@ onMounted(loadOptions)
     <section class="panel" style="padding: 1.5rem; max-width: 760px;">
       <div v-if="formError" class="badge badge-danger" style="display: flex; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">⚠️ {{ formError }}</div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-grid-2">
         <div class="form-group">
           <label class="form-label">From Month</label>
           <input v-model="form.month_from" type="month" class="form-input" />
