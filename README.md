@@ -1,72 +1,65 @@
-FIRST SYSADMIN USER
-Username:admin_tech
-Password:admin123
-# CodeIgniter 4 Application Starter
+# BSU Integrated Inventory Monitoring System
 
-## What is CodeIgniter?
+The repository has two separate apps:
 
-CodeIgniter is a PHP full-stack web framework that is light, fast, flexible and secure.
-More information can be found at the [official site](https://codeigniter.com).
+```
+backend/    CodeIgniter 4 JSON API (no HTML pages): every route is under /api
+frontend/   Vue 3 + Vite single-page app that calls the API
+```
 
-This repository holds a composer-installable app starter.
-It has been built from the
-[development repository](https://github.com/codeigniter4/CodeIgniter4).
+## Local development
 
-More information about the plans for version 4 can be found in [CodeIgniter 4](https://forum.codeigniter.com/forumdisplay.php?fid=28) on the forums.
+**Backend** (PHP 8.2+, MySQL/MariaDB):
 
-You can read the [user guide](https://codeigniter.com/user_guide/)
-corresponding to the latest version of the framework.
+```bash
+cd backend
+composer install
+cp env .env              # set database.* and app.baseURL = 'http://localhost:8080/'
+php spark migrate
+php spark serve          # http://localhost:8080/api/...
+```
 
-## Installation & updates
+**Frontend** (Node 22):
 
-`composer create-project codeigniter4/appstarter` then `composer update` whenever
-there is a new release of the framework.
+```bash
+cd frontend
+npm install
+npm run dev              # http://localhost:5173
+```
 
-When updating, check the release notes to see if there are any changes you might need to apply
-to your `app` folder. The affected files can be copied or merged from
-`vendor/codeigniter4/framework/app`.
+The Vite dev server proxies `/api` (and `/barcodes`) to `http://localhost:8080`.
+If the backend runs somewhere else, set `VITE_DEV_API_TARGET` in `frontend/.env.local`.
 
-## Setup
+`php spark db:seed DatabaseSeeder` creates the first Technical Staff account (`admin_tech`)
+with a temporary password. The app forces a password change, SMTP setup and a recovery
+email on its first login.
 
-Copy `env` to `.env` and tailor for your app, specifically the baseURL
-and any database settings.
+## Production layout
 
-## Important Change with index.php
+nginx serves `frontend/dist` (built with `npm run build`) and sends `/api/*` to
+`backend/public/index.php` with the original `REQUEST_URI`, so CodeIgniter still sees
+the `/api` prefix. Finished-product barcode SVGs are written to `backend/public/barcodes/`
+and served at `/barcodes/`. PHP must be able to write to that folder and to
+`backend/writable/`.
 
-`index.php` is no longer in the root of the project! It has been moved inside the *public* folder,
-for better security and separation of components.
+## API overview
 
-This means that you should configure your web server to "point" to your project's *public* folder, and
-not to the project root. A better practice would be to configure a virtual host to point there. A poor practice would be to point your web server to the project root and expect to enter *public/...*, as the rest of your logic and the
-framework are exposed.
+All responses are JSON: `{ "status": bool, "message": string, "data": ... }`.
+Authentication uses the CodeIgniter session cookie.
 
-**Please** read the user guide for a better explanation of how CI4 works!
+| Area | Endpoints | Min level |
+|------|-----------|-----------|
+| Auth | `auth/login`, `auth/me`, `auth/logout`, `auth/register-options`, `auth/register`, `auth/forgot-password`, `auth/reset-password` | public |
+| Account setup | `auth/change-password`; `auth/setup-smtp`, `auth/setup-recovery-email` (level 4) | logged in |
+| Dashboard | `dashboard`, `transactions`, `notifications` | 1 |
+| Products | `GET products`, `products/meta`, `products/{id}` (1); `POST products`, `PUT/DELETE products/{id}`, `products/barcodes`, `products/barcodes/generate` (2) | 1 / 2 |
+| Stock | `stockcard`, `stock/options`, `stock/add`, `stock/edit-transaction`, `stock/delete-transaction`, `stock/edit-report-cost`; `stock/copies/{id}` (1) | 2 |
+| Reports & barcodes | `reports/batches`, `reports/batchlist`, `barcode/product/{id}`, `barcode/batch/{id}`, `barcode/lookup` | 2 |
+| Exports | `export/stockcard(/options)`, `export/summary(/options)` | 2 |
+| Settings | `settings`, `settings/{type}`, `settings/{type}/{id}`, `settings/system` (save: 3), `settings/users/{id}/activate\|deactivate` (3) | 2 |
+| Backups | `backups`, `backups/run`, `backups/auto`, `backups/{id}/download`, `backups/restore`, `backups/config` (3) | 2 |
+| Stock-out | `stockout`, `stockout/temp`, `stockout/add-temp`, `stockout/edit-temp/{id}`, `stockout/remove-temp/{id}`, `stockout/submit` (1); `stockout/pending`, `approve-item`, `approve-all`, `reject-item`, `edit-pending` (2) | 1 / 2 |
 
-## Repository Management
-
-We use GitHub issues, in our main repository, to track **BUGS** and to track approved **DEVELOPMENT** work packages.
-We use our [forum](http://forum.codeigniter.com) to provide SUPPORT and to discuss
-FEATURE REQUESTS.
-
-This repository is a "distribution" one, built by our release preparation script.
-Problems with it can be raised on our forum, or as issues in the main repository.
-
-## Server Requirements
-
-PHP version 8.2 or higher is required, with the following extensions installed:
-
-- [intl](http://php.net/manual/en/intl.requirements.php)
-- [mbstring](http://php.net/manual/en/mbstring.installation.php)
-
-> [!WARNING]
-> - The end of life date for PHP 7.4 was November 28, 2022.
-> - The end of life date for PHP 8.0 was November 26, 2023.
-> - The end of life date for PHP 8.1 was December 31, 2025.
-> - If you are still using below PHP 8.2, you should upgrade immediately.
-> - The end of life date for PHP 8.2 will be December 31, 2026.
-
-Additionally, make sure that the following extensions are enabled in your PHP:
-
-- json (enabled by default - don't turn it off)
-- [mysqlnd](http://php.net/manual/en/mysqlnd.install.php) if you plan to use MySQL
-- [libcurl](http://php.net/manual/en/curl.requirements.php) if you plan to use the HTTP\CURLRequest library
+Levels: 1 Staff, 2 Custodian, 3 Manager, 4 Technical Staff. See
+`backend/app/Config/Routes.php` for the full list and `frontend/src/api/` for the
+matching client functions.

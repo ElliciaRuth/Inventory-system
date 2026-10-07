@@ -43,17 +43,8 @@ async function loadOptions() {
       products.value = res.data.products || []
     }
   } catch (err) {
-    console.warn('Failed to load products from export options, trying fallback...', err)
-    try {
-      // Fallback: fetch from /products or /stock/options if available
-      const fallbackRes = await fetch('/api/products').then(r => r.json())
-      if (fallbackRes && fallbackRes.data) {
-        products.value = fallbackRes.data
-      }
-    } catch (fallbackErr) {
-      console.error('Failed to load product list', fallbackErr)
-      errorMessage.value = 'Failed to load product list. Please check connection.'
-    }
+    console.error('Failed to load product list', err)
+    errorMessage.value = err.response?.data?.message || 'Failed to load product list. Please check connection.'
   } finally {
     loadingOptions.value = false
   }

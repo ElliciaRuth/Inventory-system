@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { productsApi } from '../api/products'
+import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import ProductModal from '../components/ProductModal.vue'
 import AppPagination from '../components/AppPagination.vue'
 
+const authStore = useAuthStore()
 const products = ref([])
 const productTypes = ref([])
 const loading = ref(true)
@@ -111,7 +113,7 @@ onMounted(() => {
         </p>
       </div>
 
-      <div>
+      <div v-if="authStore.canManageStock">
         <button type="button" class="btn btn-primary" @click="openAddModal">
           <span style="font-size: 1.1rem; line-height: 1;">+</span> Add New Product
         </button>
@@ -196,7 +198,7 @@ onMounted(() => {
                 </span>
               </td>
               <td style="text-align: center;">
-                <div style="display: inline-flex; gap: 0.4rem;">
+                <div v-if="authStore.canManageStock" style="display: inline-flex; gap: 0.4rem;">
                   <button
                     type="button"
                     class="btn btn-sm btn-secondary"

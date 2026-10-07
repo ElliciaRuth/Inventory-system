@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { authApi } from '../api/auth'
 import { useThemeStore } from '../stores/themeStore'
 
 const router = useRouter()
@@ -58,25 +58,14 @@ const isPasswordValid = computed(() => {
 async function fetchOptions() {
   loadingOptions.value = true
   try {
-    const res = await axios.get('/api/auth/register-options')
-    if (res.data?.data) {
-      levels.value = res.data.data.levels || []
-      userOffices.value = res.data.data.userOffices || []
+    const res = await authApi.getRegisterOptions()
+    if (res.data) {
+      levels.value = res.data.levels || []
+      userOffices.value = res.data.userOffices || []
     }
   } catch (err) {
-    console.warn('Could not load register options from API, using defaults:', err)
-    // Fallback defaults so the form is always functional
-    levels.value = [
-      { lvl_of_access_id: 1, role: 'Staff', lvl_of_access: 1 },
-      { lvl_of_access_id: 2, role: 'Unit Head', lvl_of_access: 2 },
-      { lvl_of_access_id: 3, role: 'Custodian', lvl_of_access: 3 },
-    ]
-    userOffices.value = [
-      { user_office_id: 1, user_office_name: 'Bakery Unit' },
-      { user_office_id: 2, user_office_name: 'Food Processing Center' },
-      { user_office_id: 3, user_office_name: 'Coffee Processing Unit' },
-      { user_office_id: 4, user_office_name: 'General Custodian Office' },
-    ]
+    console.error('Could not load register options', err)
+    errorMessage.value = 'Could not load access levels and offices. Please refresh the page to try again.'
   } finally {
     loadingOptions.value = false
   }
@@ -118,9 +107,9 @@ async function handleRegister() {
 
   loading.value = true
   try {
-    const res = await axios.post('/api/auth/register', form.value)
+    const res = await authApi.register(form.value)
     successMessage.value =
-      res.data?.message ||
+      res.message ||
       'Account created successfully. Please wait for an administrator to activate your account.'
 
     // Reset form

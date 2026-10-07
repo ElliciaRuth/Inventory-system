@@ -1,10 +1,16 @@
 import { defineStore } from 'pinia'
 import { authApi } from '../api/auth'
 
+let loadPromise = null
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
     isAuthenticated: false,
+    // Forced first-login step still to complete:
+    // 'change_password' | 'setup_smtp' | 'setup_recovery_email' | null
+    pendingSetup: null,
+    loaded: false,
     loading: false,
     error: null,
   }),
@@ -13,47 +19,46 @@ export const useAuthStore = defineStore('auth', {
     userName: (state) => state.user?.username || 'Guest',
     officeName: (state) => state.user?.office_name || 'BSU Inventory',
     role: (state) => state.user?.role || 'Staff',
-    levelId: (state) => Number(state.user?.level_id || 1),
-    canManageStock: (state) => Number(state.user?.level_id || 1) >= 2,
-    isAdmin: (state) => Number(state.user?.level_id || 1) >= 3,
+    levelId: (state) => Number(state.user?.level_id || 0),
+    canManageStock: (state) => Number(state.user?.level_id || 0) >= 2,
+    isAdmin: (state) => Number(state.user?.level_id || 0) >= 3,
   },
 
   actions: {
+    setSession(user, pendingSetup = null) {
+      this.user = user
+      this.isAuthenticated = !!user
+      this.pendingSetup = user ? pendingSetup : null
+    },
+
+    clearSession() {
+      this.setSession(null)
+    },
+
     async checkAuth() {
       this.loading = true
       try {
         const res = await authApi.me()
         if (res.status && res.data?.authenticated) {
-          this.user = res.data.user
-          this.isAuthenticated = true
+          this.setSession(res.data.user, res.data.pending_setup)
         } else {
-          // If no active session, provide fallback default info for frictionless preview
-          this.user = {
-            id: 1,
-            username: 'administrator',
-            email: 'admin@bsu.edu.ph',
-            role: 'Administrator',
-            level_id: 3,
-            user_office_id: 2,
-            office_name: 'Food Processing Center',
-          }
-          this.isAuthenticated = true
+          this.clearSession()
         }
-      } catch (err) {
-        // Fallback for standalone/dev demo
-        this.user = {
-          id: 1,
-          username: 'administrator',
-          email: 'admin@bsu.edu.ph',
-          role: 'Administrator',
-          level_id: 3,
-          user_office_id: 2,
-          office_name: 'Food Processing Center',
-        }
-        this.isAuthenticated = true
+      } catch {
+        this.clearSession()
       } finally {
+        this.loaded = true
         this.loading = false
       }
+    },
+
+    // Loads the session once; later calls reuse the same request.
+    ensureLoaded() {
+      if (this.loaded) return Promise.resolve()
+      loadPromise ??= this.checkAuth().finally(() => {
+        loadPromise = null
+      })
+      return loadPromise
     },
 
     async login(username, password) {
@@ -62,8 +67,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const res = await authApi.login(username, password)
         if (res.status && res.data?.user) {
-          this.user = res.data.user
-          this.isAuthenticated = true
+          this.setSession(res.data.user, res.data.pending_setup)
+          this.loaded = true
           return true
         }
         this.error = res.message || 'Login failed'
@@ -79,11 +84,10 @@ export const useAuthStore = defineStore('auth', {
     async logout() {
       try {
         await authApi.logout()
-      } catch (e) {
-        // Ignore logout error
+      } catch {
+        // Session is cleared locally either way
       }
-      this.user = null
-      this.isAuthenticated = false
+      this.clearSession()
     },
   },
 })

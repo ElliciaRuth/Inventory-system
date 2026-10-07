@@ -1,9 +1,10 @@
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
 
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
@@ -30,7 +31,11 @@ async function handleLogin() {
   try {
     const success = await authStore.login(username.value, password.value)
     if (success) {
-      router.push('/')
+      // The router guard sends users with a pending setup step to /account-setup
+      const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+        ? route.query.redirect
+        : '/'
+      router.push(redirect)
     } else {
       errorMessage.value = authStore.error || 'Invalid username or password.'
     }
@@ -39,32 +44,6 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
-}
-
-function handleQuickDemo() {
-  authStore.user = {
-    id: 1,
-    username: username.value || 'unit_head',
-    role: 'Unit Head',
-    level_id: 2,
-    user_office_id: 2,
-    office_name: 'Food Processing Center',
-  }
-  authStore.isAuthenticated = true
-  router.push('/')
-}
-
-function handleAdminDemo() {
-  authStore.user = {
-    id: 3,
-    username: 'admin_tech',
-    role: 'Technical Staff',
-    level_id: 4,
-    user_office_id: 0,
-    office_name: 'System Administration',
-  }
-  authStore.isAuthenticated = true
-  router.push('/')
 }
 </script>
 
@@ -202,25 +181,6 @@ function handleAdminDemo() {
               Forgot Password?
             </button>
           </div>
-
-          <!-- Quick Dev Access (Convenience) -->
-          <div style="margin-top: 1.75rem; display: flex; flex-direction: column; gap: 8px; align-items: center;">
-            <button
-              type="button"
-              class="login-demo-link"
-              @click="handleQuickDemo"
-            >
-              ⚡ Quick Access: Unit Head (Inventory Dashboard)
-            </button>
-            <button
-              type="button"
-              class="login-demo-link"
-              @click="handleAdminDemo"
-              style="color: #0f766e; font-weight: 700;"
-            >
-              👑 Quick Access: Tech Staff / Admin (User Management Dashboard)
-            </button>
-          </div>
         </div>
       </section>
     </div>
@@ -252,9 +212,6 @@ function handleAdminDemo() {
           <p style="margin-bottom: 1rem;">
             Please contact your department director, custodian head, or technical administrator to activate your official university account.
           </p>
-          <div class="badge badge-info" style="width: 100%; padding: 0.75rem 1rem;">
-            ℹ️ You can also use <strong>Quick Access</strong> below to explore the portal.
-          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-primary" @click="showRegisterModal = false">Got it</button>

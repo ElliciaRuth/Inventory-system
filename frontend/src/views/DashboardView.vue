@@ -290,7 +290,7 @@ onMounted(() => {
                     </span>
                   </td>
                   <td>
-                    <router-link to="/stockcard" class="btn btn-sm btn-secondary">Open Stockcard</router-link>
+                    <router-link v-if="authStore.canManageStock" to="/stockcard" class="btn btn-sm btn-secondary">Open Stockcard</router-link>
                   </td>
                 </tr>
                 <tr v-if="!pLowStock.items.length">
@@ -338,7 +338,7 @@ onMounted(() => {
                   <td><span class="badge badge-danger">Unavailable</span></td>
                   <td><span style="color: var(--color-danger); font-weight: 600;">Restock immediately</span></td>
                   <td>
-                    <router-link to="/stockcard" class="btn btn-sm btn-primary">Stock In</router-link>
+                    <router-link v-if="authStore.canManageStock" to="/stockcard" class="btn btn-sm btn-primary">Stock In</router-link>
                   </td>
                 </tr>
                 <tr v-if="!pOutOfStock.items.length">

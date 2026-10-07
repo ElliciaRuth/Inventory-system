@@ -9,4 +9,6 @@ const pinia = createPinia()
 
 app.use(pinia)
 app.use(router)
-app.mount('#app')
+
+// Wait for the first navigation (which loads the session) before rendering
+router.isReady().then(() => app.mount('#app'))

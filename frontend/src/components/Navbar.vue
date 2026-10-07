@@ -124,7 +124,7 @@ onUnmounted(() => {
                 <span>Products</span>
               </router-link>
             </li>
-            <li>
+            <li v-if="authStore.canManageStock">
               <router-link to="/stockcard" class="nav-link">
                 <span>Stockcard</span>
               </router-link>

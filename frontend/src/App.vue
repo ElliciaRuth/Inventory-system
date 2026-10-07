@@ -2,15 +2,14 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Navbar from './components/Navbar.vue'
-import { useAuthStore } from './stores/authStore'
 import { useThemeStore } from './stores/themeStore'
 
 const route = useRoute()
-const authStore = useAuthStore()
 const themeStore = useThemeStore()
 
 const alertCount = ref(0)
-const isAuthPage = computed(() => ['login', 'register'].includes(route.name))
+// Standalone pages without the navbar
+const isAuthPage = computed(() => ['login', 'register', 'account-setup'].includes(route.name))
 
 function handleUpdateAlerts(count) {
   alertCount.value = count
@@ -18,7 +17,6 @@ function handleUpdateAlerts(count) {
 
 onMounted(() => {
   themeStore.init()
-  authStore.checkAuth()
 })
 </script>
 

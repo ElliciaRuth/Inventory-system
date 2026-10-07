@@ -12,6 +12,18 @@ export const exportApi = {
     })
     return res
   },
+
+  async getSummaryOptions() {
+    const res = await client.get('/export/summary/options')
+    return res.data
+  },
+
+  async downloadSummary(payload) {
+    const res = await client.post('/export/summary', payload, {
+      responseType: 'blob',
+    })
+    return res
+  },
 }
 
 export function triggerBlobDownload(blob, defaultFilename) {
