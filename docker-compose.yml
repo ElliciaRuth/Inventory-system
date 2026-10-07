@@ -46,6 +46,8 @@ services:
   php:
     build: ./docker/php
     restart: unless-stopped
+    # So "docker compose exec php php spark ..." works without a path
+    working_dir: /var/www/backend
     volumes:
       - ./backend:/var/www/backend
     depends_on:
