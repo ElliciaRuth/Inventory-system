@@ -213,7 +213,7 @@ class AuthController extends BaseApiController
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * POST /api/auth/change-password
+     * POST /api/auth/change-password   { current_password (unless first login), password, confirm_password }
      */
     public function changePassword(): ResponseInterface
     {
@@ -228,13 +228,25 @@ class AuthController extends BaseApiController
             return $this->respondError(implode(' ', $errors), $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $userId    = $this->currentUserId();
+        $userModel = new UserModel();
+
+        // A voluntary change must prove the current password; the forced
+        // first-login change happens right after logging in with it.
+        if (! session('must_change_password')) {
+            $current = (string) ($input['current_password'] ?? '');
+            $stored  = (string) ($userModel->find($userId)['password'] ?? '');
+            if ($current === '' || ! $this->passwordMatches($current, $stored)) {
+                return $this->respondError('Your current password is incorrect.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+        }
+
         $password = (string) $input['password'];
         if ($error = $this->passwordStrengthError($password)) {
             return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $userId = $this->currentUserId();
-        (new UserModel())->update($userId, [
+        $userModel->update($userId, [
             'password'             => password_hash($password, PASSWORD_DEFAULT),
             'must_change_password' => 0,
         ]);

@@ -12,6 +12,8 @@ const emit = defineEmits(['close', 'saved'])
 
 const loading = ref(false)
 const errorMessage = ref('')
+// Editing the name/description asks whether this is the same product or a new one
+const askProductAction = ref(false)
 const meta = ref({ types: [], units: [], entities: [] })
 
 const form = reactive({
@@ -69,9 +71,19 @@ watch(
       form.entity_name = meta.value.entities[0]?.entity || 'BSU Food Processing Center'
     }
     errorMessage.value = ''
+    askProductAction.value = false
   },
   { immediate: true }
 )
+
+function identityChanged() {
+  const original = props.product
+  if (!original?.product_id) return false
+  return (
+    String(form.product).trim() !== String(original.product || '').trim() ||
+    String(form.product_description).trim() !== String(original.product_description || '').trim()
+  )
+}
 
 async function handleSubmit() {
   if (loading.value) return
@@ -86,10 +98,20 @@ async function handleSubmit() {
     return
   }
 
+  if (identityChanged()) {
+    askProductAction.value = true
+    return
+  }
+
+  await save('existing')
+}
+
+async function save(productAction) {
+  askProductAction.value = false
   loading.value = true
   try {
     if (props.product?.product_id) {
-      await productsApi.updateProduct(props.product.product_id, form)
+      await productsApi.updateProduct(props.product.product_id, { ...form, product_action: productAction })
     } else {
       await productsApi.createProduct(form)
     }
@@ -119,6 +141,21 @@ async function handleSubmit() {
       <div class="modal-body product-modal-body">
         <div v-if="errorMessage" class="badge badge-danger" style="display: flex; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%;">
           <span>⚠️ {{ errorMessage }}</span>
+        </div>
+
+        <!-- Same product or brand-new product? -->
+        <div v-if="askProductAction" class="panel" style="padding: 1.25rem; margin-bottom: 1.25rem; border: 1px solid var(--color-warning);">
+          <h3 style="font-size: 1.05rem; margin-bottom: 0.5rem;">⚡ Name or Description Changed</h3>
+          <p style="color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
+            Is this the <strong>same product</strong> (keep all existing transactions), or a
+            <strong>brand-new product</strong> under the same product no.? A new product clears all
+            previous stock and transactions of this item.
+          </p>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secondary" :disabled="loading" @click="save('existing')">📦 Same Product</button>
+            <button type="button" class="btn btn-primary" :disabled="loading" @click="save('new')">🆕 New Product</button>
+            <button type="button" class="btn btn-sm btn-secondary" @click="askProductAction = false">Cancel</button>
+          </div>
         </div>
 
         <form @submit.prevent="handleSubmit" id="productForm" class="product-form">

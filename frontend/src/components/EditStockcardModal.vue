@@ -26,6 +26,9 @@ const emit = defineEmits(['close', 'saved', 'deleted'])
 // Form state
 const quantity = ref(1)
 const typeId = ref(1) // 1 = receipt, 2 = issue
+const originalTypeId = ref(null) // null for borrow / return / adjust_out: their type can't be switched here
+const unitCost = ref(0)
+const originalUnitCost = ref(0)
 const reference = ref('')
 const office = ref('')
 
@@ -46,7 +49,10 @@ watch(
     if (txn) {
       const isReceipt = Number(txn.receipt_qty) > 0 || txn.transaction_type === 'receipt'
       quantity.value = isReceipt ? Number(txn.receipt_qty) : Number(txn.issue_qty) || 1
-      typeId.value = isReceipt ? 1 : 2
+      originalTypeId.value = txn.transaction_type === 'receipt' ? 1 : txn.transaction_type === 'issue' ? 2 : null
+      typeId.value = originalTypeId.value ?? (isReceipt ? 1 : 2)
+      originalUnitCost.value = Number(txn.transaction_unit_cost) || 0
+      unitCost.value = originalUnitCost.value
       reference.value = txn.reference && txn.reference !== 'N/A' ? txn.reference : ''
       office.value = txn.office && txn.office !== 'Direct' ? txn.office : ''
     }
@@ -74,19 +80,30 @@ async function handleSave() {
     errorMessage.value = 'Quantity must be greater than 0.'
     return
   }
+  if (Number(unitCost.value) < 0) {
+    errorMessage.value = 'Unit cost cannot be negative.'
+    return
+  }
 
   isSubmitting.value = true
 
   const payload = {
     transaction_id: props.transaction.transaction_id,
     new_qty: Number(quantity.value),
-    new_type: Number(typeId.value),
     new_reference: reference.value.trim(),
     new_office: office.value.trim(),
   }
 
+  // Only switch the type when the user changed it (receipt ↔ issue)
+  if (originalTypeId.value !== null && Number(typeId.value) !== originalTypeId.value) {
+    payload.new_type = Number(typeId.value)
+  }
+
   try {
     const res = await stockApi.editTransaction(payload)
+    if ((res.status || res.ok) && Math.abs(Number(unitCost.value) - originalUnitCost.value) >= 0.005) {
+      await stockApi.editReportCost(props.transaction.transaction_id, Number(unitCost.value))
+    }
     if (res.status || res.ok) {
       successMessage.value = 'Transaction updated successfully.'
       setTimeout(() => {
@@ -168,8 +185,8 @@ async function handleDelete() {
         </div>
 
         <form @submit.prevent="handleSave" class="edit-form-grid">
-          <!-- Transaction Type -->
-          <div class="form-group">
+          <!-- Transaction Type (receipt / issue entries only) -->
+          <div v-if="originalTypeId !== null" class="form-group">
             <label class="form-label">Transaction Direction / Action Type</label>
             <div class="type-radio-toggle">
               <label class="type-radio-card" :class="{ 'is-active': typeId === 1 }">
@@ -215,6 +232,19 @@ async function handleDelete() {
             <small style="color: var(--text-subtle); margin-top: 4px;">
               Original recorded quantity: <strong>{{ originalQty }}</strong>
             </small>
+          </div>
+
+          <!-- Unit Cost / Price -->
+          <div class="form-group">
+            <label class="form-label" for="edit_cost">Unit Cost / Price (₱)</label>
+            <input
+              id="edit_cost"
+              v-model.number="unitCost"
+              type="number"
+              step="any"
+              min="0"
+              class="form-input"
+            />
           </div>
 
           <!-- Reference / Document Number -->

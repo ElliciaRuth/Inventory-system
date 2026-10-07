@@ -17,7 +17,6 @@ const errorMessage = ref('')
 
 // Info Modals
 const showRegisterModal = ref(false)
-const showForgotModal = ref(false)
 
 async function handleLogin() {
   if (loading.value) return
@@ -173,13 +172,9 @@ async function handleLogin() {
               Create a new account
             </router-link>
             <span class="login-actions-sep">·</span>
-            <button
-              type="button"
-              class="login-secondary-pill"
-              @click="showForgotModal = true"
-            >
+            <router-link to="/forgot-password" class="login-secondary-pill">
               Forgot Password?
-            </button>
+            </router-link>
           </div>
         </div>
       </section>
@@ -215,27 +210,6 @@ async function handleLogin() {
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-primary" @click="showRegisterModal = false">Got it</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal for Forgot Password Info -->
-    <div v-if="showForgotModal" class="modal-backdrop" @click.self="showForgotModal = false">
-      <div class="modal-card" style="max-width: 480px;">
-        <div class="modal-header">
-          <h3 style="font-size: 1.2rem; color: var(--text-main);">Password Recovery</h3>
-          <button type="button" class="btn btn-sm btn-secondary" @click="showForgotModal = false">✕</button>
-        </div>
-        <div class="modal-body" style="line-height: 1.6; color: var(--text-muted);">
-          <p style="margin-bottom: 1rem;">
-            To reset your inventory portal password, request a recovery code from your office administrator or university IT support.
-          </p>
-          <p>
-            If SMTP is configured on the backend, password reset requests are verified via your registered university email address.
-          </p>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-primary" @click="showForgotModal = false">Close</button>
         </div>
       </div>
     </div>

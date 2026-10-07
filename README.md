@@ -7,6 +7,28 @@ backend/    CodeIgniter 4 JSON API (no HTML pages): every route is under /api
 frontend/   Vue 3 + Vite single-page app that calls the API
 ```
 
+## Running it on a local PC (Docker)
+
+Needs Docker Desktop (Windows/macOS) or Docker Engine (Linux). From the repository root:
+
+```bash
+docker compose up -d --build
+```
+
+Then open **http://localhost:8080**; other PCs on the network use `http://<this PC's IP>:8080`.
+The first start takes a few minutes: it builds the frontend, installs the backend, creates
+the database and seeds it. Log in as `admin_tech` with the temporary password from
+`backend/app/Database/Seeds/DatabaseSeeder.php`. You'll be asked to change it, then to set up
+the password-recovery email.
+
+- Data lives in the `bsu-inventory_db_data` Docker volume and survives restarts.
+  `docker compose down -v` deletes it.
+- After pulling new code, run `docker compose up -d --build` again (it rebuilds the frontend
+  and runs new migrations).
+- `INVENTORY_PORT=9090 docker compose up -d` uses another port;
+  `INVENTORY_BIND=127.0.0.1` makes it reachable from this PC only.
+- Backend settings are in `backend/.env`, created from `docker/backend.env` on first run.
+
 ## Local development
 
 **Backend** (PHP 8.2+, MySQL/MariaDB):
@@ -50,11 +72,11 @@ Authentication uses the CodeIgniter session cookie.
 | Area | Endpoints | Min level |
 |------|-----------|-----------|
 | Auth | `auth/login`, `auth/me`, `auth/logout`, `auth/register-options`, `auth/register`, `auth/forgot-password`, `auth/reset-password` | public |
-| Account setup | `auth/change-password`; `auth/setup-smtp`, `auth/setup-recovery-email` (level 4) | logged in |
+| Account | `auth/change-password` (needs `current_password` except on first login); `auth/setup-smtp`, `auth/setup-recovery-email` (level 4) | logged in |
 | Dashboard | `dashboard`, `transactions`, `notifications` | 1 |
 | Products | `GET products`, `products/meta`, `products/{id}` (1); `POST products`, `PUT/DELETE products/{id}`, `products/barcodes`, `products/barcodes/generate` (2) | 1 / 2 |
 | Stock | `stockcard`, `stock/options`, `stock/add`, `stock/edit-transaction`, `stock/delete-transaction`, `stock/edit-report-cost`; `stock/copies/{id}` (1) | 2 |
-| Reports & barcodes | `reports/batches`, `reports/batchlist`, `barcode/product/{id}`, `barcode/batch/{id}`, `barcode/lookup` | 2 |
+| Reports & barcodes | `reports/batches`, `reports/batchlist`, `barcode/product/{id}`, `barcode/batch/{id}`; `barcode/lookup` (1) | 2 |
 | Exports | `export/stockcard(/options)`, `export/summary(/options)` | 2 |
 | Settings | `settings`, `settings/{type}`, `settings/{type}/{id}`, `settings/system` (save: 3), `settings/users/{id}/activate\|deactivate` (3) | 2 |
 | Backups | `backups`, `backups/run`, `backups/auto`, `backups/{id}/download`, `backups/restore`, `backups/config` (3) | 2 |

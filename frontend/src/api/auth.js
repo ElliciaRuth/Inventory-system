@@ -26,8 +26,10 @@ export const authApi = {
     return response.data
   },
 
-  async changePassword(password, confirmPassword) {
+  // currentPassword is not needed for the forced first-login change
+  async changePassword(password, confirmPassword, currentPassword = '') {
     const response = await client.post('/auth/change-password', {
+      current_password: currentPassword,
       password,
       confirm_password: confirmPassword,
     })

@@ -415,13 +415,37 @@ class BackupModel
     //  Auto-backup check
     // ─────────────────────────────────────────────────────────
 
+    /**
+     * Whether an automatic backup is due for this office, based on the
+     * configured interval: 0 = manual only; 24h or more = once per period,
+     * at or after backup_time; shorter intervals = every N hours.
+     */
     public function needsAutoBackup(int $officeId): bool
     {
-        $today = date('Y-m-d');
-        $count = (int) $this->db->table('backup_log')
+        $config        = $this->getConfig();
+        $intervalHours = (int) ($config['backup_interval_hours'] ?? 24);
+        if ($intervalHours <= 0) {
+            return false;
+        }
+
+        $last = $this->db->table('backup_log')
+            ->selectMax('created_at')
             ->where('user_office_id', $officeId)
-            ->like('created_at', $today, 'after')
-            ->countAllResults();
-        return $count === 0;
+            ->get()
+            ->getRowArray()['created_at'] ?? null;
+        $lastTs = $last ? strtotime((string) $last) : 0;
+
+        if ($intervalHours >= 24) {
+            [$hour, $minute] = array_map('intval', explode(':', (string) ($config['backup_time'] ?? '00:00')) + [0, 0]);
+            $scheduledToday  = mktime($hour, $minute, 0);
+            if (time() < $scheduledToday) {
+                return false;
+            }
+            $days = intdiv($intervalHours, 24);
+            // Due when the last backup is older than the most recent scheduled run
+            return $lastTs < $scheduledToday - ($days - 1) * 86400;
+        }
+
+        return time() - $lastTs >= $intervalHours * 3600;
     }
 }

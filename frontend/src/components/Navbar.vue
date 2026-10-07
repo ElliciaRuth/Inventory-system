@@ -1,10 +1,11 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { triggerAutoReload, isReloading } from '../composables/useAutoReload'
+import { backupsApi } from '../api/backups'
 
 const props = defineProps({
   alertCount: {
@@ -17,9 +18,80 @@ const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const notificationStore = useNotificationStore()
 const router = useRouter()
+const route = useRoute()
+
+// Ask once per browser session whether an automatic backup is due (the server decides)
+function runAutoBackupOnce() {
+  if (authStore.levelId < 2 || authStore.levelId > 3) return
+  try {
+    const key = `bsu_auto_backup_checked_${authStore.user?.id}`
+    if (sessionStorage.getItem(key)) return
+    sessionStorage.setItem(key, '1')
+  } catch {
+    // storage unavailable — still run the check
+  }
+  backupsApi.auto().catch(() => {})
+}
 
 const isNotifDropdownOpen = ref(false)
 const dropdownRef = ref(null)
+const openMenu = ref('')
+const menuRef = ref(null)
+
+// Inventory navigation per access level (Technical Staff uses its own links below)
+const menu = computed(() => {
+  const level = authStore.levelId
+  if (level === 1) {
+    return [
+      { label: 'Dashboard', to: '/' },
+      { label: 'Items', to: '/products' },
+      {
+        label: 'Stock Out',
+        children: [
+          { label: 'Request Stock Out', to: '/stockout' },
+          { label: 'My List', to: '/stockout/list' },
+        ],
+      },
+      { label: 'Transactions', to: '/transactions' },
+    ]
+  }
+  return [
+    { label: 'Dashboard', to: '/' },
+    {
+      label: 'Stock',
+      children: [
+        { label: 'Stockcard', to: '/stockcard' },
+        { label: 'Export Stockcard', to: '/export/stockcard' },
+      ],
+    },
+    {
+      label: 'Products',
+      children: [
+        { label: 'Product List', to: '/products' },
+        { label: 'Finished Products', to: '/products/barcodes' },
+        { label: 'Batch Barcodes', to: '/reports/batches' },
+        { label: 'Summary Report', to: '/reports/summary' },
+        { label: 'Export Summary', to: '/export/summary' },
+      ],
+    },
+    { label: 'Requests', to: '/stockout/pending', badge: notificationStore.counts.stockoutRequests || 0 },
+    { label: 'Transactions', to: '/transactions' },
+    { label: 'Settings', to: '/settings', badge: notificationStore.counts.pendingUsers || 0 },
+  ]
+})
+
+function isGroupActive(item) {
+  return item.children?.some((c) => route.path === c.to || route.path.startsWith(`${c.to}/`))
+}
+
+function toggleMenu(label) {
+  openMenu.value = openMenu.value === label ? '' : label
+}
+
+// Close dropdown menus after navigating
+watch(() => route.fullPath, () => {
+  openMenu.value = ''
+})
 
 function handleManualReload() {
   triggerAutoReload('manual')
@@ -66,10 +138,14 @@ function handleClickOutside(event) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
     closeDropdown()
   }
+  if (menuRef.value && !menuRef.value.contains(event.target)) {
+    openMenu.value = ''
+  }
 }
 
 onMounted(() => {
   notificationStore.fetchNotifications()
+  runAutoBackupOnce()
   document.addEventListener('click', handleClickOutside)
 })
 
@@ -93,7 +169,7 @@ onUnmounted(() => {
         </div>
       </router-link>
 
-      <nav>
+      <nav ref="menuRef">
         <ul class="nav-links">
           <!-- Administrator Navigation Links -->
           <template v-if="isAdminAccount">
@@ -112,27 +188,29 @@ onUnmounted(() => {
             </li>
           </template>
 
-          <!-- Standard Staff / Custodians: Inventory System Navigation -->
+          <!-- Inventory navigation (levels 1–3) -->
           <template v-else>
-            <li>
-              <router-link to="/" class="nav-link">
-                <span>Dashboard</span>
+            <li v-for="item in menu" :key="item.label" class="nav-item">
+              <router-link v-if="item.to" :to="item.to" class="nav-link">
+                <span>{{ item.label }}</span>
+                <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
               </router-link>
-            </li>
-            <li>
-              <router-link to="/products" class="nav-link">
-                <span>Products</span>
-              </router-link>
-            </li>
-            <li v-if="authStore.canManageStock">
-              <router-link to="/stockcard" class="nav-link">
-                <span>Stockcard</span>
-              </router-link>
-            </li>
-            <li>
-              <router-link to="/transactions" class="nav-link">
-                <span>Transactions</span>
-              </router-link>
+              <template v-else>
+                <button
+                  type="button"
+                  class="nav-link nav-group-btn"
+                  :class="{ 'router-link-active': isGroupActive(item) }"
+                  :aria-expanded="openMenu === item.label"
+                  @click.stop="toggleMenu(item.label)"
+                >
+                  <span>{{ item.label }}</span><span class="nav-caret">▾</span>
+                </button>
+                <ul v-if="openMenu === item.label" class="nav-submenu" @click.stop>
+                  <li v-for="child in item.children" :key="child.to">
+                    <router-link :to="child.to" class="nav-submenu-link">{{ child.label }}</router-link>
+                  </li>
+                </ul>
+              </template>
             </li>
           </template>
         </ul>
@@ -197,6 +275,7 @@ onUnmounted(() => {
                   <span v-else-if="n.type === 'expiring'">⏳</span>
                   <span v-else-if="n.type === 'borrow'">🔄</span>
                   <span v-else-if="n.type === 'user_registration'">👤</span>
+                  <span v-else-if="n.type === 'stockout_request'">📋</span>
                   <span v-else>🔔</span>
                 </div>
 
@@ -235,7 +314,7 @@ onUnmounted(() => {
         </button>
 
         <!-- User Profile Pill -->
-        <div class="user-chip">
+        <router-link to="/change-password" class="user-chip" title="Change password">
           <div class="user-avatar">
             {{ (authStore.userName || 'A').charAt(0).toUpperCase() }}
           </div>
@@ -243,7 +322,7 @@ onUnmounted(() => {
             <span class="user-name">{{ authStore.userName }}</span>
             <span class="user-role">{{ authStore.role }}</span>
           </div>
-        </div>
+        </router-link>
 
         <!-- Logout Action -->
         <button
@@ -260,6 +339,60 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.nav-item {
+  position: relative;
+}
+
+.nav-group-btn {
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.nav-caret {
+  font-size: 0.7em;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+.nav-submenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 210px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: var(--shadow-xl);
+  z-index: 1000;
+}
+
+.nav-submenu-link {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav-submenu-link:hover,
+.nav-submenu-link.router-link-active {
+  background: var(--bg-subtle);
+  color: var(--color-primary);
+}
+
+.user-chip {
+  text-decoration: none;
+  color: inherit;
+}
+
 .notif-wrapper {
   position: relative;
 }

@@ -1,13 +1,16 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { stockApi } from '../api/stock'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import StockModal from '../components/StockModal.vue'
 import EditStockcardModal from '../components/EditStockcardModal.vue'
 import AppPagination from '../components/AppPagination.vue'
 
+const route = useRoute()
 const items = ref([])
-const selectedItemId = ref(0)
+// ?item_id= lets other pages (batches, notifications) open a specific product
+const selectedItemId = ref(Number(route.query.item_id) || 0)
 const itemInfo = ref({})
 const stockcard = ref([])
 const totalPages = ref(1)
@@ -16,7 +19,17 @@ const total = ref(0)
 const pageSize = ref(15)
 const loading = ref(true)
 const filterType = ref('latest')
+const filterYear = ref(0)
+const filterMonth = ref('')
 const search = ref('')
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const thisYear = new Date().getFullYear()
+const YEARS = Array.from({ length: thisYear - 2019 }, (_, i) => thisYear - i)
+
+function peso(value) {
+  return Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 const isStockModalOpen = ref(false)
 const isEditModalOpen = ref(false)
@@ -41,6 +54,8 @@ async function loadStockcard() {
     const res = await stockApi.getStockcard({
       item_id: selectedItemId.value,
       filter_type: filterType.value,
+      year: filterYear.value || undefined,
+      month: filterMonth.value || undefined,
       page: currentPage.value,
       limit: pageSize.value,
       search: search.value,
@@ -69,7 +84,7 @@ watch(selectedItemId, () => {
   loadStockcard()
 })
 
-watch(filterType, () => {
+watch([filterType, filterYear, filterMonth], () => {
   currentPage.value = 1
   loadStockcard()
 })
@@ -132,7 +147,21 @@ onMounted(() => {
           </select>
         </div>
 
-        <div style="display: flex; gap: 0.75rem; align-items: flex-end;">
+        <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+          <div>
+            <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Month</label>
+            <select v-model="filterMonth" class="form-select">
+              <option value="">All months</option>
+              <option v-for="(m, i) in MONTHS" :key="m" :value="String(i + 1).padStart(2, '0')">{{ m }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Year</label>
+            <select v-model.number="filterYear" class="form-select">
+              <option :value="0">All years</option>
+              <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
+            </select>
+          </div>
           <div>
             <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Order</label>
             <select v-model="filterType" class="form-select">
@@ -193,6 +222,7 @@ onMounted(() => {
               <th style="text-align: right; color: var(--color-success);">Receipt Qty</th>
               <th style="text-align: right; color: var(--color-primary);">Issue Qty</th>
               <th style="text-align: right;">Balance Qty</th>
+              <th style="text-align: right;">Price</th>
               <th>Action Type</th>
               <th style="text-align: center; width: 95px;">Actions</th>
             </tr>
@@ -219,6 +249,10 @@ onMounted(() => {
               <td style="text-align: right; font-family: var(--font-mono); font-weight: 800; font-size: 0.95rem;">
                 {{ entry.balance }}
               </td>
+              <td style="text-align: right; white-space: nowrap;">
+                ₱{{ peso(entry.transaction_unit_cost || entry.copy_unit_cost) }}
+                <div v-if="entry.copy_label" style="font-size: 0.75rem; color: var(--text-muted);">{{ entry.copy_label }}</div>
+              </td>
               <td>
                 <span
                   class="badge"
@@ -242,12 +276,12 @@ onMounted(() => {
             </tr>
 
             <tr v-if="loading">
-              <td colspan="8" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 Loading ledger entries...
               </td>
             </tr>
             <tr v-else-if="!stockcard.length">
-              <td colspan="8" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 No stock card transactions recorded for this item.
               </td>
             </tr>

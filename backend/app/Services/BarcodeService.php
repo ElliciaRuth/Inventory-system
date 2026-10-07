@@ -80,14 +80,14 @@ class BarcodeService
     }
 
     // ── Generate a Code 128 SVG via picqer and save it to /public/barcodes/ ───
-    //    Returns the web-accessible path (e.g. "/barcodes/BC-000001-....svg").
+    //    Returns the site-relative web path (e.g. "/barcodes/BC-000001-....svg").
     //    If the file already exists it is served directly (cached).
 
     public function saveBatchBarcode(string $value): string
     {
         $filename  = preg_replace('/[^A-Za-z0-9\-_]/', '_', $value) . '.svg';
         $savePath  = FCPATH . 'barcodes' . DIRECTORY_SEPARATOR . $filename;
-        $webPath   = base_url('barcodes/' . $filename);
+        $webPath   = '/barcodes/' . $filename;
 
         if (! file_exists($savePath)) {
             $generator = new BarcodeGeneratorSVG();
@@ -103,5 +103,14 @@ class BarcodeService
     public function batchBarcodePath(string $value): string
     {
         return $this->saveBatchBarcode($value);
+    }
+
+    // ── Site-relative path of an already saved barcode SVG, or null ───────────
+
+    public function savedBarcodePath(string $value): ?string
+    {
+        $filename = preg_replace('/[^A-Za-z0-9\-_]/', '_', $value) . '.svg';
+
+        return is_file(FCPATH . 'barcodes' . DIRECTORY_SEPARATOR . $filename) ? '/barcodes/' . $filename : null;
     }
 }

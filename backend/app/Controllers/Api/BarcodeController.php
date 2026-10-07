@@ -149,13 +149,10 @@ class BarcodeController extends BaseApiController
         $products = $builder->orderBy('p.product_no', 'ASC')->get()->getResultArray();
 
         // Attach barcode web paths where the SVG file already exists
+        $barcodes = new BarcodeService();
         foreach ($products as &$product) {
-            $value   = $this->finishedProductBarcodeValue($product);
-            $safe    = preg_replace('/[^A-Za-z0-9\-_]/', '_', $value);
-            $svgFile = FCPATH . 'barcodes' . DIRECTORY_SEPARATOR . $safe . '.svg';
-
-            $product['barcode_value'] = $value;
-            $product['barcode_url']   = file_exists($svgFile) ? base_url('barcodes/' . $safe . '.svg') : null;
+            $product['barcode_value'] = $this->finishedProductBarcodeValue($product);
+            $product['barcode_url']   = $barcodes->savedBarcodePath($product['barcode_value']);
         }
         unset($product);
 

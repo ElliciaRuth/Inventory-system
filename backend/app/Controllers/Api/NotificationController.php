@@ -4,6 +4,7 @@ namespace App\Controllers\Api;
 
 use App\Models\DashboardModel;
 use App\Models\SettingsModel;
+use App\Models\StockoutModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class NotificationController extends BaseApiController
@@ -162,6 +163,34 @@ class NotificationController extends BaseApiController
             }
         }
 
+        // 6. Stock-out requests waiting for approval (custodians / managers)
+        $pendingRequests = [];
+        if ($levelId >= 2 && $levelId <= 3) {
+            $pendingRequests = (new StockoutModel())->pendingRequests($officeId, $levelId);
+            foreach ($pendingRequests as $request) {
+                $requestId = (int) $request['temp_stockout_id'];
+                $requester = $request['requester_name'] ?? 'Staff';
+
+                $notifications[] = [
+                    'id'           => 'stockout-pending-' . $requestId,
+                    'type'         => 'stockout_request',
+                    'severity'     => 'warning',
+                    'category'     => 'Stock-Out Approval',
+                    'title'        => "Stock-Out Request #{$requestId}",
+                    'item'         => $requester,
+                    'message'      => "{$requester} submitted a stock-out request that needs approval.",
+                    'badge'        => 'Awaiting Approval',
+                    'created_at'   => $request['created_at'] ?? date('Y-m-d H:i:s'),
+                    'action_url'   => '/stockout/pending',
+                    'action_label' => 'Review Request',
+                    'details'      => [
+                        'temp_stockout_id' => $requestId,
+                        'requester'        => $requester,
+                    ],
+                ];
+            }
+        }
+
         // Summary counts
         $counts = [
             'total'        => count($notifications),
@@ -170,6 +199,7 @@ class NotificationController extends BaseApiController
             'expiring'     => count($expiring),
             'borrows'      => count($activeBorrows),
             'pendingUsers' => ($levelId >= 3) ? count($this->settingsModel->pendingUsers($officeId, $levelId)) : 0,
+            'stockoutRequests' => count($pendingRequests),
         ];
 
         return $this->respondSuccess([

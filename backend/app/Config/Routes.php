@@ -64,7 +64,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('reports/batchlist', 'ReportsController::batchlist', ['filter' => 'level:2']);
         $routes->get('barcode/product/(:num)', 'BarcodeController::product/$1', ['filter' => 'level:2']);
         $routes->get('barcode/batch/(:num)', 'BarcodeController::batch/$1', ['filter' => 'level:2']);
-        $routes->get('barcode/lookup', 'BarcodeController::lookupByValue', ['filter' => 'level:2']);
+        // Level 1 too: the stock-out request page scans batch barcodes
+        $routes->get('barcode/lookup', 'BarcodeController::lookupByValue', ['filter' => 'level:1']);
 
         // ── Exports — level 2+ ───────────────────────────────────────────────
         $routes->get('export/stockcard/options', 'ExportController::stockcardOptions', ['filter' => 'level:2']);

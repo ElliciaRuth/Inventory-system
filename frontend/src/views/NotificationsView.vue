@@ -9,7 +9,7 @@ const router = useRouter()
 const notificationStore = useNotificationStore()
 
 // Filter and Search State
-const activeCategory = ref('all') // 'all' | 'unread' | 'out_of_stock' | 'low_stock' | 'expiring' | 'borrow' | 'user_registration'
+const activeCategory = ref('all') // 'all' | 'unread' | 'out_of_stock' | 'low_stock' | 'expiring' | 'borrow' | 'user_registration' | 'stockout_request'
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -94,6 +94,8 @@ function getIcon(type) {
       return '🔄'
     case 'user_registration':
       return '👤'
+    case 'stockout_request':
+      return '📋'
     default:
       return '🔔'
   }
@@ -304,6 +306,17 @@ function getIcon(type) {
           >
             <span>👤 Pending Users</span>
             <span class="pill-badge">{{ notificationStore.counts.pendingUsers }}</span>
+          </button>
+
+          <button
+            v-if="notificationStore.counts.stockoutRequests > 0"
+            type="button"
+            class="notif-pill"
+            :class="{ 'is-selected': activeCategory === 'stockout_request' }"
+            @click="setCategory('stockout_request')"
+          >
+            <span>📋 Stock-Out Requests</span>
+            <span class="pill-badge">{{ notificationStore.counts.stockoutRequests }}</span>
           </button>
         </div>
       </div>

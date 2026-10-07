@@ -1,0 +1,72 @@
+# Local test / on-premises setup. From the repository root:
+#
+#   docker compose up -d --build
+#
+# then open http://localhost:8080 (or http://<this PC's IP>:8080 from other PCs).
+# The first run builds the frontend, installs the backend, migrates and seeds the
+# database; later runs reuse what is already there. See README.md.
+name: bsu-inventory
+
+services:
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: inventory_system
+      MARIADB_USER: inventory_user
+      MARIADB_PASSWORD: inventory_pass
+      MARIADB_ROOT_PASSWORD: inventory_root_pass
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: .env, composer install, migrations, first-run seed, permissions
+  setup:
+    build: ./docker/php
+    command: sh /docker/setup.sh
+    volumes:
+      - ./backend:/var/www/backend
+      - ./docker:/docker:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # One-shot: build the Vue app into frontend/dist
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci --no-audit --no-fund && npm run build"
+    volumes:
+      - ./frontend:/app
+
+  php:
+    build: ./docker/php
+    restart: unless-stopped
+    volumes:
+      - ./backend:/var/www/backend
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      # INVENTORY_BIND=127.0.0.1 keeps it reachable from this PC only
+      - "${INVENTORY_BIND:-0.0.0.0}:${INVENTORY_PORT:-8080}:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/var/www/frontend:ro
+      - ./backend:/var/www/backend:ro
+    depends_on:
+      php:
+        condition: service_started
+      frontend:
+        condition: service_completed_successfully
+
+volumes:
+  db_data:

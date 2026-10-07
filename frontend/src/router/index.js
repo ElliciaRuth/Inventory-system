@@ -9,6 +9,16 @@ import RegisterView from '../views/RegisterView.vue'
 import AccountSetupView from '../views/AccountSetupView.vue'
 import ExportStockcardView from '../views/ExportStockcardView.vue'
 import NotificationsView from '../views/NotificationsView.vue'
+import StockoutView from '../views/StockoutView.vue'
+import StockoutListView from '../views/StockoutListView.vue'
+import StockoutPendingView from '../views/StockoutPendingView.vue'
+import SettingsView from '../views/SettingsView.vue'
+import BatchesView from '../views/BatchesView.vue'
+import SummaryReportView from '../views/SummaryReportView.vue'
+import ExportSummaryView from '../views/ExportSummaryView.vue'
+import FinishedBarcodesView from '../views/FinishedBarcodesView.vue'
+import ForgotPasswordView from '../views/ForgotPasswordView.vue'
+import ChangePasswordView from '../views/ChangePasswordView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 
@@ -49,9 +59,68 @@ const routes = [
     meta: { title: 'Export Stock Card - BSU Inventory', minLevel: 2 },
   },
   {
+    path: '/export/summary',
+    name: 'export-summary',
+    component: ExportSummaryView,
+    meta: { title: 'Export Summary - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
     path: '/export',
     redirect: '/export/stockcard',
   },
+  {
+    path: '/products/barcodes',
+    name: 'finished-barcodes',
+    component: FinishedBarcodesView,
+    meta: { title: 'Finished Product Barcodes - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/reports/batches',
+    name: 'batches',
+    component: BatchesView,
+    meta: { title: 'Batch Inventory - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/reports/summary',
+    name: 'summary-report',
+    component: SummaryReportView,
+    meta: { title: 'Inventory Report - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/stockout',
+    name: 'stockout',
+    component: StockoutView,
+    meta: { title: 'Request Stock Out - BSU Inventory', maxLevel: 3 },
+  },
+  {
+    path: '/stockout/list',
+    name: 'stockout-list',
+    component: StockoutListView,
+    meta: { title: 'My Stock-Out List - BSU Inventory', maxLevel: 3 },
+  },
+  {
+    path: '/stockout/pending',
+    name: 'stockout-pending',
+    component: StockoutPendingView,
+    meta: { title: 'Stock-Out Requests - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: SettingsView,
+    meta: { title: 'Settings - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/change-password',
+    name: 'change-password',
+    component: ChangePasswordView,
+    meta: { title: 'Change Password - BSU Inventory' },
+  },
+  // Old CodeIgniter page URLs
+  { path: '/batches', redirect: '/reports/batches' },
+  { path: '/batchlist', redirect: '/reports/summary' },
+  { path: '/stockout/temp', redirect: '/stockout/list' },
+  { path: '/stock/add', redirect: '/stockcard' },
   {
     path: '/transactions',
     name: 'transactions',
@@ -81,6 +150,12 @@ const routes = [
     name: 'register',
     component: RegisterView,
     meta: { title: 'Create Account - BSU Inventory', public: true },
+  },
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: ForgotPasswordView,
+    meta: { title: 'Forgot Password - BSU Inventory', public: true },
   },
   {
     path: '/:pathMatch(.*)*',

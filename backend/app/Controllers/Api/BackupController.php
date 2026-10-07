@@ -56,8 +56,14 @@ class BackupController extends BaseApiController
         $model  = new BackupModel();
         $config = $model->getConfig();
 
+        // Server file paths stay on the server
+        $backups = array_map(
+            static fn (array $b) => array_diff_key($b, array_flip(['backup_filepath', 'backup_filepath_2'])),
+            $model->getBackups($this->currentOfficeId())
+        );
+
         return $this->respondSuccess([
-            'backups'               => $model->getBackups($this->currentOfficeId()),
+            'backups'               => $backups,
             'backup_dir'            => $config['backup_dir'] ?? '',
             'backup_dir_2'          => $config['backup_dir_2'] ?? '',
             'backup_interval_hours' => (int) ($config['backup_interval_hours'] ?? 24),
@@ -195,23 +201,17 @@ class BackupController extends BaseApiController
             $backupTime = '00:00';
         }
 
-        // ── Resolve Drive 1 ──
-        if (! str_contains($dir, ':') && ! str_starts_with($dir, '/')) {
-            $dir = ROOTPATH . ltrim($dir, '/\\');
-        }
-        $dir = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR;
-        if (! is_dir($dir) && ! @mkdir($dir, 0775, true)) {
+        // Relative folders are stored as entered (BackupModel resolves them against
+        // the backend root), so the config keeps working if the app moves to another PC.
+        $dir = rtrim($dir, '/\\') . '/';
+        if (! $this->ensureDirectory($dir)) {
             return $this->respondError('Cannot create directory (Drive 1): ' . $dir, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // ── Resolve Drive 2 (optional) ──
+        // Drive 2 is optional: if it can't be created, save it empty so backups still go to drive 1
         if ($dir2 !== '') {
-            if (! str_contains($dir2, ':') && ! str_starts_with($dir2, '/')) {
-                $dir2 = ROOTPATH . ltrim($dir2, '/\\');
-            }
-            $dir2 = rtrim($dir2, '/\\') . DIRECTORY_SEPARATOR;
-            if (! is_dir($dir2) && ! @mkdir($dir2, 0775, true)) {
-                // Non-fatal: save as empty so backup still works on drive 1
+            $dir2 = rtrim($dir2, '/\\') . '/';
+            if (! $this->ensureDirectory($dir2)) {
                 $dir2 = '';
             }
         }
@@ -225,5 +225,15 @@ class BackupController extends BaseApiController
         (new BackupModel())->saveConfig($config);
 
         return $this->respondSuccess($config, 'Backup settings updated.');
+    }
+
+    /**
+     * Create the folder if needed. Relative paths are relative to the backend root.
+     */
+    private function ensureDirectory(string $dir): bool
+    {
+        $path = (str_contains($dir, ':') || str_starts_with($dir, '/')) ? $dir : ROOTPATH . ltrim($dir, '/\\');
+
+        return is_dir($path) || @mkdir($path, 0775, true);
     }
 }

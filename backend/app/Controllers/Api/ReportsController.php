@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Models\ReportModel;
+use App\Services\BarcodeService;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class ReportsController extends BaseApiController
@@ -83,6 +84,16 @@ class ReportsController extends BaseApiController
             ->orderBy('b.batch_id', 'DESC')
             ->get()
             ->getResultArray();
+
+        // Saved SVG when it exists, otherwise the on-the-fly image endpoint
+        $barcodes = new BarcodeService();
+        foreach ($batches as &$batch) {
+            $value = (string) ($batch['barcode_value'] ?? '');
+            $batch['barcode_url'] = $value === ''
+                ? null
+                : ($barcodes->savedBarcodePath($value) ?? '/api/barcode/batch/' . (int) $batch['batch_id']);
+        }
+        unset($batch);
 
         return $this->respondSuccess([
             'batches'   => $batches,
