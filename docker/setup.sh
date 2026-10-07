@@ -8,13 +8,13 @@ if [ ! -f .env ]; then
     cp /docker/backend.env .env
 fi
 
-# Password-reset SMTP credentials are encrypted with this key
+echo "Installing PHP dependencies..."
+composer install --no-interaction --optimize-autoloader
+
+# Password-reset SMTP credentials are encrypted with this key (needs vendor/ from composer)
 if ! grep -q "^encryption.key" .env; then
     php spark key:generate --force
 fi
-
-echo "Installing PHP dependencies..."
-composer install --no-interaction --optimize-autoloader
 
 echo "Waiting for the database..."
 until php -r '$m = @new mysqli("db", "inventory_user", "inventory_pass", "inventory_system"); exit($m->connect_errno ? 1 : 0);'; do
