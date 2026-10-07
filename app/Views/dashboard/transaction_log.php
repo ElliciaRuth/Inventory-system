@@ -12,13 +12,14 @@
 
     // Build query string helper (preserves current filters when paginating)
     function txnUrl(array $overrides = []): string {
-        $base = ['search' => '', 'type' => '', 'date_from' => '', 'date_to' => '', 'page' => 1];
+        $base = ['search' => '', 'type' => '', 'date_from' => '', 'date_to' => '', 'page' => 1, 'limit' => 25];
         $params = array_merge($base, array_filter([
             'search'    => $_GET['search']    ?? '',
             'type'      => $_GET['type']      ?? '',
             'date_from' => $_GET['date_from'] ?? '',
             'date_to'   => $_GET['date_to']   ?? '',
             'page'      => $_GET['page']      ?? 1,
+            'limit'     => $_GET['limit']     ?? 25,
         ]), $overrides);
         $qs = http_build_query(array_filter($params, fn($v) => $v !== '' && $v != 0));
         return site_url('transactions') . ($qs ? '?' . $qs : '');
@@ -70,7 +71,7 @@
 
     <!-- ── Table ── -->
     <div class="panel-card table-card" style="overflow-x:auto;">
-        <table class="data-table txn-log-table">
+        <table class="data-table txn-log-table" data-no-paginate="true">
             <thead>
                 <tr>
                     <th>Date</th>
@@ -143,11 +144,23 @@
     </div>
 
     <!-- ── Pagination ── -->
-    <?php if ($totalPages > 1): ?>
     <div class="txn-pagination">
-        <span class="txn-page-info">
-            Showing <?= number_format($from) ?>–<?= number_format($to) ?> of <?= number_format($total) ?>
-        </span>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted,#64748b);">
+                <span>Show</span>
+                <select onchange="location.href='<?= txnUrl(['limit' => '', 'page' => 1]) ?>&limit=' + this.value"
+                        style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-color,#cbd5e1);background:var(--input-bg,#fff);color:inherit;font-size:13px;cursor:pointer;">
+                    <?php foreach ([10, 25, 50, 100] as $sz): ?>
+                        <option value="<?= $sz ?>" <?= (int)$limit === $sz ? 'selected' : '' ?>><?= $sz ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <span>entries</span>
+            </label>
+            <span class="txn-page-info">
+                Showing <?= number_format($from) ?>–<?= number_format($to) ?> of <?= number_format($total) ?>
+            </span>
+        </div>
+        <?php if ($totalPages > 1): ?>
         <div class="txn-page-buttons">
             <?php if ($page > 1): ?>
                 <a href="<?= txnUrl(['page' => 1]) ?>" class="txn-page-btn" title="First">«</a>
@@ -170,8 +183,8 @@
                 <a href="<?= txnUrl(['page' => $totalPages]) ?>" class="txn-page-btn" title="Last">»</a>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>
 
 <style>

@@ -99,3 +99,48 @@ $routes->group('', ['filter' => 'auth'], static function ($routes): void {
     $routes->post('stockout/reject-item/(:num)', 'StockoutController::rejectItem/$1', ['filter' => 'level:2']);
     $routes->post('stockout/edit-pending/(:num)', 'StockoutController::editPendingItem/$1', ['filter' => 'level:2']);
 });
+
+/*
+ * --------------------------------------------------------------------
+ * RESTful API Routes (Decoupled Vue 3 Frontend Integration)
+ * --------------------------------------------------------------------
+ */
+$routes->group('api', ['namespace' => 'App\Controllers\Api'], static function ($routes) {
+    // Auth endpoints
+    $routes->post('auth/login', 'AuthController::login');
+    $routes->get('auth/me', 'AuthController::me');
+    $routes->post('auth/logout', 'AuthController::logout');
+    $routes->get('auth/register-options', 'AuthController::registerOptions');
+    $routes->post('auth/register', 'AuthController::register');
+
+    // Dashboard endpoints
+    $routes->get('dashboard', 'DashboardController::index');
+    $routes->get('dashboard/admin', 'DashboardController::admin');
+    $routes->get('transactions', 'DashboardController::transactions');
+
+    // Admin & User Management endpoints
+    $routes->get('admin/data', 'AdminController::data');
+    $routes->post('admin/users/activate/(:num)', 'AdminController::activateUser/$1');
+    $routes->post('admin/users/deactivate/(:num)', 'AdminController::deactivateUser/$1');
+    $routes->delete('admin/records/(:segment)/(:num)', 'AdminController::deleteRecord/$1/$2');
+    $routes->post('admin/save/(:segment)', 'AdminController::saveRecord/$1');
+
+    // Stock & Inventory endpoints
+    $routes->get('stockcard', 'StockController::stockcard');
+    $routes->get('stock/options', 'StockController::options');
+    $routes->post('stock/add', 'StockController::add');
+    $routes->post('stock/edit-transaction', 'StockController::editTransaction');
+    $routes->post('stock/delete-transaction', 'StockController::deleteTransaction');
+
+    // Product Resource and Meta
+    $routes->get('products/meta', 'ProductController::meta');
+    $routes->resource('products', ['controller' => 'ProductController']);
+
+    // Export endpoints
+    $routes->get('export/stockcard/options', '\App\Controllers\ExportController::stockcardOptions');
+    $routes->match(['get', 'post'], 'export/stockcard', '\App\Controllers\ExportController::stockcardDownload');
+
+    // Notification endpoints
+    $routes->get('notifications', 'NotificationController::index');
+});
+

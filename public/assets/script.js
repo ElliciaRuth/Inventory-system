@@ -192,6 +192,8 @@
 
         const isOpen = navLinks.classList.toggle("show");
         navLinks.classList.toggle("active", isOpen);
+        document.body.classList.toggle("nav-open", isOpen);
+        document.querySelector("[data-menu-toggle]")?.classList.toggle("is-active", isOpen);
 
         if (!isOpen) {
             document.querySelectorAll(".nav-links .has-submenu.active").forEach((item) => {
@@ -199,6 +201,15 @@
             });
         }
     }
+
+    document.addEventListener("click", (e) => {
+        if (!document.body.classList.contains("nav-open")) return;
+        const nav = document.querySelector(".navbar");
+        const toggle = document.querySelector("[data-menu-toggle]");
+        if (nav && !nav.contains(e.target) && (!toggle || !toggle.contains(e.target))) {
+            toggleMenu();
+        }
+    });
 
     function toggleMobileSubmenu(trigger) {
         const parent = trigger?.closest(".has-submenu");

@@ -15,6 +15,8 @@
         })();
     </script>
     <link rel="stylesheet" href="<?= base_url('assets/style.css?v=' . filemtime(FCPATH . 'assets/style.css')) ?>">
+    <link rel="stylesheet" href="<?= base_url('assets/table-pagination.css?v=' . filemtime(FCPATH . 'assets/table-pagination.css')) ?>">
+    <link rel="stylesheet" href="<?= base_url('assets/mobile-responsive.css?v=' . filemtime(FCPATH . 'assets/mobile-responsive.css')) ?>">
 </head>
 <body>
 
@@ -22,10 +24,18 @@
     $levelId = (int) (session('user')['level_id'] ?? 0);
 ?>
 
-<button class="menu-toggle" type="button" data-menu-toggle>Menu</button>
-
 <div class="navbar">
-    <div class="nav-logo">BSU INVENTORY</div>
+    <div class="nav-brand-container">
+        <a href="<?= site_url('/') ?>" class="nav-logo">BSU INVENTORY</a>
+        <button class="menu-toggle" type="button" data-menu-toggle aria-label="Toggle navigation">
+            <span class="menu-toggle-icon" aria-hidden="true">
+                <span class="menu-bar"></span>
+                <span class="menu-bar"></span>
+                <span class="menu-bar"></span>
+            </span>
+            <span class="menu-toggle-text">Menu</span>
+        </button>
+    </div>
     <?php
         // ── Fetch notification counts for badges ──
         $db = db_connect();
@@ -161,6 +171,7 @@
         <li class="login"><a href="<?= site_url('logout') ?>">LOGOUT</a></li>
     </ul>
 </div>
+<div class="nav-backdrop" data-menu-backdrop></div>
 
 <div class="app-shell">
     <?php if (session()->has('success')): ?>
@@ -189,6 +200,7 @@ window.appConfig = {
 };
 </script>
 <script src="<?= base_url('assets/script.js?v=' . filemtime(FCPATH . 'assets/script.js')) ?>"></script>
+<script src="<?= base_url('assets/table-pagination.js?v=' . filemtime(FCPATH . 'assets/table-pagination.js')) ?>"></script>
 <script>
 // ── Session-expiry watcher ───────────────────────────────────────────────────
 (function () {

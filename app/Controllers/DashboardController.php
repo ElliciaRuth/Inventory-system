@@ -29,7 +29,7 @@ class DashboardController extends BaseController
     public function transactionLog()
     {
         $userOfficeId = (int) (session('user')['user_office_id'] ?? 0);
-        $limit        = 50;
+        $limit        = max(5, min(200, (int) ($this->request->getGet('limit') ?? 25)));
         $page         = max(1, (int) ($this->request->getGet('page') ?? 1));
         $search       = trim((string) ($this->request->getGet('search') ?? ''));
         $type         = trim((string) ($this->request->getGet('type') ?? ''));

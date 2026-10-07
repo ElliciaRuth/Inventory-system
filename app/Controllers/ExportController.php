@@ -26,31 +26,63 @@ class ExportController extends BaseController
         ]);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    public function stockcardOptions()
+    {
+        $productModel = new ProductModel();
+        return $this->response->setJSON([
+            'status' => true,
+            'data'   => [
+                'products' => $productModel->listForSelect($this->userOfficeId()),
+            ],
+        ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // POST /export/stockcard
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────────────────
 
     public function stockcardDownload()
     {
-        $format    = trim((string) ($this->request->getPost('format')     ?? ''));
-        $productId = (int)         ($this->request->getPost('product_id') ?? 0);
-        $monthFrom = trim((string) ($this->request->getPost('month_from') ?? ''));
-        $monthTo   = trim((string) ($this->request->getPost('month_to')   ?? ''));
-        $sortOrder = $this->request->getPost('sort_order')  === 'DESC' ? 'DESC' : 'ASC';
-        $paperSize = $this->request->getPost('paper_size');
+        $input = $this->request->getJSON(true) ?: $this->request->getPost();
+        if (empty($input)) {
+            $input = $this->request->getGet();
+        }
 
-        // Normalise paper size â†’ dompdf paper name + CSS page size
+        $format    = trim((string) ($input['format']     ?? ''));
+        $productId = (int)         ($input['product_id'] ?? 0);
+        $monthFrom = trim((string) ($input['month_from'] ?? ''));
+        $monthTo   = trim((string) ($input['month_to']   ?? ''));
+        $sortOrder = ($input['sort_order'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
+        $paperSize = $input['paper_size'] ?? 'long';
+
+        // Normalise paper size → dompdf paper name + CSS page size
         $paperMap  = [
             'a4'    => ['dompdf' => 'A4',     'css' => 'A4'],
             'long'  => ['dompdf' => 'folio',  'css' => '8.5in 13in'],   // Philippine Long Bond
-            'short' => ['dompdf' => 'letter', 'css' => 'letter'],        // 8.5 Ã— 11
+            'short' => ['dompdf' => 'letter', 'css' => 'letter'],        // 8.5 × 11
         ];
-        $paper = $paperMap[$paperSize] ?? $paperMap['a4'];
+        $paper = $paperMap[$paperSize] ?? $paperMap['long'];
+
+        $isApi = $this->request->isAJAX()
+            || str_contains($this->request->getHeaderLine('Accept'), 'application/json')
+            || str_contains((string) $this->request->getUri()->getPath(), 'api/');
 
         if (! in_array($format, ['pdf', 'csv', 'word'], true)) {
+            if ($isApi) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'status'  => false,
+                    'message' => 'Please select a download format.',
+                ]);
+            }
             return redirect()->to(site_url('export/stockcard'))->with('error', 'Please select a download format.');
         }
         if ($monthFrom === '' || $monthTo === '') {
+            if ($isApi) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'status'  => false,
+                    'message' => 'Please select a date range.',
+                ]);
+            }
             return redirect()->to(site_url('export/stockcard'))->with('error', 'Please select a date range.');
         }
 
@@ -58,6 +90,12 @@ class ExportController extends BaseController
         $dateTo   = date('Y-m-d', strtotime($monthTo . '-01 +1 month'));
 
         if ($dateFrom > $dateTo) {
+            if ($isApi) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'status'  => false,
+                    'message' => 'From Month must be before To Month.',
+                ]);
+            }
             return redirect()->to(site_url('export/stockcard'))->with('error', 'From Month must be before To Month.');
         }
 
