@@ -4,6 +4,10 @@ import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useAutoReload } from '../composables/useAutoReload'
 import AppPagination from '../components/AppPagination.vue'
+import {
+  Bell, AlertCircle, AlertTriangle, Clock, RefreshCw, UserCheck, ClipboardList,
+  Check, Search, Trash2, PartyPopper, ArrowRight, X,
+} from 'lucide-vue-next'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -82,23 +86,15 @@ function handleAction(n) {
   }
 }
 
+// Same icons as the navbar notification flyout
 function getIcon(type) {
-  switch (type) {
-    case 'out_of_stock':
-      return '🚨'
-    case 'low_stock':
-      return '⚠️'
-    case 'expiring':
-      return '⏳'
-    case 'borrow':
-      return '🔄'
-    case 'user_registration':
-      return '👤'
-    case 'stockout_request':
-      return '📋'
-    default:
-      return '🔔'
-  }
+  if (type === 'out_of_stock') return AlertCircle
+  if (type === 'low_stock') return AlertTriangle
+  if (type === 'expiring') return Clock
+  if (type === 'borrow') return RefreshCw
+  if (type === 'user_registration') return UserCheck
+  if (type === 'stockout_request') return ClipboardList
+  return Bell
 }
 </script>
 
@@ -108,7 +104,7 @@ function getIcon(type) {
     <div class="page-hero">
       <div>
         <p class="hero-eyebrow">
-          <span>🔔</span> System Intelligence & Audit
+          <Bell :size="14" /> System Intelligence & Audit
         </p>
         <h1 class="hero-title">Notifications & System Alerts</h1>
         <p class="hero-subtitle">
@@ -123,7 +119,7 @@ function getIcon(type) {
           :disabled="notificationStore.unreadCount === 0"
           @click="notificationStore.markAllAsRead()"
         >
-          <span>✓</span> Mark All Read
+          <Check :size="15" /> Mark All Read
         </button>
         <button
           type="button"
@@ -131,7 +127,7 @@ function getIcon(type) {
           :disabled="notificationStore.loading"
           @click="refresh"
         >
-          <span :class="{ 'spin-icon': notificationStore.loading }">🔄</span> Refresh
+          <RefreshCw :size="15" :class="{ 'spin-icon': notificationStore.loading }" /> Refresh
         </button>
       </div>
     </div>
@@ -146,7 +142,7 @@ function getIcon(type) {
       >
         <div class="stat-card-header">
           <span class="stat-card-title">Active Alerts</span>
-          <span class="stat-card-icon" style="background: var(--color-primary-light); color: var(--color-primary);">🔔</span>
+          <span class="stat-card-icon" style="background: var(--color-primary-light); color: var(--color-primary);"><Bell :size="18" /></span>
         </div>
         <strong class="stat-card-value">{{ notificationStore.activeNotifications.length }}</strong>
         <span class="stat-card-hint">
@@ -162,7 +158,7 @@ function getIcon(type) {
       >
         <div class="stat-card-header">
           <span class="stat-card-title">Out of Stock</span>
-          <span class="stat-card-icon">🚨</span>
+          <span class="stat-card-icon"><AlertCircle :size="18" /></span>
         </div>
         <strong class="stat-card-value">{{ notificationStore.counts.outOfStock }}</strong>
         <span class="stat-card-hint">Zero balance items</span>
@@ -176,7 +172,7 @@ function getIcon(type) {
       >
         <div class="stat-card-header">
           <span class="stat-card-title">Low Stock</span>
-          <span class="stat-card-icon">⚠️</span>
+          <span class="stat-card-icon"><AlertTriangle :size="18" /></span>
         </div>
         <strong class="stat-card-value">{{ notificationStore.counts.lowStock }}</strong>
         <span class="stat-card-hint">Below reorder point</span>
@@ -190,7 +186,7 @@ function getIcon(type) {
       >
         <div class="stat-card-header">
           <span class="stat-card-title">Expiring Soon</span>
-          <span class="stat-card-icon">⏳</span>
+          <span class="stat-card-icon"><Clock :size="18" /></span>
         </div>
         <strong class="stat-card-value">{{ notificationStore.counts.expiring }}</strong>
         <span class="stat-card-hint">Within threshold days</span>
@@ -203,7 +199,7 @@ function getIcon(type) {
       <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 16px;">
         <div class="notif-toolbar-top">
           <div class="notif-search-box">
-            <span class="search-icon">🔍</span>
+            <Search :size="15" class="search-icon" />
             <input
               v-model="searchQuery"
               type="text"
@@ -216,7 +212,7 @@ function getIcon(type) {
               class="clear-search-btn"
               @click="searchQuery = ''"
             >
-              ✕
+              <X :size="14" />
             </button>
           </div>
 
@@ -227,7 +223,7 @@ function getIcon(type) {
               :disabled="notificationStore.activeNotifications.length === 0"
               @click="notificationStore.clearAll()"
             >
-              <span>🗑️</span> Clear All
+              <Trash2 :size="14" /> Clear All
             </button>
           </div>
         </div>
@@ -262,7 +258,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'out_of_stock' }"
             @click="setCategory('out_of_stock')"
           >
-            <span>🚨 Out of Stock</span>
+            <span><AlertCircle :size="14" /> Out of Stock</span>
             <span class="pill-badge">{{ notificationStore.counts.outOfStock }}</span>
           </button>
 
@@ -272,7 +268,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'low_stock' }"
             @click="setCategory('low_stock')"
           >
-            <span>⚠️ Low Stock</span>
+            <span><AlertTriangle :size="14" /> Low Stock</span>
             <span class="pill-badge">{{ notificationStore.counts.lowStock }}</span>
           </button>
 
@@ -282,7 +278,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'expiring' }"
             @click="setCategory('expiring')"
           >
-            <span>⏳ Expiring</span>
+            <span><Clock :size="14" /> Expiring</span>
             <span class="pill-badge">{{ notificationStore.counts.expiring }}</span>
           </button>
 
@@ -293,7 +289,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'borrow' }"
             @click="setCategory('borrow')"
           >
-            <span>🔄 Borrows</span>
+            <span><RefreshCw :size="14" /> Borrows</span>
             <span class="pill-badge">{{ notificationStore.counts.borrows }}</span>
           </button>
 
@@ -304,7 +300,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'user_registration' }"
             @click="setCategory('user_registration')"
           >
-            <span>👤 Pending Users</span>
+            <span><UserCheck :size="14" /> Pending Users</span>
             <span class="pill-badge">{{ notificationStore.counts.pendingUsers }}</span>
           </button>
 
@@ -315,7 +311,7 @@ function getIcon(type) {
             :class="{ 'is-selected': activeCategory === 'stockout_request' }"
             @click="setCategory('stockout_request')"
           >
-            <span>📋 Stock-Out Requests</span>
+            <span><ClipboardList :size="14" /> Stock-Out Requests</span>
             <span class="pill-badge">{{ notificationStore.counts.stockoutRequests }}</span>
           </button>
         </div>
@@ -326,7 +322,7 @@ function getIcon(type) {
         <!-- Empty State -->
         <div v-if="paginatedList.length === 0" class="notif-empty-state">
           <div class="empty-icon-wrap">
-            <span>🎉</span>
+            <PartyPopper :size="32" />
           </div>
           <h3 class="empty-title">All Caught Up!</h3>
           <p class="empty-desc">
@@ -359,7 +355,7 @@ function getIcon(type) {
             <div class="notif-card-inner">
               <!-- Icon -->
               <div class="notif-icon-badge">
-                <span>{{ getIcon(n.type) }}</span>
+                <component :is="getIcon(n.type)" :size="20" />
               </div>
 
               <!-- Content Area -->
@@ -397,7 +393,7 @@ function getIcon(type) {
                     @click="handleAction(n)"
                   >
                     <span>{{ n.action_label || 'View Details' }}</span>
-                    <span>→</span>
+                    <ArrowRight :size="14" />
                   </button>
 
                   <button
@@ -415,7 +411,7 @@ function getIcon(type) {
                     title="Dismiss alert"
                     @click="notificationStore.dismiss(n.id)"
                   >
-                    ✕ Dismiss
+                    <X :size="14" /> Dismiss
                   </button>
                 </div>
               </div>
@@ -633,16 +629,23 @@ function getIcon(type) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.35rem;
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
 .severity-danger .notif-icon-badge {
   background: rgba(239, 68, 68, 0.12);
+  color: var(--color-danger);
 }
 
 .severity-warning .notif-icon-badge {
   background: rgba(245, 158, 11, 0.12);
+  color: var(--color-warning);
+}
+
+.severity-info .notif-icon-badge,
+.severity-caution .notif-icon-badge {
+  color: var(--color-info);
 }
 
 .notif-content-area {
@@ -741,7 +744,7 @@ function getIcon(type) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2.2rem;
+  color: var(--color-primary);
   margin-bottom: 16px;
 }
 

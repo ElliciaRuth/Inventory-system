@@ -30,8 +30,9 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
     $routes->post('auth/reset-password', 'AuthController::resetPassword');
 
     $routes->group('', ['filter' => 'auth'], static function (RouteCollection $routes): void {
-        // ── Account setup (first-login steps) ────────────────────────────────
+        // ── Account setup & profile ─────────────────────────────────────────
         $routes->post('auth/change-password', 'AuthController::changePassword');
+        $routes->post('auth/update-profile', 'AuthController::updateProfile');
         $routes->post('auth/setup-smtp', 'AuthController::setupSmtp', ['filter' => 'level:4']);
         $routes->post('auth/setup-recovery-email', 'AuthController::setupRecoveryEmail', ['filter' => 'level:4']);
 

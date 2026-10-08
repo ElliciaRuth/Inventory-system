@@ -18,7 +18,7 @@ import SummaryReportView from '../views/SummaryReportView.vue'
 import ExportSummaryView from '../views/ExportSummaryView.vue'
 import FinishedBarcodesView from '../views/FinishedBarcodesView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
-import ChangePasswordView from '../views/ChangePasswordView.vue'
+import ProfileView from '../views/ProfileView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 
@@ -111,10 +111,18 @@ const routes = [
     meta: { title: 'Settings - BSU Inventory', minLevel: 2, maxLevel: 3 },
   },
   {
+    path: '/profile',
+    name: 'profile',
+    component: ProfileView,
+    meta: { title: 'Edit Profile - BSU Inventory' },
+  },
+  {
+    path: '/edit-profile',
+    redirect: '/profile',
+  },
+  {
     path: '/change-password',
-    name: 'change-password',
-    component: ChangePasswordView,
-    meta: { title: 'Change Password - BSU Inventory' },
+    redirect: '/profile',
   },
   // Old CodeIgniter page URLs
   { path: '/batches', redirect: '/reports/batches' },

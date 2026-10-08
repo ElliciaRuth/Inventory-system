@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { toast, errorMessage } from '../composables/useToast'
+import AuthLogoHeader from '../components/AuthLogoHeader.vue'
+import { AlertTriangle } from 'lucide-vue-next'
 
 // Step 1: request a 6-digit code by email. Step 2: enter it with a new password.
 const router = useRouter()
@@ -59,6 +61,9 @@ async function resetPassword() {
     <div class="login-shell">
       <section class="login-card" style="margin: 0 auto;">
         <div class="login-card-content">
+          <!-- Institution & Department Branding Logos -->
+          <AuthLogoHeader />
+
           <h2 class="login-card-title">{{ step === 1 ? 'Forgot Password' : 'Reset Password' }}</h2>
           <p class="login-card-subtitle">
             {{ step === 1
@@ -66,7 +71,7 @@ async function resetPassword() {
               : 'Enter the code from your email and choose a new password. The code expires in 15 minutes.' }}
           </p>
 
-          <div v-if="error" class="login-error-banner"><span>⚠️ {{ error }}</span></div>
+          <div v-if="error" class="login-error-banner"><span><AlertTriangle :size="15" /> {{ error }}</span></div>
           <div v-if="info && step === 2 && !error" class="login-success-banner"><span>{{ info }}</span></div>
 
           <form v-if="step === 1" class="login-form-body" @submit.prevent="requestCode">

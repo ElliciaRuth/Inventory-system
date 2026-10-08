@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted, computed } from 'vue'
+import { X, AlertTriangle } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { triggerAutoReload } from '../composables/useAutoReload'
 
@@ -206,12 +207,15 @@ async function handleSubmit() {
           <h2 style="font-size: 1.25rem">Stock Movement / Transaction</h2>
           <p class="panel-subtitle">Record stock-in deliveries, issues, borrows, returns, or spoilage.</p>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">✕</button>
+        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">
+          <X :size="16" />
+        </button>
       </div>
 
       <div class="modal-body">
-        <div v-if="errorMessage" class="badge badge-danger" style="display: flex; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
-          <span>⚠️ {{ errorMessage }}</span>
+        <div v-if="errorMessage" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
+          <AlertTriangle :size="16" style="flex-shrink: 0;" />
+          <span>{{ errorMessage }}</span>
         </div>
 
         <form @submit.prevent="handleSubmit" id="stockForm">

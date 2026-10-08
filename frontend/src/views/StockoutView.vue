@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { ClipboardList, AlertTriangle, Package } from 'lucide-vue-next'
 import { stockoutApi } from '../api/stockout'
 import { stockApi } from '../api/stock'
 import { barcodesApi } from '../api/reports'
@@ -162,7 +163,10 @@ onMounted(loadItems)
         <h1 class="hero-title">Request Stock Out</h1>
         <p class="hero-subtitle">Search for a product or scan a barcode to add it to your stock-out list.</p>
       </div>
-      <router-link to="/stockout/list" class="btn btn-primary">📋 View My List</router-link>
+      <router-link to="/stockout/list" class="btn btn-primary">
+        <ClipboardList :size="15" />
+        <span>View My List</span>
+      </router-link>
     </div>
 
     <section class="panel" style="margin-bottom: 1.5rem;">
@@ -172,14 +176,18 @@ onMounted(loadItems)
         </div>
       </div>
       <form style="padding: 1.25rem;" @submit.prevent="addToList">
-        <div v-if="formError" class="badge badge-danger" style="display: flex; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
-          ⚠️ {{ formError }}
+        <div v-if="formError" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
+          <AlertTriangle :size="16" style="flex-shrink: 0;" />
+          <span>{{ formError }}</span>
         </div>
 
         <div class="form-group" style="position: relative;">
           <label class="form-label">Product <small style="font-weight: 400;">— type to search, or scan a barcode and press Enter</small></label>
           <div v-if="selected" style="display: flex; gap: 0.75rem; align-items: center;">
-            <div class="form-input" style="flex: 1; font-weight: 700;">📦 {{ selected.product }}</div>
+            <div class="form-input" style="flex: 1; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+              <Package :size="16" style="color: var(--color-primary); flex-shrink: 0;" />
+              <span>{{ selected.product }}</span>
+            </div>
             <button type="button" class="btn btn-sm btn-secondary" @click="clearSelection">Change</button>
           </div>
           <template v-else>

@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { barcodesApi } from '../api/reports'
 import { toast, errorMessage } from '../composables/useToast'
+import { Download } from 'lucide-vue-next'
 
 const products = ref([])
 const loading = ref(true)
@@ -88,7 +89,7 @@ onMounted(load)
                 <span v-else style="color: var(--text-muted);">Not yet generated</span>
               </td>
               <td style="text-align: right;">
-                <a v-if="p.barcode_url" :href="p.barcode_url" :download="fileName(p)" class="btn btn-sm btn-secondary">⬇ Download</a>
+                <a v-if="p.barcode_url" :href="p.barcode_url" :download="fileName(p)" class="btn btn-sm btn-secondary"><Download :size="14" /> Download</a>
                 <button v-else type="button" class="btn btn-sm btn-primary" :disabled="generatingId === Number(p.product_id)" @click="generate(p)">
                   {{ generatingId === Number(p.product_id) ? 'Generating…' : 'Generate' }}
                 </button>

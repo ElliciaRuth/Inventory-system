@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
+import AuthLogoHeader from '../components/AuthLogoHeader.vue'
+import { AlertTriangle, Palette, Moon, Sun } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,6 +75,9 @@ async function handleLogin() {
       <!-- Right Sign In Form Card -->
       <section class="login-card">
         <div class="login-card-content">
+          <!-- Institution & Department Branding Logos -->
+          <AuthLogoHeader />
+
           <h2 class="login-card-title">Sign In</h2>
           <p class="login-card-subtitle">
             Access the dashboard and continue managing inventory.
@@ -80,7 +85,7 @@ async function handleLogin() {
 
           <!-- Error Alert Banner -->
           <div v-if="errorMessage" class="login-error-banner">
-            <span>⚠️ {{ errorMessage }}</span>
+            <span><AlertTriangle :size="15" /> {{ errorMessage }}</span>
           </div>
 
           <form class="login-form-body" @submit.prevent="handleLogin">
@@ -188,9 +193,9 @@ async function handleLogin() {
       :title="`Theme: ${themeStore.current}. Click to change.`"
       aria-label="Switch color theme"
     >
-      <span v-if="themeStore.current === 'bsu'">🏛️</span>
-      <span v-else-if="themeStore.current === 'dark'">🌙</span>
-      <span v-else>☀️</span>
+      <Palette v-if="themeStore.current === 'bsu'" :size="18" />
+      <Moon v-else-if="themeStore.current === 'dark'" :size="18" />
+      <Sun v-else :size="18" />
     </button>
 
     <!-- Modal for Create Account Info -->

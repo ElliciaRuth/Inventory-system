@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { Clock, UserCheck, Users, AlertTriangle } from 'lucide-vue-next'
 import { settingsApi } from '../api/settings'
 import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
@@ -165,7 +166,7 @@ onMounted(load)
       <!-- Expiry thresholds (managers) -->
       <section v-if="authStore.levelId >= 3" class="panel settings-section">
         <button type="button" class="section-toggle" @click="toggle('thresholds')">
-          <span>⏳ Expiry Alert Defaults</span><span>{{ openSection === 'thresholds' ? '▴' : '▾' }}</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px;"><Clock :size="16" /> Expiry Alert Defaults</span><span>{{ openSection === 'thresholds' ? '▴' : '▾' }}</span>
         </button>
         <form v-if="openSection === 'thresholds'" class="section-body" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="saveThresholds">
           <div class="form-group" style="margin: 0;">
@@ -183,7 +184,7 @@ onMounted(load)
       <!-- Pending applicants (managers) -->
       <section v-if="data.pendingUsers.length" class="panel settings-section" style="border: 1px solid var(--color-warning);">
         <button type="button" class="section-toggle" @click="toggle('pending')">
-          <span>🕒 Pending Applicants ({{ data.pendingUsers.length }})</span><span>{{ openSection === 'pending' ? '▴' : '▾' }}</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px;"><UserCheck :size="16" /> Pending Applicants ({{ data.pendingUsers.length }})</span><span>{{ openSection === 'pending' ? '▴' : '▾' }}</span>
         </button>
         <div v-if="openSection === 'pending'" class="table-responsive">
           <table class="data-table">
@@ -207,7 +208,7 @@ onMounted(load)
       <!-- Users (managers) -->
       <section v-if="data.definitions.users" class="panel settings-section">
         <button type="button" class="section-toggle" @click="toggle('users')">
-          <span>👥 Users</span><span>{{ openSection === 'users' ? '▴' : '▾' }}</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px;"><Users :size="16" /> Users</span><span>{{ openSection === 'users' ? '▴' : '▾' }}</span>
         </button>
         <div v-if="openSection === 'users'" class="section-body">
           <input v-model="searches.users" type="text" class="form-input" placeholder="Search users…" style="max-width: 320px; margin-bottom: 1rem;" />
@@ -227,8 +228,8 @@ onMounted(load)
                     <td><span class="badge" :class="activityId === 1 ? 'badge-success' : 'badge-danger'">{{ u.activity_status }}</span></td>
                     <td style="text-align: right; white-space: nowrap;">
                       <button type="button" class="btn btn-sm btn-secondary" @click="openModal('users', u)">Edit</button>
-                      <button v-if="activityId === 1" type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem; color: var(--color-danger);" :disabled="!!busy" @click="deactivate(u)">Deactivate</button>
-                      <button v-else type="button" class="btn btn-sm btn-primary" style="margin-left: 0.4rem;" :disabled="!!busy" @click="activate(u)">Activate</button>
+                      <button v-if="activityId === 1 && Number(u.level_id) !== 4" type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem; color: var(--color-danger);" :disabled="!!busy" @click="deactivate(u)">Deactivate</button>
+                      <button v-else-if="activityId !== 1" type="button" class="btn btn-sm btn-primary" style="margin-left: 0.4rem;" :disabled="!!busy" @click="activate(u)">Activate</button>
                     </td>
                   </tr>
                 </tbody>
@@ -280,7 +281,10 @@ onMounted(load)
           <button type="button" class="btn btn-sm btn-secondary" @click="modal.open = false">✕</button>
         </div>
         <form class="modal-body" @submit.prevent="saveModal">
-          <div v-if="modal.error" class="badge badge-danger" style="display: flex; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">⚠️ {{ modal.error }}</div>
+          <div v-if="modal.error" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
+            <AlertTriangle :size="16" style="flex-shrink: 0;" />
+            <span>{{ modal.error }}</span>
+          </div>
           <div v-for="field in data.definitions[modal.type].fields" :key="field" class="form-group">
             <template v-if="field === 'lvl_of_access_id'">
               <label class="form-label">Level of Access</label>

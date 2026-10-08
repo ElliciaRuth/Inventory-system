@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { Download, ArrowLeftRight, Pencil } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import StockModal from '../components/StockModal.vue'
@@ -123,14 +124,16 @@ onMounted(() => {
           class="btn btn-secondary"
           title="Export formatted stock card as PDF or Word"
         >
-          <span>📥</span> Export Stock Card
+          <Download :size="15" />
+          <span>Export Stock Card</span>
         </router-link>
         <button
           type="button"
           class="btn btn-primary"
           @click="isStockModalOpen = true"
         >
-          <span>⇄</span> Record Stock In / Out
+          <ArrowLeftRight :size="15" />
+          <span>Record Stock In / Out</span>
         </button>
       </div>
     </div>
@@ -266,11 +269,12 @@ onMounted(() => {
                 <button
                   type="button"
                   class="btn btn-sm btn-secondary"
-                  style="padding: 4px 10px; font-size: 12px; gap: 4px;"
+                  style="padding: 4px 10px; font-size: 12px; gap: 5px;"
                   title="Edit or correct this transaction entry"
                   @click="openEditModal(entry)"
                 >
-                  <span>✏️</span> Edit
+                  <Pencil :size="13" />
+                  <span>Edit</span>
                 </button>
               </td>
             </tr>

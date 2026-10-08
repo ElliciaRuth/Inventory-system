@@ -60,6 +60,7 @@ class AuthController extends BaseApiController
         $sessionData = [
             'id'             => (int) $user['user_id'],
             'username'       => $user['username'],
+            'name'           => $user['name'] ?? $user['username'],
             'email'          => $user['email'] ?? '',
             'role'           => $user['role'] ?? '',
             'level_id'       => $levelId,
@@ -88,8 +89,8 @@ class AuthController extends BaseApiController
      */
     public function me(): ResponseInterface
     {
-        $user = session('user');
-        if (! $user) {
+        $sessionUser = session('user');
+        if (! $sessionUser) {
             return $this->respondSuccess([
                 'authenticated' => false,
                 'user'          => null,
@@ -97,9 +98,32 @@ class AuthController extends BaseApiController
             ], 'Not authenticated');
         }
 
+        $userId    = (int) ($sessionUser['id'] ?? 0);
+        $userModel = new UserModel();
+        $dbUser    = $userModel->find($userId);
+        if ($dbUser) {
+            $officeRow  = db_connect()->table('user_office_table')->where('user_office_id', (int) ($dbUser['user_office_id'] ?? 0))->get(1)->getRowArray();
+            $officeName = $officeRow['user_office_name'] ?? 'General Office';
+            $levelRow   = db_connect()->table('level_of_access')->where('lvl_of_access_id', (int) ($dbUser['lvl_of_access_id'] ?? 0))->get(1)->getRowArray();
+            $role       = $levelRow['role'] ?? ($sessionUser['role'] ?? 'Staff');
+            $levelId    = (int) ($levelRow['lvl_of_access'] ?? ($sessionUser['level_id'] ?? 1));
+
+            $sessionUser = [
+                'id'             => $userId,
+                'username'       => $dbUser['username'],
+                'name'           => $dbUser['name'] ?? $dbUser['username'],
+                'email'          => $dbUser['email'] ?? '',
+                'role'           => $role,
+                'level_id'       => $levelId,
+                'user_office_id' => (int) ($dbUser['user_office_id'] ?? 0),
+                'office_name'    => $officeName,
+            ];
+            session()->set('user', $sessionUser);
+        }
+
         return $this->respondSuccess([
             'authenticated' => true,
-            'user'          => $user,
+            'user'          => $sessionUser,
             'pending_setup' => $this->pendingSetup(),
         ], 'User profile retrieved');
     }
@@ -264,6 +288,119 @@ class AuthController extends BaseApiController
         }
 
         return $this->respondSuccess(['pending_setup' => $this->pendingSetup()], 'Password changed successfully.');
+    }
+
+    /**
+     * Update user profile information (name, username, email, and optional password).
+     * POST /api/auth/update-profile
+     */
+    public function updateProfile(): ResponseInterface
+    {
+        $userId    = $this->currentUserId();
+        $userModel = new UserModel();
+        $user      = $userModel->find($userId);
+
+        if (! $user) {
+            return $this->respondError('User account not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+
+        $input    = $this->input();
+        $name     = trim((string) ($input['name'] ?? ''));
+        $username = trim((string) ($input['username'] ?? ''));
+        $email    = trim((string) ($input['email'] ?? ''));
+
+        $rules = [
+            'name'     => 'permit_empty|max_length[255]',
+            'username' => 'required|min_length[3]|max_length[100]',
+            'email'    => 'permit_empty|valid_email|max_length[255]',
+        ];
+
+        if (! $this->validateData($input, $rules)) {
+            $errors = $this->validator->getErrors();
+            return $this->respondError(implode(' ', $errors), $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Check username uniqueness if changed
+        if ($username !== $user['username']) {
+            $exists = $userModel->where('username', $username)->where('user_id !=', $userId)->first();
+            if ($exists) {
+                return $this->respondError('The username is already taken by another account.', [
+                    'username' => 'Username is already taken.'
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+        }
+
+        // Check email uniqueness if changed and provided
+        if ($email !== '' && $email !== ($user['email'] ?? '')) {
+            $exists = $userModel->where('email', $email)->where('user_id !=', $userId)->first();
+            if ($exists) {
+                return $this->respondError('The email is already registered to another account.', [
+                    'email' => 'Email is already registered.'
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+        }
+
+        $updateData = [
+            'name'     => $name !== '' ? $name : $username,
+            'username' => $username,
+            'email'    => $email,
+        ];
+
+        // Optional password change within profile
+        $newPassword     = (string) ($input['password'] ?? '');
+        $currentPassword = (string) ($input['current_password'] ?? '');
+        $confirmPassword = (string) ($input['confirm_password'] ?? '');
+
+        if ($newPassword !== '') {
+            $storedPassword = (string) ($user['password'] ?? '');
+            if ($currentPassword === '' || ! $this->passwordMatches($currentPassword, $storedPassword)) {
+                return $this->respondError('Your current password is incorrect.', [
+                    'current_password' => 'Incorrect current password.'
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            if ($newPassword !== $confirmPassword) {
+                return $this->respondError('New password and confirm password do not match.', [
+                    'confirm_password' => 'Passwords do not match.'
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            if ($error = $this->passwordStrengthError($newPassword)) {
+                return $this->respondError($error, [
+                    'password' => $error
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $updateData['password']             = password_hash($newPassword, PASSWORD_DEFAULT);
+            $updateData['must_change_password'] = 0;
+            session()->remove('must_change_password');
+        }
+
+        $userModel->update($userId, $updateData);
+
+        // Fetch refreshed office & role
+        $officeRow  = db_connect()->table('user_office_table')->where('user_office_id', (int) ($user['user_office_id'] ?? 0))->get(1)->getRowArray();
+        $officeName = $officeRow['user_office_name'] ?? 'General Office';
+        $levelRow   = db_connect()->table('level_of_access')->where('lvl_of_access_id', (int) ($user['lvl_of_access_id'] ?? 0))->get(1)->getRowArray();
+        $role       = $levelRow['role'] ?? 'Staff';
+        $levelId    = (int) ($levelRow['lvl_of_access'] ?? 1);
+
+        $sessionData = [
+            'id'             => $userId,
+            'username'       => $username,
+            'name'           => $updateData['name'],
+            'email'          => $email,
+            'role'           => $role,
+            'level_id'       => $levelId,
+            'user_office_id' => (int) ($user['user_office_id'] ?? 0),
+            'office_name'    => $officeName,
+        ];
+        session()->set('user', $sessionData);
+
+        $msg = $newPassword !== '' ? 'Profile and password updated successfully.' : 'Profile information updated successfully.';
+        return $this->respondSuccess([
+            'user' => $sessionData,
+        ], $msg);
     }
 
     // ════════════════════════════════════════════════════════════════

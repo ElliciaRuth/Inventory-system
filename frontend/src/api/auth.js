@@ -36,6 +36,11 @@ export const authApi = {
     return response.data
   },
 
+  async updateProfile(payload) {
+    const response = await client.post('/auth/update-profile', payload)
+    return response.data
+  },
+
   async setupSmtp(smtpEmail, smtpPassword) {
     const response = await client.post('/auth/setup-smtp', {
       smtp_email: smtpEmail,

@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import ProductModal from '../components/ProductModal.vue'
 import AppPagination from '../components/AppPagination.vue'
+import { Pencil, Trash2 } from 'lucide-vue-next'
 
 const authStore = useAuthStore()
 const products = ref([])
@@ -207,7 +208,7 @@ onMounted(() => {
                     title="Edit Product"
                     @click="openEditModal(p)"
                   >
-                    ✏️ Edit
+                    <Pencil :size="13" /> Edit
                   </button>
                   <button
                     type="button"
@@ -216,7 +217,7 @@ onMounted(() => {
                     @click="handleDelete(p)"
                     style="color: var(--color-danger);"
                   >
-                    🗑️
+                    <Trash2 :size="14" />
                   </button>
                 </div>
               </td>

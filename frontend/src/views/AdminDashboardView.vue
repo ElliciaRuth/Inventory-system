@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
+import { Users, Clock, Building2, Trash2, Pencil, Check } from 'lucide-vue-next'
 import { adminApi } from '../api/admin'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
@@ -239,7 +240,7 @@ onMounted(() => {
         :value="adminData.records.users.length"
         hint="Registered accounts across all offices"
         variant="primary"
-        icon="👥"
+        :icon="Users"
         :active="activeSection === 'users'"
         @click="activeSection = 'users'"
       />
@@ -249,7 +250,7 @@ onMounted(() => {
         :value="adminData.pendingUsers.length"
         :hint="adminData.pendingUsers.length > 0 ? 'Urgent approvals required' : 'No pending applicants'"
         variant="warning"
-        icon="⏳"
+        :icon="Clock"
         :active="activeSection === 'pending'"
         @click="activeSection = 'pending'"
       />
@@ -259,7 +260,7 @@ onMounted(() => {
         :value="adminData.records.user_office_table.length"
         hint="Designated campus divisions & centers"
         variant="info"
-        icon="🏢"
+        :icon="Building2"
         :active="activeSection === 'offices'"
         @click="activeSection = 'offices'"
       />
@@ -297,10 +298,11 @@ onMounted(() => {
                 <button
                   type="button"
                   class="btn btn-sm btn-primary"
-                  style="background: var(--color-success); border-color: var(--color-success);"
+                  style="background: var(--color-success); border-color: var(--color-success); display: inline-flex; align-items: center; gap: 4px;"
                   @click="handleActivateUser(pUser.user_id)"
                 >
-                  ✓ Activate
+                  <Check :size="14" />
+                  <span>Activate</span>
                 </button>
               </td>
             </tr>
@@ -320,18 +322,22 @@ onMounted(() => {
         type="button"
         class="btn btn-sm"
         :class="activeSection === 'users' ? 'btn-primary' : 'btn-secondary'"
+        style="display: inline-flex; align-items: center; gap: 6px;"
         @click="activeSection = 'users'"
       >
-        👥 Users Directory ({{ adminData.records.users.length }})
+        <Users :size="15" />
+        <span>Users Directory ({{ adminData.records.users.length }})</span>
       </button>
 
       <button
         type="button"
         class="btn btn-sm"
         :class="activeSection === 'offices' ? 'btn-primary' : 'btn-secondary'"
+        style="display: inline-flex; align-items: center; gap: 6px;"
         @click="activeSection = 'offices'"
       >
-        🏢 User Offices ({{ adminData.records.user_office_table.length }})
+        <Building2 :size="15" />
+        <span>User Offices ({{ adminData.records.user_office_table.length }})</span>
       </button>
     </div>
 
@@ -380,7 +386,9 @@ onMounted(() => {
                 </span>
               </td>
               <td style="text-align: center;">
-                <div style="display: inline-flex; gap: 0.35rem;">
+                <!-- Admin account (Technical Staff) is protected: no deactivate / delete -->
+                <span v-if="Number(user.level_id) === 4" style="font-size: 0.8rem; color: var(--text-muted);">Protected</span>
+                <div v-else style="display: inline-flex; gap: 0.35rem;">
                   <!-- Deactivate Button (if Active) -->
                   <button
                     v-if="user.activity_status === 'Active'"
@@ -408,11 +416,11 @@ onMounted(() => {
                   <button
                     type="button"
                     class="btn btn-sm btn-secondary"
-                    style="color: var(--color-danger);"
+                    style="color: var(--color-danger); display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;"
                     title="Delete User"
                     @click="handleDeleteRecord('users', user.user_id, user.username)"
                   >
-                    🗑️
+                    <Trash2 :size="14" />
                   </button>
                 </div>
               </td>
@@ -479,17 +487,19 @@ onMounted(() => {
               <td style="font-family: var(--font-mono); color: var(--text-muted);">#{{ office.user_office_id }}</td>
               <td><strong>{{ office.user_office_name }}</strong></td>
               <td style="text-align: center;">
-                <div style="display: inline-flex; gap: 0.4rem;">
-                  <button type="button" class="btn btn-sm btn-secondary" @click="openEditOfficeModal(office)">
-                    ✏️ Edit
+                <div style="display: inline-flex; gap: 0.4rem; align-items: center;">
+                  <button type="button" class="btn btn-sm btn-secondary" style="display: inline-flex; align-items: center; gap: 4px;" @click="openEditOfficeModal(office)">
+                    <Pencil :size="13" />
+                    <span>Edit</span>
                   </button>
                   <button
                     type="button"
                     class="btn btn-sm btn-secondary"
-                    style="color: var(--color-danger);"
+                    style="color: var(--color-danger); display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;"
+                    title="Delete Office"
                     @click="handleDeleteRecord('user_office_table', office.user_office_id, office.user_office_name)"
                   >
-                    🗑️
+                    <Trash2 :size="14" />
                   </button>
                 </div>
               </td>

@@ -2,6 +2,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { exportApi, triggerBlobDownload } from '../api/export'
+import {
+  BarChart3, ArrowLeft, AlertTriangle, CheckCircle2, Filter, Package, CalendarDays, Settings,
+  FileText, File, ArrowUpDown, ArrowUpNarrowWide, ArrowDownWideNarrow, ClipboardList, FilePen, Info, ArrowRight,
+} from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -190,7 +194,7 @@ onMounted(() => {
     <div class="page-hero">
       <div>
         <p class="hero-eyebrow">
-          <span>📊</span> Reports & Audit
+          <BarChart3 :size="14" /> Reports & Audit
         </p>
         <h1 class="hero-title">Export Stock Card</h1>
         <p class="hero-subtitle">
@@ -200,18 +204,18 @@ onMounted(() => {
 
       <div>
         <router-link to="/stockcard" class="btn btn-secondary">
-          <span>←</span> Back to Stockcard Ledger
+          <ArrowLeft :size="15" /> Back to Stockcard Ledger
         </router-link>
       </div>
     </div>
 
     <!-- Alert / Flash Messages -->
     <div v-if="errorMessage" class="login-error-banner" style="margin-bottom: 24px;">
-      ⚠️ {{ errorMessage }}
+      <AlertTriangle :size="16" /> {{ errorMessage }}
     </div>
 
     <div v-if="successMessage" class="login-success-banner" style="margin-bottom: 24px;">
-      ✅ {{ successMessage }}
+      <CheckCircle2 :size="16" /> {{ successMessage }}
     </div>
 
     <!-- Main Two-Column Export Layout -->
@@ -222,7 +226,7 @@ onMounted(() => {
         <div class="panel ex-panel">
           <div class="panel-header ex-panel-header">
             <div class="ex-header-title-wrap">
-              <span class="ex-panel-icon">🔍</span>
+              <span class="ex-panel-icon"><Filter :size="20" /></span>
               <div>
                 <h2 class="ex-panel-title">Filter Selection</h2>
                 <p class="ex-panel-sub">Choose product scope and date range for the stock card ledger</p>
@@ -234,7 +238,7 @@ onMounted(() => {
             <!-- Product Field -->
             <div class="form-group">
               <label class="form-label ex-field-label" for="export_product">
-                <span class="ex-label-icon">📦</span> Target Product
+                <Package :size="15" class="ex-label-icon" /> Target Product
               </label>
               <select
                 id="export_product"
@@ -260,7 +264,7 @@ onMounted(() => {
             <div class="ex-two-col">
               <div class="form-group">
                 <label class="form-label ex-field-label" for="month_from">
-                  <span class="ex-label-icon">📅</span> From Month
+                  <CalendarDays :size="15" class="ex-label-icon" /> From Month
                 </label>
                 <input
                   id="month_from"
@@ -273,7 +277,7 @@ onMounted(() => {
 
               <div class="form-group">
                 <label class="form-label ex-field-label" for="month_to">
-                  <span class="ex-label-icon">📅</span> To Month
+                  <CalendarDays :size="15" class="ex-label-icon" /> To Month
                 </label>
                 <input
                   id="month_to"
@@ -317,7 +321,7 @@ onMounted(() => {
         <div class="panel ex-panel">
           <div class="panel-header ex-panel-header">
             <div class="ex-header-title-wrap">
-              <span class="ex-panel-icon">⚙️</span>
+              <span class="ex-panel-icon"><Settings :size="20" /></span>
               <div>
                 <h2 class="ex-panel-title">Output Options</h2>
                 <p class="ex-panel-sub">Configure document sheet size and chronological order</p>
@@ -330,7 +334,7 @@ onMounted(() => {
               <!-- Paper Size Selection -->
               <div class="form-group">
                 <label class="form-label ex-field-label">
-                  <span class="ex-label-icon">📄</span> Paper Size
+                  <FileText :size="15" class="ex-label-icon" /> Paper Size
                 </label>
                 <div class="ex-card-radio-group">
                   <label
@@ -344,7 +348,7 @@ onMounted(() => {
                       value="long"
                     />
                     <div class="ex-card-radio-body">
-                      <span class="ex-card-radio-icon">📄</span>
+                      <FileText :size="20" class="ex-card-radio-icon" />
                       <div class="ex-card-radio-text">
                         <strong>Long</strong>
                         <small>8.5″ × 13″ Folio</small>
@@ -363,7 +367,7 @@ onMounted(() => {
                       value="short"
                     />
                     <div class="ex-card-radio-body">
-                      <span class="ex-card-radio-icon">📃</span>
+                      <File :size="20" class="ex-card-radio-icon" />
                       <div class="ex-card-radio-text">
                         <strong>Short</strong>
                         <small>8.5″ × 11″ Letter</small>
@@ -376,7 +380,7 @@ onMounted(() => {
               <!-- Date Ordering Selection -->
               <div class="form-group">
                 <label class="form-label ex-field-label">
-                  <span class="ex-label-icon">↕️</span> Date Order
+                  <ArrowUpDown :size="15" class="ex-label-icon" /> Date Order
                 </label>
                 <div class="ex-card-radio-group">
                   <label
@@ -390,7 +394,7 @@ onMounted(() => {
                       value="ASC"
                     />
                     <div class="ex-card-radio-body">
-                      <span class="ex-card-radio-icon">⬆️</span>
+                      <ArrowUpNarrowWide :size="20" class="ex-card-radio-icon" />
                       <div class="ex-card-radio-text">
                         <strong>Ascending</strong>
                         <small>Oldest first (Ledger flow)</small>
@@ -409,7 +413,7 @@ onMounted(() => {
                       value="DESC"
                     />
                     <div class="ex-card-radio-body">
-                      <span class="ex-card-radio-icon">⬇️</span>
+                      <ArrowDownWideNarrow :size="20" class="ex-card-radio-icon" />
                       <div class="ex-card-radio-text">
                         <strong>Descending</strong>
                         <small>Newest first</small>
@@ -428,7 +432,7 @@ onMounted(() => {
         <!-- Live Preview Summary Card -->
         <div class="ex-preview-card">
           <div class="ex-preview-header">
-            <span>📋</span>
+            <ClipboardList :size="17" />
             <span>Export Summary</span>
           </div>
           <div class="ex-preview-body">
@@ -471,13 +475,13 @@ onMounted(() => {
           >
             <span class="ex-dl-icon">
               <span v-if="isDownloadingPdf" class="spinner"></span>
-              <span v-else>📄</span>
+              <FileText v-else :size="24" />
             </span>
             <span class="ex-dl-info">
               <strong>PDF Document</strong>
               <small>{{ isDownloadingPdf ? 'Generating PDF...' : 'Print-ready Appendix 58' }}</small>
             </span>
-            <span class="ex-dl-arrow">→</span>
+            <ArrowRight :size="18" class="ex-dl-arrow" />
           </button>
 
           <!-- Word Button -->
@@ -489,20 +493,20 @@ onMounted(() => {
           >
             <span class="ex-dl-icon">
               <span v-if="isDownloadingWord" class="spinner"></span>
-              <span v-else>📝</span>
+              <FilePen v-else :size="24" />
             </span>
             <span class="ex-dl-info">
               <strong>Word Document</strong>
               <small>{{ isDownloadingWord ? 'Generating Word...' : 'Editable .doc with tables' }}</small>
             </span>
-            <span class="ex-dl-arrow">→</span>
+            <ArrowRight :size="18" class="ex-dl-arrow" />
           </button>
         </div>
 
         <!-- Document Info Note -->
         <div class="ex-info-note">
           <p>
-            ℹ️ <strong>Official Perpetual Record</strong>: The generated Stock Card adheres to government audit standards with automatic pagination, opening balances, verified references, and office transaction logs.
+            <Info :size="15" class="ex-info-icon" /> <strong>Official Perpetual Record</strong>: The generated Stock Card adheres to government audit standards with automatic pagination, opening balances, verified references, and office transaction logs.
           </p>
         </div>
       </div>
@@ -555,8 +559,15 @@ onMounted(() => {
 }
 
 .ex-panel-icon {
-  font-size: 1.4rem;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  flex-shrink: 0;
 }
 
 .ex-panel-title {
@@ -591,7 +602,14 @@ onMounted(() => {
 }
 
 .ex-label-icon {
-  font-size: 14px;
+  color: var(--color-primary);
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+
+.ex-info-icon {
+  color: var(--color-info);
+  vertical-align: -3px;
 }
 
 .ex-two-col {
@@ -668,7 +686,8 @@ onMounted(() => {
 }
 
 .ex-card-radio-icon {
-  font-size: 1.25rem;
+  color: var(--color-primary);
+  flex-shrink: 0;
 }
 
 .ex-card-radio-text {

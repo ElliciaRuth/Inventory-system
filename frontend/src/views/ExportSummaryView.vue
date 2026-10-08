@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { exportApi, triggerBlobDownload } from '../api/export'
 import { toast, errorMessage } from '../composables/useToast'
+import { FileText, FilePen, FileSpreadsheet, ArrowLeft, AlertTriangle } from 'lucide-vue-next'
 
 const thisMonth = new Date().toISOString().slice(0, 7)
 
@@ -11,9 +12,9 @@ const downloading = ref('')
 const formError = ref('')
 
 const FORMATS = [
-  ['pdf', '📄 Download PDF', 'pdf'],
-  ['word', '📝 Download Word', 'doc'],
-  ['csv', '📊 Download CSV', 'csv'],
+  ['pdf', 'Download PDF', 'pdf', FileText],
+  ['word', 'Download Word', 'doc', FilePen],
+  ['csv', 'Download CSV', 'csv', FileSpreadsheet],
 ]
 
 async function loadOptions() {
@@ -62,11 +63,11 @@ onMounted(loadOptions)
         <h1 class="hero-title">Export Summary Report</h1>
         <p class="hero-subtitle">Download the monthly inventory summary (beginning, purchase, used, spoiled, ending) for a range of months.</p>
       </div>
-      <router-link to="/reports/summary" class="btn btn-secondary">← Back to Report</router-link>
+      <router-link to="/reports/summary" class="btn btn-secondary"><ArrowLeft :size="15" /> Back to Report</router-link>
     </div>
 
     <section class="panel" style="padding: 1.5rem; max-width: 760px;">
-      <div v-if="formError" class="badge badge-danger" style="display: flex; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">⚠️ {{ formError }}</div>
+      <div v-if="formError" class="badge badge-danger" style="display: flex; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;"><AlertTriangle :size="15" /> {{ formError }}</div>
 
       <div class="form-grid-2">
         <div class="form-group">
@@ -98,7 +99,7 @@ onMounted(loadOptions)
 
       <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;">
         <button
-          v-for="[format, label, ext] in FORMATS"
+          v-for="[format, label, ext, icon] in FORMATS"
           :key="format"
           type="button"
           class="btn"
@@ -106,6 +107,7 @@ onMounted(loadOptions)
           :disabled="!!downloading"
           @click="download(format, ext)"
         >
+          <component :is="icon" :size="15" />
           {{ downloading === format ? 'Generating…' : label }}
         </button>
       </div>

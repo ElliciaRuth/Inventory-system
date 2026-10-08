@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useThemeStore } from '../stores/themeStore'
+import AuthLogoHeader from '../components/AuthLogoHeader.vue'
+import { AlertTriangle, CheckCircle2, Palette, Moon, Sun } from 'lucide-vue-next'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -172,6 +174,9 @@ onMounted(() => {
       <!-- Right Registration Form Card -->
       <section class="login-card">
         <div class="login-card-content">
+          <!-- Institution & Department Branding Logos -->
+          <AuthLogoHeader />
+
           <h2 class="login-card-title">Create Account</h2>
           <p class="login-card-subtitle">
             Create a new user. Your account will be pending until an admin activates it.
@@ -179,12 +184,12 @@ onMounted(() => {
 
           <!-- Error Alert Banner -->
           <div v-if="errorMessage" class="login-error-banner">
-            <span>⚠️ {{ errorMessage }}</span>
+            <span><AlertTriangle :size="15" /> {{ errorMessage }}</span>
           </div>
 
           <!-- Success Alert Banner -->
           <div v-if="successMessage" class="login-success-banner">
-            <div>✅ {{ successMessage }}</div>
+            <div><CheckCircle2 :size="15" /> {{ successMessage }}</div>
             <div style="font-size: 12.5px; opacity: 0.9; font-weight: 500;">
               Redirecting to login page in a few moments...
             </div>
@@ -450,9 +455,9 @@ onMounted(() => {
       :title="`Theme: ${themeStore.current}. Click to change.`"
       aria-label="Switch color theme"
     >
-      <span v-if="themeStore.current === 'bsu'">🏛️</span>
-      <span v-else-if="themeStore.current === 'dark'">🌙</span>
-      <span v-else>☀️</span>
+      <Palette v-if="themeStore.current === 'bsu'" :size="18" />
+      <Moon v-else-if="themeStore.current === 'dark'" :size="18" />
+      <Sun v-else :size="18" />
     </button>
   </div>
 </template>

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { Database, Upload, FolderOpen, Download, RotateCcw } from 'lucide-vue-next'
 import { backupsApi } from '../api/backups'
 import { triggerBlobDownload } from '../api/export'
 import { useAuthStore } from '../stores/authStore'
@@ -96,7 +97,10 @@ onMounted(load)
   <section class="panel" style="margin-bottom: 1.5rem;">
     <div class="panel-header">
       <div class="panel-title-group">
-        <h2 class="panel-title">💾 Data Backup &amp; Restore</h2>
+        <h2 class="panel-title" style="display: flex; align-items: center; gap: 8px;">
+          <Database :size="18" style="color: var(--color-primary);" />
+          <span>Data Backup &amp; Restore</span>
+        </h2>
         <p class="panel-subtitle">Backups cover your office's records. Automatic backups run after login when one is due.</p>
       </div>
     </div>
@@ -128,12 +132,14 @@ onMounted(load)
       </form>
 
       <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
-        <button type="button" class="btn btn-primary" :disabled="!!busy" @click="backupNow">
-          {{ busy === 'backup' ? 'Backing up…' : '⬆ Backup Now' }}
+        <button type="button" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px;" :disabled="!!busy" @click="backupNow">
+          <Upload :size="15" />
+          <span>{{ busy === 'backup' ? 'Backing up…' : 'Backup Now' }}</span>
         </button>
         <input ref="fileInput" type="file" accept=".sql" style="display: none;" @change="restoreFromFile" />
-        <button type="button" class="btn btn-secondary" :disabled="!!busy" @click="fileInput.click()">
-          📂 Restore from .sql File
+        <button type="button" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px;" :disabled="!!busy" @click="fileInput.click()">
+          <FolderOpen :size="15" />
+          <span>Restore from .sql File</span>
         </button>
       </div>
 
@@ -161,8 +167,14 @@ onMounted(load)
               <td>{{ b.office_name }}</td>
               <td>{{ b.created_by_name }}</td>
               <td style="text-align: right; white-space: nowrap;">
-                <button type="button" class="btn btn-sm btn-secondary" :disabled="!!busy" @click="download(b)">⬇ Download</button>
-                <button type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem;" :disabled="!!busy" @click="restore(b)">↺ Restore</button>
+                <button type="button" class="btn btn-sm btn-secondary" style="display: inline-flex; align-items: center; gap: 4px;" :disabled="!!busy" @click="download(b)">
+                  <Download :size="13" />
+                  <span>Download</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 4px;" :disabled="!!busy" @click="restore(b)">
+                  <RotateCcw :size="13" />
+                  <span>Restore</span>
+                </button>
               </td>
             </tr>
           </tbody>

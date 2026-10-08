@@ -8,6 +8,9 @@ backend/      CodeIgniter 4 JSON API: every route is under /api, no HTML pages
 frontend/     Vue 3 + Vite single-page app that calls the API
 docker/       Files for running everything on one PC with Docker
 docker-compose.yml
+setup.bat     Windows: double-click to set up and start without Docker (runs setup.ps1)
+setup.ps1     Windows setup script (XAMPP / PHP / Composer / Node)
+setup.sh      Linux / macOS / WSL setup script
 ```
 
 ## Contents
@@ -28,14 +31,40 @@ docker-compose.yml
 | **Staff** (1) | Dashboard, Items (read-only product list), **Stock Out** (request items by search or barcode scan, then submit "My List" for approval), Transactions, Notifications |
 | **Custodian** (2) | Everything above, plus: **Stock** (Stockcard, record stock in / issue / borrow / return / spoiled, Export Stockcard), **Products** (Product List, Finished Product Barcodes, Batch Barcodes, Summary Report, Export Summary), **Requests** (approve, edit or reject staff stock-out requests), **Settings** (units, references, entities, offices, product types, backups) |
 | **Manager** (3) | Everything a custodian can do, plus user management (activate, deactivate, edit), pending applicants, expiry-alert defaults and backup schedule |
-| **Technical Staff** (4) | User Management (all users and user offices) and Notifications. No inventory pages. |
+| **Technical Staff** (4) | User Management (all users and user offices) and Edit Profile. No inventory pages and no notifications; the **Menu** only shows the account card (profile, theme, sign out). |
 
 Anyone can register an account from the login page; a manager or technical staff member has
-to activate it before it can log in. Every user can change their password by clicking their
-name in the menu. "Forgot Password?" on the login page emails a 6-digit reset code once the
-technical staff account has set up the email sender.
+to activate it before it can log in. Every user can update their name, email and password on
+**Edit Profile** (Menu → Edit Profile, or click the account card). "Forgot Password?" on the
+login page emails a 6-digit reset code once the technical staff account has set up the email
+sender.
+
+Technical Staff accounts are the system admin accounts: they **cannot be deactivated or
+deleted** from User Management or Settings, and the API refuses those requests too.
 
 ## What changed in this version
+
+### Latest update
+
+- **Edit Profile page** (`/profile`) for every user: name, email and password in one place.
+  It replaces the old Change Password page; `/change-password` and `/edit-profile` redirect there.
+- **Admin accounts are protected:** Technical Staff accounts can no longer be deactivated or
+  deleted (buttons hidden, and blocked by the API).
+- **Admin view simplified:** no notification bell, and the Menu only shows the account card.
+- **Batch Barcodes** now has the same pagination bar as the other tables.
+- **Look and feel:** one consistent set of line icons across all pages (the same ones as the
+  Menu) instead of emoji; the BSU, Bakery and FPC logos use transparent PNGs without white
+  frames; a subtle themed background pattern behind the pages.
+- **Menu** closes when you click anywhere outside it.
+- **Setup without Docker:** `setup.bat` / `setup.ps1` (Windows + XAMPP) and `setup.sh`
+  (Linux / macOS / WSL). See [Option B](#option-b-without-docker-xampp-or-local-php--node).
+- **Demo accounts:** the seeder now creates one account per role and office (see
+  [Default accounts](#default-accounts)). Re-running the seeder is safe; it only adds missing
+  starting data.
+- **Cleanup:** removed unused files (old item models for tables that no longer exist,
+  CodeIgniter example tests, the old Change Password page, duplicate logo images).
+
+### Previous update
 
 - **Split into `backend/` and `frontend/`.** The CodeIgniter server-rendered pages were removed.
   CodeIgniter is now only a JSON API, and the whole user interface is the Vue app.
@@ -60,6 +89,13 @@ The local PC runs the database, the API and the web page. Other computers, table
 on the same network open it in a browser, so they only need Wi-Fi or LAN access to that PC,
 not internet access.
 
+There are two ways to run it:
+
+- **Option A: Docker** (recommended for the office PC). Steps 1–5 below.
+- **Option B: without Docker**, using XAMPP or a local PHP + Node install. Good for
+  development or a PC where Docker can't be installed. See
+  [Option B](#option-b-without-docker-xampp-or-local-php--node).
+
 ### 1. Install the requirements
 
 **Windows 10/11 (64-bit):**
@@ -83,9 +119,6 @@ git clone https://github.com/ElliciaRuth/Inventory-system.git
 cd Inventory-system
 ```
 
-If this version has not been merged into `master` yet, also run
-`git checkout feature/vue-legacy-pages`.
-
 ### 3. Start it
 
 ```bash
@@ -108,17 +141,58 @@ docker compose ps -a
 ### 4. Open it and finish the first-time setup
 
 1. On the same PC, open **<http://localhost:8080>**.
-2. Log in as **`admin_tech`**. Its temporary password is in
-   `backend/app/Database/Seeds/DatabaseSeeder.php`.
-3. You will be asked to:
-   - choose a new password;
-   - enter a Gmail address and an **app password** used to send password-reset codes
-     (Google account → Security → 2-Step Verification → App passwords);
-   - enter your own recovery email.
+2. Log in as **`admin_tech`** (password `admin123`, see [Default accounts](#default-accounts)).
+3. Open **Menu → Edit Profile** and change the password straight away. If you are asked to
+   set up email, enter a Gmail address and an **app password** used to send password-reset
+   codes (Google account → Security → 2-Step Verification → App passwords), and your own
+   recovery email.
 4. In **User Management**, check the user offices. *BAKERY* and *FPC* are created for
-   you; add any others. Then ask the other users to register from the login page (they pick
-   their office and role there) and activate them. Each office needs at least one
+   you; add any others. Change the passwords of the demo accounts you want to keep and
+   delete or deactivate the rest. Then ask the other users to register from the login page
+   (they pick their office and role there) and activate them. Each office needs at least one
    **Manager**, who can then activate and manage that office's users.
+
+### Default accounts
+
+On an empty database the seeder creates these accounts, all active:
+
+| Username | Password | Role | Office |
+|---|---|---|---|
+| `admin_tech`, `tech` | `admin123`, `Tech123` | Technical Staff | Global |
+| `manager`, `manager_bakery` / `manager_fpc` | `Manager123` | Manager | BAKERY / BAKERY / FPC |
+| `custodian`, `custodian_bakery` / `custodian_fpc` | `Custodian123` | Custodian | FPC / BAKERY / FPC |
+| `staff`, `staff_bakery` / `staff_fpc` | `Staff123` | Staff | BAKERY / BAKERY / FPC |
+
+> **These passwords are public (they are in this README and in
+> `backend/app/Database/Seeds/DatabaseSeeder.php`).** Change them, or delete the accounts you
+> don't need, before real data goes into the system. Running `php spark db:seed DatabaseSeeder`
+> by hand **resets these accounts to the passwords above**; the Docker and setup scripts only
+> seed an empty database.
+
+### Option B: without Docker (XAMPP or local PHP + Node)
+
+**Windows:** install [XAMPP](https://www.apachefriends.org/) with PHP 8.2+ (in `C:\xampp`),
+[Composer](https://getcomposer.org/) and [Node.js 22](https://nodejs.org/). Then double-click
+**`setup.bat`** in the project folder. It:
+
+1. checks for PHP, Composer, Node/npm and XAMPP (and uses XAMPP's PHP if it isn't on `PATH`);
+2. starts MySQL (and Apache) from XAMPP if they aren't running;
+3. creates `backend/.env` for XAMPP (`root` user, no password, database `inventory_system`)
+   if it doesn't exist, and generates the encryption key;
+4. installs the PHP and npm packages, runs the database migrations, and seeds an empty
+   database;
+5. starts the API on <http://localhost:8080> and the web app on <http://localhost:5173>,
+   and opens the browser.
+
+Options (run `setup.ps1` from PowerShell): `-InstallOnly` (set up without starting servers),
+`-SkipBrowser`, `-BackendPort 8080`, `-FrontendPort 5173`, `-HostAddress 0.0.0.0`.
+
+**Linux / macOS / WSL:** install PHP 8.2+ (with `mysqli`, `intl`, `mbstring`), Composer,
+Node 22 and MySQL/MariaDB, then run `./setup.sh`. It does the same steps and serves the app on
+<http://localhost:5173>.
+
+This mode runs the development servers, so keep the window open while the system is in use.
+For an always-on office PC, use Docker (Option A).
 
 ### 5. Let other computers, tablets and phones connect
 
@@ -248,13 +322,13 @@ Authentication uses the CodeIgniter session cookie.
 | Area | Endpoints | Min level |
 |------|-----------|-----------|
 | Auth | `auth/login`, `auth/me`, `auth/logout`, `auth/register-options`, `auth/register`, `auth/forgot-password`, `auth/reset-password` | public |
-| Account | `auth/change-password` (needs `current_password` except on first login); `auth/setup-smtp`, `auth/setup-recovery-email` (level 4) | logged in |
+| Account | `auth/update-profile` (name, email; password change needs `current_password`), `auth/change-password` (needs `current_password` except on first login); `auth/setup-smtp`, `auth/setup-recovery-email` (level 4) | logged in |
 | Dashboard | `dashboard`, `transactions`, `notifications` | 1 |
 | Products | `GET products`, `products/meta`, `products/{id}` (1); `POST products`, `PUT/DELETE products/{id}`, `products/barcodes`, `products/barcodes/generate` (2) | 1 / 2 |
 | Stock | `stockcard`, `stock/options`, `stock/add`, `stock/edit-transaction`, `stock/delete-transaction`, `stock/edit-report-cost`; `stock/copies/{id}` (1) | 2 |
 | Reports & barcodes | `reports/batches`, `reports/batchlist`, `barcode/product/{id}`, `barcode/batch/{id}`; `barcode/lookup` (1) | 2 |
 | Exports | `export/stockcard(/options)`, `export/summary(/options)` | 2 |
-| Settings | `settings`, `settings/{type}`, `settings/{type}/{id}`, `settings/system` (save: 3), `settings/users/{id}/activate\|deactivate` (3) | 2 |
+| Settings | `settings`, `settings/{type}`, `settings/{type}/{id}`, `settings/system` (save: 3), `settings/users/{id}/activate\|deactivate` (3). Technical Staff accounts can't be deactivated or deleted (422). | 2 |
 | Backups | `backups`, `backups/run`, `backups/auto`, `backups/{id}/download`, `backups/restore`, `backups/config` (3) | 2 |
 | Stock-out | `stockout`, `stockout/temp`, `stockout/add-temp`, `stockout/edit-temp/{id}`, `stockout/remove-temp/{id}`, `stockout/submit` (1); `stockout/pending`, `approve-item`, `approve-all`, `reject-item`, `edit-pending` (2) | 1 / 2 |
 

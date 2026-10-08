@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { Download } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { toast, errorMessage } from '../composables/useToast'
 
@@ -63,7 +64,10 @@ onMounted(load)
         <h1 class="hero-title">Inventory Report</h1>
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
-      <router-link to="/export/summary" class="btn btn-secondary">📥 Export Summary</router-link>
+      <router-link to="/export/summary" class="btn btn-secondary">
+        <Download :size="15" />
+        <span>Export Summary</span>
+      </router-link>
     </div>
 
     <form class="panel" style="padding: 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="load">

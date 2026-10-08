@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [vue()],
     server: {
+      host: '0.0.0.0',
       port: 5173,
       proxy: {
         // Forward API calls to the CodeIgniter backend (`php spark serve` in ../backend).

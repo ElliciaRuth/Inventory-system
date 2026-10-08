@@ -238,6 +238,21 @@ class SettingsModel extends Model
             ->update(['user_activity_id' => 2]);
     }
 
+    /**
+     * Technical Staff (level 4) is the system admin account; it cannot be deactivated or deleted.
+     */
+    public function isAdminAccount(int $userId): bool
+    {
+        $row = $this->db->table('user_table u')
+            ->select('loa.lvl_of_access')
+            ->join('level_of_access loa', 'u.lvl_of_access_id = loa.lvl_of_access_id', 'left')
+            ->where('u.user_id', $userId)
+            ->get(1)
+            ->getRowArray();
+
+        return (int) ($row['lvl_of_access'] ?? 0) === 4;
+    }
+
     private function orderedRecords(string $table, string $orderBy, int $userOfficeId = 0): array
     {
         $builder = $this->db->table($table)->orderBy($orderBy, 'ASC');
@@ -252,7 +267,8 @@ class SettingsModel extends Model
         $sql = 'SELECT u.user_id, u.name, u.username, u.email, u.user_office_id, u.user_activity_id, u.lvl_of_access_id,
                        COALESCE(uot.user_office_name, "Global") AS user_office_name,
                        COALESCE(ua.user_activity, "Unknown") AS activity_status,
-                       COALESCE(loa.role, "Unknown") AS role
+                       COALESCE(loa.role, "Unknown") AS role,
+                       COALESCE(loa.lvl_of_access, 0) AS level_id
                 FROM user_table u
                 LEFT JOIN user_office_table uot ON u.user_office_id = uot.user_office_id
                 LEFT JOIN user_activity_table ua ON u.user_activity_id = ua.user_activity_id

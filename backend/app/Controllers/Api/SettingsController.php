@@ -106,6 +106,10 @@ class SettingsController extends BaseApiController
             return $this->respondError('You cannot delete the currently logged-in user.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        if ($type === 'users' && $this->settingsModel->isAdminAccount($id)) {
+            return $this->respondError('The admin account cannot be deleted.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         if ($type === 'users' && $this->currentLevelId() === 3) {
             return $this->respondError('Use deactivate instead of delete for users.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -135,6 +139,10 @@ class SettingsController extends BaseApiController
     {
         if ($this->currentUserId() === $id) {
             return $this->respondError('You cannot deactivate the currently logged-in user.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if ($this->settingsModel->isAdminAccount($id)) {
+            return $this->respondError('The admin account cannot be deactivated.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $this->settingsModel->deactivateUser($id);

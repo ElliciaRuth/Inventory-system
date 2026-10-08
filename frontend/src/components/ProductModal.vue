@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
+import { X, AlertTriangle, Zap, Package, PlusCircle } from 'lucide-vue-next'
 import { productsApi } from '../api/products'
 import { triggerAutoReload } from '../composables/useAutoReload'
 
@@ -135,25 +136,37 @@ async function save(productAction) {
           <h2 style="font-size: 1.25rem">{{ product ? 'Edit Product' : 'Add New Product' }}</h2>
           <p class="panel-subtitle">Configure inventory catalog details, stock thresholds, and units.</p>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">✕</button>
+        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">
+          <X :size="16" />
+        </button>
       </div>
 
       <div class="modal-body product-modal-body">
-        <div v-if="errorMessage" class="badge badge-danger" style="display: flex; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%;">
-          <span>⚠️ {{ errorMessage }}</span>
+        <div v-if="errorMessage" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%;">
+          <AlertTriangle :size="16" style="flex-shrink: 0;" />
+          <span>{{ errorMessage }}</span>
         </div>
 
         <!-- Same product or brand-new product? -->
         <div v-if="askProductAction" class="panel" style="padding: 1.25rem; margin-bottom: 1.25rem; border: 1px solid var(--color-warning);">
-          <h3 style="font-size: 1.05rem; margin-bottom: 0.5rem;">⚡ Name or Description Changed</h3>
+          <h3 style="font-size: 1.05rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 6px;">
+            <Zap :size="16" style="color: var(--color-warning);" />
+            <span>Name or Description Changed</span>
+          </h3>
           <p style="color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
             Is this the <strong>same product</strong> (keep all existing transactions), or a
             <strong>brand-new product</strong> under the same product no.? A new product clears all
             previous stock and transactions of this item.
           </p>
           <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-            <button type="button" class="btn btn-secondary" :disabled="loading" @click="save('existing')">📦 Same Product</button>
-            <button type="button" class="btn btn-primary" :disabled="loading" @click="save('new')">🆕 New Product</button>
+            <button type="button" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px;" :disabled="loading" @click="save('existing')">
+              <Package :size="14" />
+              <span>Same Product</span>
+            </button>
+            <button type="button" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px;" :disabled="loading" @click="save('new')">
+              <PlusCircle :size="14" />
+              <span>New Product</span>
+            </button>
             <button type="button" class="btn btn-sm btn-secondary" @click="askProductAction = false">Cancel</button>
           </div>
         </div>

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { ArrowDownToLine, ArrowUpFromLine, Info, Trash2, AlertTriangle, AlertCircle, Check, X } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 
 const props = defineProps({
@@ -158,18 +159,20 @@ async function handleDelete() {
           </p>
         </div>
         <button type="button" class="btn btn-icon btn-secondary" @click="$emit('close')">
-          ✕
+          <X :size="16" />
         </button>
       </div>
 
       <!-- Modal Body -->
       <div class="modal-body">
         <!-- Error & Success Banners -->
-        <div v-if="errorMessage" class="login-error-banner" style="margin-bottom: 16px;">
-          ⚠️ {{ errorMessage }}
+        <div v-if="errorMessage" class="login-error-banner" style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <AlertCircle :size="16" style="flex-shrink: 0;" />
+          <span>{{ errorMessage }}</span>
         </div>
-        <div v-if="successMessage" class="login-success-banner" style="margin-bottom: 16px;">
-          ✓ {{ successMessage }}
+        <div v-if="successMessage" class="login-success-banner" style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <Check :size="16" style="flex-shrink: 0;" />
+          <span>{{ successMessage }}</span>
         </div>
 
         <!-- Product Summary Bar -->
@@ -191,7 +194,7 @@ async function handleDelete() {
             <div class="type-radio-toggle">
               <label class="type-radio-card" :class="{ 'is-active': typeId === 1 }">
                 <input v-model.number="typeId" type="radio" :value="1" />
-                <span class="type-icon">📥</span>
+                <span class="type-icon"><ArrowDownToLine :size="18" /></span>
                 <div>
                   <strong>Receipt (Stock In)</strong>
                   <small>Increases inventory balance</small>
@@ -200,7 +203,7 @@ async function handleDelete() {
 
               <label class="type-radio-card" :class="{ 'is-active': typeId === 2 }">
                 <input v-model.number="typeId" type="radio" :value="2" />
-                <span class="type-icon">📤</span>
+                <span class="type-icon"><ArrowUpFromLine :size="18" /></span>
                 <div>
                   <strong>Issue (Stock Out)</strong>
                   <small>Deducts from inventory balance</small>
@@ -273,7 +276,7 @@ async function handleDelete() {
 
           <!-- Audit Warning Note -->
           <div class="edit-audit-notice">
-            <span>ℹ️</span>
+            <Info :size="16" style="flex-shrink: 0; color: var(--color-primary);" />
             <p>
               Saving changes will automatically update the linked batch inventory and recompute the running ledger balance in real time.
             </p>
@@ -291,16 +294,18 @@ async function handleDelete() {
               <button
                 type="button"
                 class="btn btn-sm btn-secondary"
-                style="color: var(--color-danger); border-color: rgba(239, 68, 68, 0.3);"
+                style="color: var(--color-danger); border-color: rgba(239, 68, 68, 0.3); display: inline-flex; align-items: center; gap: 5px;"
                 @click="showDeleteConfirm = true"
               >
-                🗑️ Delete Entry
+                <Trash2 :size="14" />
+                <span>Delete Entry</span>
               </button>
             </div>
 
             <div v-else class="delete-confirmation-box">
-              <p style="color: var(--color-danger); font-weight: 700; font-size: 13px; margin-bottom: 8px;">
-                ⚠️ Are you sure you want to permanently delete Transaction #{{ transaction.transaction_id }}?
+              <p style="color: var(--color-danger); font-weight: 700; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                <AlertTriangle :size="16" style="flex-shrink: 0;" />
+                <span>Are you sure you want to permanently delete Transaction #{{ transaction.transaction_id }}?</span>
               </p>
               <div style="display: flex; gap: 8px; justify-content: flex-end;">
                 <button

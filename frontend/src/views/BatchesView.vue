@@ -1,14 +1,28 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { reportsApi } from '../api/reports'
 import { toast, errorMessage } from '../composables/useToast'
+import AppPagination from '../components/AppPagination.vue'
+import { Download } from 'lucide-vue-next'
 
 const batches = ref([])
 const loading = ref(true)
 const search = ref('')
 const showEmpty = ref(false)
 
+// Pagination
+const currentPage = ref(1)
+const pageSize = ref(15)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(batches.value.length / pageSize.value)))
+
+const paginatedBatches = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return batches.value.slice(start, start + pageSize.value)
+})
+
 async function load() {
+  currentPage.value = 1
   loading.value = true
   try {
     const res = await reportsApi.getBatches({ search: search.value, show_empty: showEmpty.value ? 1 : 0 })
@@ -64,7 +78,7 @@ onMounted(load)
           <tbody>
             <tr v-if="loading"><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">Loading batches…</td></tr>
             <tr v-else-if="!batches.length"><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">No batches found{{ search ? ` for "${search}"` : '' }}.</td></tr>
-            <tr v-for="b in batches" :key="b.batch_id">
+            <tr v-for="b in paginatedBatches" :key="b.batch_id">
               <td style="font-family: var(--font-mono);">{{ b.batch_no }}</td>
               <td><router-link :to="{ path: '/stockcard', query: { item_id: b.product_id } }">{{ b.product }}</router-link></td>
               <td>{{ b.unit_name }}</td>
@@ -79,12 +93,25 @@ onMounted(load)
                 <span v-else style="color: var(--text-muted);">—</span>
               </td>
               <td style="text-align: right;">
-                <a v-if="b.barcode_url" :href="b.barcode_url" :download="fileName(b)" class="btn btn-sm btn-secondary">⬇ Download</a>
+                <a v-if="b.barcode_url" :href="b.barcode_url" :download="fileName(b)" class="btn btn-sm btn-secondary"><Download :size="14" /> Download</a>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination (< 1 2 3 ... x > Page items : Go to : ) -->
+      <AppPagination
+        v-if="batches.length > 0"
+        :current-page="currentPage"
+        :total-pages="totalPages"
+        :total-items="batches.length"
+        :page-size="pageSize"
+        :page-size-options="[5, 10, 15, 25, 50, 100]"
+        item-name="batches"
+        @update:current-page="currentPage = $event"
+        @update:page-size="pageSize = $event; currentPage = 1"
+      />
     </section>
   </div>
 </template>

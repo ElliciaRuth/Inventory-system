@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
+import { AlertTriangle } from 'lucide-vue-next'
 
 // Forced first-login steps, driven by authStore.pendingSetup:
 //   change_password → (Technical Staff only) setup_smtp → setup_recovery_email
@@ -88,7 +89,7 @@ async function handleLogout() {
           <p class="login-card-subtitle">{{ copy[step]?.subtitle }}</p>
 
           <div v-if="errorMessage" class="login-error-banner">
-            <span>⚠️ {{ errorMessage }}</span>
+            <span><AlertTriangle :size="15" /> {{ errorMessage }}</span>
           </div>
           <div v-if="successMessage" class="login-success-banner">
             <span>{{ successMessage }}</span>

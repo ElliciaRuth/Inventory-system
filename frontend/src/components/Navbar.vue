@@ -6,6 +6,43 @@ import { useThemeStore } from '../stores/themeStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { triggerAutoReload, isReloading } from '../composables/useAutoReload'
 import { backupsApi } from '../api/backups'
+import bsuLogo from '../assets/images/bsu-logo.png'
+import bakeryLogo from '../assets/images/bakery-logo.png'
+import fpcLogo from '../assets/images/fpc-logo.png'
+
+import {
+  LayoutDashboard,
+  Boxes,
+  FileSpreadsheet,
+  Package,
+  ShoppingBag,
+  Barcode,
+  BarChart3,
+  Inbox,
+  Receipt,
+  Settings,
+  Users,
+  Lock,
+  LogOut,
+  Bell,
+  Menu,
+  X,
+  ChevronDown,
+  Sun,
+  Moon,
+  Palette,
+  AlertCircle,
+  AlertTriangle,
+  Clock,
+  RefreshCw,
+  UserCheck,
+  ClipboardList,
+  ArrowRight,
+  ShieldCheck,
+  Building2,
+  Shield,
+  User,
+} from 'lucide-vue-next'
 
 const props = defineProps({
   alertCount: {
@@ -20,7 +57,7 @@ const notificationStore = useNotificationStore()
 const router = useRouter()
 const route = useRoute()
 
-// Ask once per browser session whether an automatic backup is due (the server decides)
+// Ask once per browser session whether an automatic backup is due
 function runAutoBackupOnce() {
   if (authStore.levelId < 2 || authStore.levelId > 3) return
   try {
@@ -28,113 +65,35 @@ function runAutoBackupOnce() {
     if (sessionStorage.getItem(key)) return
     sessionStorage.setItem(key, '1')
   } catch {
-    // storage unavailable — still run the check
+    // storage unavailable
   }
   backupsApi.auto().catch(() => {})
 }
 
+// Mega Menu card state
+const isMegaMenuOpen = ref(false)
+const megaMenuRef = ref(null)
+
+function toggleMegaMenu() {
+  isMegaMenuOpen.value = !isMegaMenuOpen.value
+  if (isMegaMenuOpen.value) {
+    isNotifDropdownOpen.value = false
+  }
+}
+
+function closeMegaMenu() {
+  isMegaMenuOpen.value = false
+}
+
+// Notification dropdown state
 const isNotifDropdownOpen = ref(false)
 const dropdownRef = ref(null)
-const openMenu = ref('')
-const menuRef = ref(null)
-// Phones / tablets: the links, user and logout move into a panel behind the ☰ button
-const mobileOpen = ref(false)
-const headerRef = ref(null)
-
-// Navigation per access level
-const menu = computed(() => {
-  const level = authStore.levelId
-  if (isAdminAccount.value) {
-    return [
-      { label: 'User Management', to: '/admin' },
-      { label: 'Notifications', to: '/notifications', badge: notificationStore.unreadCount },
-    ]
-  }
-  if (level === 1) {
-    return [
-      { label: 'Dashboard', to: '/' },
-      { label: 'Items', to: '/products' },
-      {
-        label: 'Stock Out',
-        children: [
-          { label: 'Request Stock Out', to: '/stockout' },
-          { label: 'My List', to: '/stockout/list' },
-        ],
-      },
-      { label: 'Transactions', to: '/transactions' },
-    ]
-  }
-  return [
-    { label: 'Dashboard', to: '/' },
-    {
-      label: 'Stock',
-      children: [
-        { label: 'Stockcard', to: '/stockcard' },
-        { label: 'Export Stockcard', to: '/export/stockcard' },
-      ],
-    },
-    {
-      label: 'Products',
-      children: [
-        { label: 'Product List', to: '/products' },
-        { label: 'Finished Products', to: '/products/barcodes' },
-        { label: 'Batch Barcodes', to: '/reports/batches' },
-        { label: 'Summary Report', to: '/reports/summary' },
-        { label: 'Export Summary', to: '/export/summary' },
-      ],
-    },
-    { label: 'Requests', to: '/stockout/pending', badge: notificationStore.counts.stockoutRequests || 0 },
-    { label: 'Transactions', to: '/transactions' },
-    { label: 'Settings', to: '/settings', badge: notificationStore.counts.pendingUsers || 0 },
-  ]
-})
-
-function isGroupActive(item) {
-  return item.children?.some((c) => route.path === c.to || route.path.startsWith(`${c.to}/`))
-}
-
-function toggleMenu(label) {
-  openMenu.value = openMenu.value === label ? '' : label
-}
-
-function toggleMobileMenu() {
-  mobileOpen.value = !mobileOpen.value
-  closeDropdown()
-}
-
-// Close menus after navigating
-watch(() => route.fullPath, () => {
-  openMenu.value = ''
-  mobileOpen.value = false
-})
-
-function handleManualReload() {
-  triggerAutoReload('manual')
-}
-
-const isAdminAccount = computed(() => {
-  return authStore.levelId >= 4 || authStore.role?.toLowerCase().includes('technical')
-})
-
-const themeIcon = computed(() => {
-  if (themeStore.current === 'bsu') return '🏛️'
-  if (themeStore.current === 'dark') return '🌙'
-  return '☀️'
-})
-
-const themeLabel = computed(() => {
-  if (themeStore.current === 'bsu') return 'BSU Theme'
-  if (themeStore.current === 'dark') return 'Dark Mode'
-  return 'Light Mode'
-})
-
-async function handleLogout() {
-  await authStore.logout()
-  router.push('/login')
-}
 
 function toggleNotifDropdown() {
   isNotifDropdownOpen.value = !isNotifDropdownOpen.value
+  if (isNotifDropdownOpen.value) {
+    isMegaMenuOpen.value = false
+  }
 }
 
 function closeDropdown() {
@@ -149,81 +108,287 @@ function handleNotifClick(n) {
   }
 }
 
+function getNotifIcon(type) {
+  if (type === 'out_of_stock') return AlertCircle
+  if (type === 'low_stock') return AlertTriangle
+  if (type === 'expiring') return Clock
+  if (type === 'borrow') return RefreshCw
+  if (type === 'user_registration') return UserCheck
+  if (type === 'stockout_request') return ClipboardList
+  return Bell
+}
+
+// Auto close on route change
+watch(() => route.fullPath, () => {
+  closeMegaMenu()
+  closeDropdown()
+})
+
+const isAdminAccount = computed(() => {
+  return authStore.levelId >= 4 || authStore.role?.toLowerCase().includes('technical')
+})
+
+const userOfficeId = computed(() => {
+  return Number(authStore.user?.user_office_id || 0)
+})
+
+const userOfficeName = computed(() => {
+  return String(authStore.user?.office_name || authStore.officeName || '').trim().toLowerCase()
+})
+
+const userRole = computed(() => {
+  return String(authStore.user?.role || authStore.role || '').trim().toLowerCase()
+})
+
+// Brand context
+const isBakeryAccount = computed(() => {
+  return userOfficeId.value === 1 || 
+         userOfficeName.value.includes('bakery') || 
+         userRole.value.includes('bakery')
+})
+
+const isFpcAccount = computed(() => {
+  return userOfficeId.value === 2 || 
+         userOfficeName.value.includes('fpc') || 
+         userOfficeName.value.includes('food processing') || 
+         userRole.value.includes('fpc')
+})
+
+const showBsuLogo = computed(() => true)
+
+const showBakeryLogo = computed(() => {
+  if (isBakeryAccount.value) return true
+  if (isFpcAccount.value) return false
+  if (isAdminAccount.value) return true
+  return false
+})
+
+const showFpcLogo = computed(() => {
+  if (isFpcAccount.value) return true
+  if (isBakeryAccount.value) return false
+  if (isAdminAccount.value) return true
+  return false
+})
+
+const brandSubtitle = computed(() => {
+  if (isAdminAccount.value) {
+    if (isBakeryAccount.value) return 'Bakery · Administration'
+    if (isFpcAccount.value) return 'FPC · Administration'
+    return 'System Administration'
+  }
+  if (isBakeryAccount.value) return 'Bakery Project'
+  if (isFpcAccount.value) return 'Food Processing Center'
+  return authStore.officeName || 'BSU Inventory'
+})
+
+// Mega Menu multi-column layout inspired by Velt design
+const menuColumns = computed(() => {
+  const level = authStore.levelId
+
+  // Admin access
+  if (isAdminAccount.value) {
+    return [
+      {
+        title: 'OVERVIEW',
+        items: [
+          { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
+        ],
+      },
+      {
+        title: 'USER MANAGEMENT',
+        items: [
+          { label: 'User Management', to: '/admin', icon: Users, color: '#8b5cf6' },
+        ],
+      },
+      {
+        title: 'SYSTEM SETTINGS',
+        items: [
+          { label: 'Settings', to: '/settings', icon: Settings, color: '#94a3b8', badge: notificationStore.counts.pendingUsers || 0 },
+          { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
+        ],
+      },
+    ]
+  }
+
+  // Level 1: Staff
+  if (level === 1) {
+    return [
+      {
+        title: 'OVERVIEW',
+        items: [
+          { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
+          { label: 'Transactions', to: '/transactions', icon: Receipt, color: '#06b6d4' },
+        ],
+      },
+      {
+        title: 'STOCK OUT REQUESTS',
+        items: [
+          { label: 'Request Stock Out', to: '/stockout', icon: Inbox, color: '#fb923c' },
+          { label: 'My Requests List', to: '/stockout/list', icon: ClipboardList, color: '#f59e0b' },
+        ],
+      },
+      {
+        title: 'ITEMS & PROFILE',
+        items: [
+          { label: 'Item Catalog', to: '/products', icon: Package, color: '#34d399' },
+          { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
+        ],
+      },
+    ]
+  }
+
+  // Levels 2 & 3: Custodian & Manager
+  return [
+    {
+      title: 'OVERVIEW',
+      items: [
+        { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
+        { label: 'Transactions', to: '/transactions', icon: Receipt, color: '#06b6d4' },
+        {
+          label: 'Requests',
+          to: '/stockout/pending',
+          icon: Inbox,
+          color: '#fb923c',
+          badge: notificationStore.counts.stockoutRequests || 0,
+        },
+        { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
+      ],
+    },
+    {
+      title: 'INVENTORY & STOCK',
+      items: [
+        { label: 'Stockcard Ledger', to: '/stockcard', icon: Boxes, color: '#2dd4bf' },
+        { label: 'Export Stockcard', to: '/export/stockcard', icon: FileSpreadsheet, color: '#34d399' },
+      ],
+    },
+    {
+      title: 'PRODUCTS & CATALOG',
+      items: [
+        { label: 'Product List', to: '/products', icon: Package, color: '#f59e0b' },
+        { label: 'Finished Products', to: '/products/barcodes', icon: ShoppingBag, color: '#f43f5e' },
+        { label: 'Batch Barcodes', to: '/reports/batches', icon: Barcode, color: '#a855f7' },
+        { label: 'Summary Report', to: '/reports/summary', icon: BarChart3, color: '#6366f1' },
+        { label: 'Export Summary', to: '/export/summary', icon: FileSpreadsheet, color: '#10b981' },
+      ],
+    },
+  ]
+})
+
+const totalMenuBadges = computed(() => {
+  if (isAdminAccount.value) return 0
+  return (notificationStore.counts.stockoutRequests || 0) +
+         (notificationStore.counts.pendingUsers || 0)
+})
+
+const themeIconComponent = computed(() => {
+  if (themeStore.current === 'bsu') return Palette
+  if (themeStore.current === 'dark') return Moon
+  return Sun
+})
+
+const themeLabel = computed(() => {
+  if (themeStore.current === 'bsu') return 'BSU Theme'
+  if (themeStore.current === 'dark') return 'Dark Mode'
+  return 'Light Mode'
+})
+
+async function handleLogout() {
+  closeMegaMenu()
+  await authStore.logout()
+  router.push('/login')
+}
+
 function handleClickOutside(event) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
     closeDropdown()
   }
-  if (menuRef.value && !menuRef.value.contains(event.target)) {
-    openMenu.value = ''
+  // The menu button uses @click.stop, so any click reaching here outside the card closes the menu
+  if (isMegaMenuOpen.value && megaMenuRef.value && !megaMenuRef.value.contains(event.target)) {
+    closeMegaMenu()
   }
-  if (headerRef.value && !headerRef.value.contains(event.target)) {
-    mobileOpen.value = false
+}
+
+function handleKeyDown(e) {
+  if (e.key === 'Escape') {
+    closeMegaMenu()
+    closeDropdown()
   }
 }
 
 onMounted(() => {
-  notificationStore.fetchNotifications()
+  if (!isAdminAccount.value) notificationStore.fetchNotifications()
   runAutoBackupOnce()
   document.addEventListener('click', handleClickOutside)
+  document.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('keydown', handleKeyDown)
 })
 </script>
 
 <template>
-  <header ref="headerRef" class="navbar">
+  <header class="navbar">
     <div class="navbar-inner">
+      <!-- Left: Brand Section with Logos and Title -->
       <router-link to="/" class="brand-section">
-        <div class="brand-logo-badge">
-          <span>BSU</span>
+        <div class="brand-logos-container">
+          <!-- BSU Logo (Primary institution seal) -->
+          <div class="nav-logo-badge nav-logo-bsu" title="Benguet State University">
+            <img
+              :src="bsuLogo"
+              alt="Benguet State University Logo"
+              class="nav-logo-img"
+            />
+          </div>
+
+          <!-- Bakery Logo (Displayed for Bakery account or Global Admin) -->
+          <div
+            v-if="showBakeryLogo"
+            class="nav-logo-badge nav-logo-bakery"
+            title="BSU Bakery Project"
+          >
+            <img
+              :src="bakeryLogo"
+              alt="BSU Bakery Project Logo"
+              class="nav-logo-img"
+            />
+          </div>
+
+          <!-- FPC Logo (Displayed for FPC account or Global Admin) -->
+          <div
+            v-if="showFpcLogo"
+            class="nav-logo-badge nav-logo-fpc"
+            title="BSU Food Processing Center"
+          >
+            <img
+              :src="fpcLogo"
+              alt="BSU Food Processing Center Logo"
+              class="nav-logo-img"
+            />
+          </div>
         </div>
+
         <div class="brand-title-group">
           <span class="brand-title">BSU INVENTORY</span>
-          <span class="brand-subtitle">
-            {{ isAdminAccount ? 'System Administration' : (authStore.officeName || 'Food Processing Center') }}
-          </span>
+          <span class="brand-subtitle">{{ brandSubtitle }}</span>
         </div>
       </router-link>
 
-      <nav ref="menuRef" class="desktop-nav">
-        <ul class="nav-links">
-          <li v-for="item in menu" :key="item.label" class="nav-item">
-            <router-link v-if="item.to" :to="item.to" class="nav-link">
-              <span>{{ item.label }}</span>
-              <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
-            </router-link>
-            <template v-else>
-              <button
-                type="button"
-                class="nav-link nav-group-btn"
-                :class="{ 'router-link-active': isGroupActive(item) }"
-                :aria-expanded="openMenu === item.label"
-                @click.stop="toggleMenu(item.label)"
-              >
-                <span>{{ item.label }}</span><span class="nav-caret">▾</span>
-              </button>
-              <ul v-if="openMenu === item.label" class="nav-submenu" @click.stop>
-                <li v-for="child in item.children" :key="child.to">
-                  <router-link :to="child.to" class="nav-submenu-link">{{ child.label }}</router-link>
-                </li>
-              </ul>
-            </template>
-          </li>
-        </ul>
-      </nav>
-
+      <!-- Right: Unified, Symmetrical Action Controls (Desktop & Mobile) -->
       <div class="nav-actions">
-        <!-- Notification Bell Dropdown Button -->
-        <div ref="dropdownRef" class="notif-wrapper">
+        <!-- Notification Bell with Flyout Dropdown (not shown to the admin account) -->
+        <div v-if="!isAdminAccount" ref="dropdownRef" class="notif-wrapper">
           <button
             type="button"
             class="theme-btn notif-bell-btn"
+            :class="{ 'is-active': isNotifDropdownOpen }"
             @click.stop="toggleNotifDropdown"
             :title="`Notifications (${notificationStore.unreadCount} unread)`"
+            aria-label="View notifications"
           >
-            <span style="font-size: 1.15rem;">🔔</span>
+            <Bell :size="18" />
             <span
               v-if="notificationStore.unreadCount > 0"
               class="bell-unread-badge"
@@ -232,10 +397,11 @@ onUnmounted(() => {
             </span>
           </button>
 
-          <!-- Flyout Notification Dropdown -->
+          <!-- Notification Flyout -->
           <div v-if="isNotifDropdownOpen" class="notif-flyout" @click.stop>
             <div class="flyout-header">
               <div class="flyout-title-wrap">
+                <Bell :size="15" />
                 <strong>Notifications</strong>
                 <span v-if="notificationStore.unreadCount > 0" class="flyout-count-badge">
                   {{ notificationStore.unreadCount }} new
@@ -256,7 +422,7 @@ onUnmounted(() => {
                 v-if="notificationStore.activeNotifications.length === 0"
                 class="flyout-empty"
               >
-                <span>🎉</span>
+                <Inbox :size="32" class="empty-icon" />
                 <p>No active alerts right now.</p>
               </div>
 
@@ -268,13 +434,7 @@ onUnmounted(() => {
                 @click="handleNotifClick(n)"
               >
                 <div class="flyout-item-icon">
-                  <span v-if="n.type === 'out_of_stock'">🚨</span>
-                  <span v-else-if="n.type === 'low_stock'">⚠️</span>
-                  <span v-else-if="n.type === 'expiring'">⏳</span>
-                  <span v-else-if="n.type === 'borrow'">🔄</span>
-                  <span v-else-if="n.type === 'user_registration'">👤</span>
-                  <span v-else-if="n.type === 'stockout_request'">📋</span>
-                  <span v-else>🔔</span>
+                  <component :is="getNotifIcon(n.type)" :size="16" />
                 </div>
 
                 <div class="flyout-item-content">
@@ -295,273 +455,447 @@ onUnmounted(() => {
                 @click="closeDropdown"
               >
                 <span>View all notifications</span>
-                <span>→</span>
+                <ArrowRight :size="13" />
               </router-link>
             </div>
           </div>
         </div>
 
-        <!-- Theme Toggle Button -->
+        <!-- Quick Theme Toggle (Desktop only shortcut) -->
         <button
           type="button"
           class="theme-btn desktop-only"
           @click="themeStore.cycleTheme()"
           :title="`Current theme: ${themeLabel}. Click to switch.`"
+          aria-label="Switch color theme"
         >
-          <span style="font-size: 1.1rem">{{ themeIcon }}</span>
+          <component :is="themeIconComponent" :size="18" />
         </button>
 
-        <!-- User Profile Pill -->
-        <router-link to="/change-password" class="user-chip desktop-only" title="Change password">
+        <!-- User Profile Chip (Desktop only) -->
+        <router-link
+          to="/profile"
+          class="user-chip desktop-only"
+          title="View & Edit Profile"
+        >
           <div class="user-avatar">
             {{ (authStore.userName || 'A').charAt(0).toUpperCase() }}
           </div>
           <div class="user-info">
-            <span class="user-name">{{ authStore.userName }}</span>
+            <span class="user-name">{{ authStore.user?.name || authStore.userName }}</span>
             <span class="user-role">{{ authStore.role }}</span>
           </div>
         </router-link>
 
-        <!-- Logout Action -->
+        <!-- Dedicated Menu Button (Triggers Velt Mega Menu Card) -->
         <button
           type="button"
-          class="btn btn-sm btn-secondary desktop-only"
-          @click="handleLogout"
-          style="background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.25); color: #fff;"
+          class="nav-menu-btn"
+          :class="{ 'is-active': isMegaMenuOpen }"
+          @click.stop="toggleMegaMenu"
+          :aria-expanded="isMegaMenuOpen"
+          aria-label="Toggle navigation menu"
+          title="Menu"
         >
-          Logout
-        </button>
-
-        <button
-          type="button"
-          class="theme-btn nav-toggle"
-          :aria-expanded="mobileOpen"
-          aria-controls="mobile-menu"
-          :title="mobileOpen ? 'Close menu' : 'Open menu'"
-          @click.stop="toggleMobileMenu"
-        >
-          <span style="font-size: 1.2rem; line-height: 1;">{{ mobileOpen ? '✕' : '☰' }}</span>
+          <component :is="isMegaMenuOpen ? X : Menu" :size="18" class="menu-icon" />
+          <span class="menu-btn-text desktop-only">Menu</span>
+          <ChevronDown :size="13" class="menu-chevron desktop-only" :class="{ 'is-flipped': isMegaMenuOpen }" />
+          <span v-if="totalMenuBadges > 0" class="menu-badge-dot"></span>
         </button>
       </div>
     </div>
 
-    <!-- Phone / tablet menu panel -->
-    <div v-if="mobileOpen" id="mobile-menu" class="mobile-menu">
-      <router-link to="/change-password" class="mobile-user">
-        <div class="user-avatar">{{ (authStore.userName || 'A').charAt(0).toUpperCase() }}</div>
-        <div class="mobile-user-info">
-          <strong>{{ authStore.userName }}</strong>
-          <span>{{ authStore.role }} · Change password</span>
-        </div>
-      </router-link>
+    <!-- Backdrop Overlay for Outside Click (teleported: .navbar's backdrop-filter would otherwise trap position: fixed) -->
+    <Teleport to="body">
+      <div
+        v-if="isMegaMenuOpen"
+        class="mega-menu-backdrop"
+        @click="closeMegaMenu"
+        aria-hidden="true"
+      ></div>
+    </Teleport>
 
-      <ul class="mobile-links">
-        <template v-for="item in menu" :key="item.label">
-          <li v-if="item.to">
-            <router-link :to="item.to" class="mobile-link">
-              <span>{{ item.label }}</span>
-              <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+    <!-- VELT MEGA MENU FLOATING CARD -->
+    <transition name="mega-menu">
+      <div
+        v-if="isMegaMenuOpen"
+        ref="megaMenuRef"
+        class="mega-menu-card"
+        :class="{ 'is-account-only': isAdminAccount }"
+        role="dialog"
+        aria-label="Navigation Menu"
+      >
+        <div class="mega-menu-grid">
+          <!-- Left/Center Categorized Columns (ASYNC / REALTIME / PLATFORM style); admin only gets the account card -->
+          <div v-if="!isAdminAccount" class="mega-columns-wrap">
+            <div
+              v-for="col in menuColumns"
+              :key="col.title"
+              class="mega-col"
+            >
+              <span class="mega-col-title">{{ col.title }}</span>
+              <ul class="mega-item-list">
+                <li v-for="item in col.items" :key="item.to" class="mega-item">
+                  <router-link
+                    :to="item.to"
+                    class="mega-link"
+                    @click="closeMegaMenu"
+                  >
+                    <span
+                      class="mega-item-icon-box"
+                      :style="{ color: item.color }"
+                    >
+                      <component :is="item.icon" :size="18" stroke-width="2" />
+                    </span>
+                    <span class="mega-link-label">{{ item.label }}</span>
+                    <span v-if="item.badge" class="mega-badge-pill">
+                      {{ item.badge }}
+                    </span>
+                  </router-link>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Bottom Footer Link (matching VIEW ALL FEATURES in Velt) -->
+            <div class="mega-columns-footer">
+              <router-link
+                to="/transactions"
+                class="mega-footer-link"
+                @click="closeMegaMenu"
+              >
+                <span>VIEW ALL TRANSACTIONS</span>
+                <ArrowRight :size="13" />
+              </router-link>
+            </div>
+          </div>
+
+          <!-- Right: User Account & System Status Card -->
+          <div class="mega-account-panel">
+            <!-- Account Profile Header (Clickable -> /profile) -->
+            <router-link
+              to="/profile"
+              class="account-profile-card"
+              @click="closeMegaMenu"
+              title="Click to view & edit your profile"
+            >
+              <div class="account-avatar">
+                {{ (authStore.userName || 'U').charAt(0).toUpperCase() }}
+              </div>
+              <div class="account-details">
+                <strong class="account-name">{{ authStore.user?.name || authStore.userName }}</strong>
+                <span class="account-username">@{{ authStore.userName }}</span>
+                <div class="account-tags">
+                  <span class="badge-role">{{ authStore.role || 'Staff' }}</span>
+                  <span class="badge-status">
+                    <span class="status-dot"></span>
+                    <span>Active</span>
+                  </span>
+                </div>
+              </div>
             </router-link>
-          </li>
-          <li v-else>
-            <span class="mobile-group">{{ item.label }}</span>
-            <ul class="mobile-sublinks">
-              <li v-for="child in item.children" :key="child.to">
-                <router-link :to="child.to" class="mobile-link">{{ child.label }}</router-link>
-              </li>
-            </ul>
-          </li>
-        </template>
-      </ul>
 
-      <div class="mobile-actions">
-        <button type="button" class="btn btn-secondary" @click="themeStore.cycleTheme()">
-          {{ themeIcon }} {{ themeLabel }}
-        </button>
-        <button type="button" class="btn btn-primary" @click="handleLogout">Log out</button>
+            <!-- Office & Access Meta Info -->
+            <div class="account-meta-box">
+              <div class="meta-row">
+                <span class="meta-label">
+                  <Building2 :size="13" class="meta-icon" />
+                  <span>Office:</span>
+                </span>
+                <span class="meta-value">{{ authStore.officeName || 'BSU Inventory' }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">
+                  <Shield :size="13" class="meta-icon" />
+                  <span>Privilege:</span>
+                </span>
+                <span class="meta-value">Level {{ authStore.levelId }}</span>
+              </div>
+              <div v-if="authStore.user?.email" class="meta-row">
+                <span class="meta-label">
+                  <User :size="13" class="meta-icon" />
+                  <span>Email:</span>
+                </span>
+                <span class="meta-value" :title="authStore.user.email">{{ authStore.user.email }}</span>
+              </div>
+            </div>
+
+            <!-- Quick Theme Switcher Pill -->
+            <button
+              type="button"
+              class="feature-theme-strip"
+              @click="themeStore.cycleTheme()"
+              title="Click to cycle color theme"
+            >
+              <div class="theme-strip-info">
+                <component :is="themeIconComponent" :size="15" class="theme-strip-icon" />
+                <span>Theme: <strong>{{ themeLabel }}</strong></span>
+              </div>
+              <span class="theme-strip-action">Switch</span>
+            </button>
+
+            <!-- Bottom Action Buttons -->
+            <div class="feature-action-buttons">
+              <router-link
+                to="/profile"
+                class="feature-btn-secondary"
+                @click="closeMegaMenu"
+              >
+                <User :size="14" />
+                <span>Edit Profile</span>
+              </router-link>
+
+              <button
+                type="button"
+                class="feature-btn-primary"
+                @click="handleLogout"
+              >
+                <LogOut :size="14" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </transition>
   </header>
 </template>
 
 <style scoped>
-.nav-toggle {
-  display: none;
+/* =========================================================
+   NAVBAR CORE & BRANDING
+   ========================================================= */
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--color-nav-bg);
+  color: var(--color-nav-text);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.mobile-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  max-height: calc(100dvh - 64px);
-  overflow-y: auto;
-  padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
-  background: var(--bg-surface);
-  color: var(--text-main);
-  border-bottom: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-xl);
-  z-index: 999;
+.navbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 1360px;
+  height: 72px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  box-sizing: border-box;
 }
 
-.mobile-user {
+/* Brand Section */
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.brand-logos-container {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  border-radius: 12px;
-  background: var(--bg-subtle);
-  color: inherit;
-  text-decoration: none;
+  flex-shrink: 0;
 }
 
-.mobile-user-info {
+.nav-logo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  /* Transparent PNG logos: no white frame, shadow follows the logo's own shape */
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  transition: transform var(--transition-fast, 0.2s ease), filter var(--transition-fast, 0.2s ease);
+  flex-shrink: 0;
+}
+
+.nav-logo-badge:hover {
+  transform: scale(1.08);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+}
+
+.nav-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.brand-title-group {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.mobile-user-info span {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.mobile-links,
-.mobile-sublinks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.mobile-link {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  min-height: 46px;
-  padding: 0 0.75rem;
-  border-radius: 10px;
-  color: var(--text-main);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.mobile-link.router-link-exact-active {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
-.mobile-group {
-  display: block;
-  padding: 0.85rem 0.75rem 0.25rem;
-  font-size: 0.72rem;
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 1.18rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.mobile-sublinks .mobile-link {
-  padding-left: 1.25rem;
-  font-weight: 500;
-}
-
-.mobile-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.mobile-actions .btn {
-  justify-content: center;
-}
-
-/* Phones and tablets: compact one-row header, everything else in the panel */
-@media (max-width: 1199px) {
-  .navbar-inner {
-    flex-wrap: nowrap;
-    height: 64px;
-    padding: 0 1rem;
-    gap: 0.75rem;
-  }
-
-  .desktop-nav,
-  .desktop-only {
-    display: none !important;
-  }
-
-  .nav-toggle {
-    display: flex;
-  }
-
-  .nav-actions {
-    gap: 0.5rem;
-  }
-}
-
-
-.nav-item {
-  position: relative;
-}
-
-.nav-group-btn {
-  background: none;
-  border: 0;
-  font: inherit;
-  cursor: pointer;
-}
-
-.nav-caret {
-  font-size: 0.7em;
-  margin-left: 4px;
-  opacity: 0.8;
-}
-
-.nav-submenu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  min-width: 210px;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  box-shadow: var(--shadow-xl);
-  z-index: 1000;
-}
-
-.nav-submenu-link {
-  display: block;
-  padding: 9px 12px;
-  border-radius: 8px;
-  color: var(--text-main);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
-.nav-submenu-link:hover,
-.nav-submenu-link.router-link-active {
-  background: var(--bg-subtle);
-  color: var(--color-primary);
+.brand-subtitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
 }
 
+/* =========================================================
+   NAVBAR ACTIONS (BELL, THEME, USER, MENU)
+   ========================================================= */
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Common Icon Button Style */
+.theme-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md, 12px);
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.2s ease);
+  box-sizing: border-box;
+}
+
+.theme-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.theme-btn.is-active {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: #ffffff;
+}
+
+/* User Profile Chip */
 .user-chip {
-  text-decoration: none;
-  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.2s ease);
 }
 
-.notif-wrapper {
+.user-chip:hover {
+  background: rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-accent, #e6d628);
+  color: #12200f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.user-name {
+  font-weight: 700;
+  font-size: 0.825rem;
+  white-space: nowrap;
+}
+
+.user-role {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: capitalize;
+}
+
+/* Dedicated Menu Button */
+.nav-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  height: 40px;
+  padding: 0 0.95rem;
+  border-radius: var(--radius-md, 12px);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.2s ease);
   position: relative;
+  box-sizing: border-box;
 }
 
-.notif-bell-btn {
+.nav-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.nav-menu-btn.is-active {
+  background: rgba(255, 255, 255, 0.38);
+  border-color: #ffffff;
+}
+
+.menu-chevron {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.menu-chevron.is-flipped {
+  transform: rotate(180deg);
+}
+
+.menu-badge-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid #1a5209;
+  animation: pulse 2s infinite;
+}
+
+/* Notification Bell Dropdown */
+.notif-wrapper {
   position: relative;
 }
 
@@ -575,7 +909,7 @@ onUnmounted(() => {
   border-radius: 9999px;
   background: #ef4444;
   color: #fff;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -586,7 +920,7 @@ onUnmounted(() => {
 
 .notif-flyout {
   position: absolute;
-  top: calc(100% + 12px);
+  top: calc(100% + 10px);
   right: 0;
   width: 360px;
   max-width: calc(100vw - 32px);
@@ -654,16 +988,11 @@ onUnmounted(() => {
   padding: 32px 16px;
   text-align: center;
   gap: 8px;
-}
-
-.flyout-empty span {
-  font-size: 1.8rem;
-}
-
-.flyout-empty p {
-  font-size: 13px;
   color: var(--text-muted);
-  margin: 0;
+}
+
+.empty-icon {
+  opacity: 0.6;
 }
 
 .flyout-item {
@@ -689,9 +1018,8 @@ onUnmounted(() => {
 }
 
 .flyout-item-icon {
-  font-size: 1.2rem;
-  line-height: 1;
-  padding-top: 2px;
+  padding-top: 3px;
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
@@ -763,25 +1091,617 @@ onUnmounted(() => {
   text-decoration: underline;
 }
 
-/* Phone overrides — kept last so they win over the base rules above */
-@media (max-width: 640px) {
+/* =========================================================
+   VELT MEGA MENU DESIGN
+   ========================================================= */
+
+.mega-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 25, 8, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 99;
+}
+
+.mega-menu-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 1.5rem;
+  width: min(1080px, calc(100vw - 3rem));
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28), 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  padding: 26px 28px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Admin: menu holds only the account card */
+@media (min-width: 769px) {
+  .mega-menu-card.is-account-only {
+    width: min(340px, calc(100vw - 3rem));
+    padding: 14px;
+  }
+}
+
+.is-account-only .mega-menu-grid {
+  grid-template-columns: 1fr;
+}
+
+/* Animation */
+.mega-menu-enter-active,
+.mega-menu-leave-active {
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mega-menu-enter-from,
+.mega-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.985);
+}
+
+.mega-menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 290px;
+  gap: 28px;
+  align-items: stretch;
+}
+
+/* Left / Center Columns */
+.mega-columns-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.mega-columns-wrap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.mega-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.mega-col-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  padding-left: 10px;
+}
+
+.mega-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mega-item {
+  width: 100%;
+}
+
+.mega-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  color: var(--text-main);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.915rem;
+  transition: all var(--transition-fast, 0.2s);
+}
+
+.mega-link:hover {
+  background: var(--bg-subtle);
+  transform: translateX(3px);
+  color: var(--color-primary);
+}
+
+.mega-link.router-link-exact-active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.mega-item-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.mega-link:hover .mega-item-icon-box {
+  transform: scale(1.1);
+}
+
+.mega-link-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mega-badge-pill {
+  border-radius: 9999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 1px 7px;
+  margin-left: auto;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35);
+}
+
+/* Footer Link across columns */
+.mega-columns-footer {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.mega-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: all var(--transition-fast, 0.2s);
+}
+
+.mega-footer-link:hover {
+  background: var(--color-primary-light);
+  gap: 9px;
+}
+
+/* =========================================================
+   RIGHT ACCOUNT & SYSTEM STATUS PANEL
+   ========================================================= */
+
+.mega-account-panel {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 280px;
+}
+
+.account-profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  text-decoration: none;
+  color: var(--text-main);
+  transition: all var(--transition-fast, 0.2s);
+}
+
+.account-profile-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.account-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-primary), #2d8212);
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme='bsu'] .account-avatar {
+  background: linear-gradient(135deg, #1A5209, #25700e);
+}
+
+.account-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.account-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-username {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.account-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.badge-role {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--color-primary-light, rgba(26, 82, 9, 0.1));
+  color: var(--color-primary);
+  border: 1px solid rgba(26, 82, 9, 0.2);
+}
+
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-success, #16a34a);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success, #16a34a);
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.15); }
+}
+
+/* Office & Access Meta Box */
+.account-meta-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+
+.meta-icon {
+  color: var(--color-primary);
+  opacity: 0.85;
+}
+
+.meta-value {
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  text-align: right;
+}
+
+/* Theme Strip */
+.feature-theme-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.2s);
+}
+
+.feature-theme-strip:hover {
+  border-color: var(--color-primary);
+}
+
+.theme-strip-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-strip-icon {
+  color: var(--color-accent, #e6d628);
+}
+
+.theme-strip-action {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--color-primary);
+  text-transform: uppercase;
+}
+
+/* Action Buttons (Learn More & View Docs style) */
+.feature-action-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.feature-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  border-radius: 9999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all var(--transition-fast, 0.2s);
+}
+
+.feature-btn-secondary:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.feature-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  border-radius: 9999px;
+  background: #4f46e5;
+  border: none;
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.2s);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+
+html[data-theme='bsu'] .feature-btn-primary {
+  background: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(26, 82, 9, 0.35);
+}
+
+.feature-btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+.badge-mini {
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  border-radius: 9999px;
+  padding: 1px 5px;
+}
+
+/* =========================================================
+   RESPONSIVE & MOBILE VIEW PLACEMENT
+   ========================================================= */
+
+@media (max-width: 1024px) {
+  .mega-menu-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mega-columns-wrap {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+/* Clean, Balanced, Bespoke Mobile View Placement */
+@media (max-width: 768px) {
+  .navbar-inner {
+    height: 64px;
+    padding: 0 0.85rem;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+  }
+
+  .brand-section {
+    flex: 1;
+    min-width: 0;
+    gap: 0.5rem;
+    overflow: hidden;
+  }
+
+  .brand-logos-container {
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+
+  .nav-logo-badge {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand-title-group {
+    min-width: 0;
+    overflow: hidden;
+  }
+
   .brand-title {
-    font-size: 1rem;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .brand-subtitle {
-    max-width: 150px;
+    font-size: 0.65rem;
+    max-width: 110px;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  /* Notification flyout spans the screen instead of hanging off the bell */
+  /* Symmetrical, unified mobile actions dock */
+  .nav-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.22);
+    padding: 3px 4px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+  }
+
+  .notif-wrapper {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+
+  .theme-btn.notif-bell-btn,
+  .nav-menu-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    margin: 0;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+  }
+
+  .theme-btn.notif-bell-btn:hover,
+  .nav-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.24);
+    transform: none;
+  }
+
+  .theme-btn.notif-bell-btn.is-active,
+  .nav-menu-btn.is-active {
+    background: rgba(255, 255, 255, 0.35);
+    border-color: #ffffff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  }
+
+  .bell-unread-badge {
+    top: -2px;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    font-size: 9px;
+    padding: 0 3px;
+  }
+
+  .menu-badge-dot {
+    top: 2px;
+    right: 2px;
+    width: 7px;
+    height: 7px;
+  }
+
+  /* Full-width floating card on mobile */
+  .mega-menu-card {
+    position: fixed;
+    top: 68px;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+    padding: 20px 16px;
+    border-radius: 20px;
+  }
+
+  .mega-columns-wrap {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .feature-action-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Flyout dropdown stays aligned on mobile */
   .notif-flyout {
     position: fixed;
-    top: 72px;
-    left: 0.5rem;
-    right: 0.5rem;
+    top: 68px;
+    left: 0.75rem;
+    right: 0.75rem;
     width: auto;
     max-width: none;
   }
