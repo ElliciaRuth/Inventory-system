@@ -59,6 +59,11 @@ export const authApi = {
     return response.data
   },
 
+  async verifyResetCode(email, code) {
+    const response = await client.post('/auth/verify-reset-code', { email, code })
+    return response.data
+  },
+
   async resetPassword(payload) {
     const response = await client.post('/auth/reset-password', payload)
     return response.data

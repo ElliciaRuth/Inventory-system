@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { authApi } from '../api/auth'
 import { toast, errorMessage } from '../composables/useToast'
+import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.vue'
+import { maskEmail } from '../utils/maskEmail'
 import {
   User,
   Mail,
@@ -27,6 +29,9 @@ const router = useRouter()
 
 // Active tab
 const activeTab = ref('profile') // 'profile' | 'security'
+
+// The email field shows a masked address until it is clicked for editing
+const emailFocused = ref(false)
 
 // Profile Form State
 const profileForm = ref({
@@ -298,11 +303,14 @@ onMounted(async () => {
               <label class="form-label" for="profile_email">Email Address</label>
               <input
                 id="profile_email"
-                v-model="profileForm.email"
+                :value="emailFocused ? profileForm.email : maskEmail(profileForm.email)"
                 type="email"
                 class="form-input"
                 placeholder="e.g. jdelacruz@bsu.edu.ph"
                 autocomplete="email"
+                @input="profileForm.email = $event.target.value"
+                @focus="emailFocused = true"
+                @blur="emailFocused = false"
               />
               <small class="form-hint">Used for official system communications and account recovery.</small>
             </div>
@@ -450,6 +458,7 @@ onMounted(async () => {
                   class="form-input"
                   autocomplete="new-password"
                   placeholder="Re-type your new password"
+                  :class="matchClass(passwordForm.password, passwordForm.confirm_password)"
                   required
                 />
                 <button
@@ -462,6 +471,7 @@ onMounted(async () => {
                   <component :is="showConfirmPassword ? EyeOff : Eye" :size="16" />
                 </button>
               </div>
+              <PasswordMatchHint :password="passwordForm.password" :confirm="passwordForm.confirm_password" />
             </div>
 
             <div class="form-actions-bar">

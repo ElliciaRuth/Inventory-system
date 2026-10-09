@@ -11,6 +11,7 @@ use CodeIgniter\HTTP\ResponseInterface;
  *
  * - Rejects unauthenticated API requests with 401 JSON
  * - Enforces a 24-hour session timeout (from login_time)
+ * - Enforces a 15-minute inactivity timeout (from last_activity)
  * - Rejects sessions whose user was deactivated or deleted
  * - Blocks everything except the matching setup endpoint while a forced
  *   first-login step (password change / SMTP / recovery email) is pending
@@ -20,6 +21,9 @@ class AuthFilter implements FilterInterface
 {
     /** Session lifetime in seconds (24 hours) */
     private const SESSION_TTL = 86400;
+
+    /** Inactivity limit in seconds (15 minutes) */
+    public const IDLE_TTL = 900;
 
     /**
      * Forced first-login steps: session flag => [error code, endpoints still allowed].
@@ -45,6 +49,13 @@ class AuthFilter implements FilterInterface
             session()->destroy();
             return $this->deny(401, 'Your session has expired. Please log in again.', 'session_expired');
         }
+
+        // ── 2b. 15-minute inactivity timeout ─────────────────────────────
+        if (self::isIdleExpired()) {
+            session()->destroy();
+            return $this->deny(401, 'You were logged out after 15 minutes of inactivity.', 'session_expired');
+        }
+        session()->set('last_activity', time());
 
         // ── 3. Verify the session user still exists and is active ─────────
         $userId = (int) (session('user')['id'] ?? 0);
@@ -88,6 +99,17 @@ class AuthFilter implements FilterInterface
         $response->setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
 
         return $response;
+    }
+
+    /**
+     * True when the logged-in session has been idle longer than IDLE_TTL.
+     * Sessions created before last_activity existed fall back to login_time.
+     */
+    public static function isIdleExpired(): bool
+    {
+        $lastActivity = (int) (session('last_activity') ?? session('login_time') ?? 0);
+
+        return $lastActivity === 0 || (time() - $lastActivity) > self::IDLE_TTL;
     }
 
     private function deny(int $status, string $message, string $code): ResponseInterface

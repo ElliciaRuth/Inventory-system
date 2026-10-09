@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
@@ -113,9 +114,11 @@ async function handleLogout() {
                   v-model="confirmPassword"
                   type="password"
                   class="login-field-input"
+                  :class="matchClass(password, confirmPassword)"
                   autocomplete="new-password"
                   required
                 />
+                <PasswordMatchHint :password="password" :confirm="confirmPassword" />
               </div>
               <p class="login-card-subtitle" style="font-size: 0.8rem;">
                 At least 6 characters with an uppercase letter, a lowercase letter and a number,

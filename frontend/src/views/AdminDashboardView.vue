@@ -1,11 +1,15 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
-import { Users, Clock, Building2, Trash2, Pencil, Check } from 'lucide-vue-next'
+import { Users, Clock, Building2, Trash2, Pencil, Check, Mail } from 'lucide-vue-next'
 import { adminApi } from '../api/admin'
+import { maskEmail } from '../utils/maskEmail'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import StatCard from '../components/StatCard.vue'
 import AppPagination from '../components/AppPagination.vue'
+import EmailSettingsPanel from '../components/EmailSettingsPanel.vue'
+import { confirmDialog } from '../composables/useConfirm'
+import { toast, errorMessage } from '../composables/useToast'
 
 const authStore = useAuthStore()
 
@@ -29,7 +33,7 @@ const adminData = ref({
 // Search queries per section
 const searchUsers = ref('')
 const searchOffices = ref('')
-const activeSection = ref('users') // 'users' | 'offices' | 'entities' | 'units'
+const activeSection = ref('users') // 'users' | 'offices' | 'email'
 
 // Modal state
 const isModalOpen = ref(false)
@@ -80,15 +84,21 @@ async function handleActivateUser(userId) {
     triggerAutoReload('activate-user')
     await fetchAdminData()
   } catch (err) {
-    alert(err.response?.data?.message || 'Failed to activate user.')
+    toast(errorMessage(err, 'Failed to activate user.'), 'error')
   } finally {
     actionLoading.value = false
   }
 }
 
-async function handleDeactivateUser(userId) {
+async function handleDeactivateUser(userId, username) {
   if (actionLoading.value) return
-  if (confirm('Are you sure you want to deactivate this user? They will not be able to log in.')) {
+  const ok = await confirmDialog({
+    title: 'Deactivate user?',
+    message: `${username ? `"${username}"` : 'This user'} will no longer be able to log in. You can reactivate the account later.`,
+    confirmText: 'Deactivate',
+    variant: 'danger',
+  })
+  if (ok) {
     actionLoading.value = true
     try {
       await adminApi.deactivateUser(userId)
@@ -96,7 +106,7 @@ async function handleDeactivateUser(userId) {
       triggerAutoReload('deactivate-user')
       await fetchAdminData()
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to deactivate user.')
+      toast(errorMessage(err, 'Failed to deactivate user.'), 'error')
     } finally {
       actionLoading.value = false
     }
@@ -105,7 +115,13 @@ async function handleDeactivateUser(userId) {
 
 async function handleDeleteRecord(type, id, label) {
   if (actionLoading.value) return
-  if (confirm(`Are you sure you want to delete ${label || 'this record'}?`)) {
+  const ok = await confirmDialog({
+    title: type === 'users' ? 'Delete user?' : 'Delete office?',
+    message: `${label ? `"${label}"` : 'This record'} will be permanently deleted. This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (ok) {
     actionLoading.value = true
     try {
       await adminApi.deleteRecord(type, id)
@@ -113,7 +129,7 @@ async function handleDeleteRecord(type, id, label) {
       triggerAutoReload('delete-record')
       await fetchAdminData()
     } catch (err) {
-      alert(err.response?.data?.message || 'Cannot delete record.')
+      toast(errorMessage(err, 'Cannot delete record.'), 'error')
     } finally {
       actionLoading.value = false
     }
@@ -149,7 +165,7 @@ async function handleSaveOffice() {
     triggerAutoReload('save-office')
     await fetchAdminData()
   } catch (err) {
-    alert(err.response?.data?.message || 'Failed to save office.')
+    toast(errorMessage(err, 'Failed to save office.'), 'error')
   } finally {
     modalLoading.value = false
   }
@@ -291,7 +307,7 @@ onMounted(() => {
           <tbody>
             <tr v-for="pUser in adminData.pendingUsers" :key="pUser.user_id">
               <td><strong>{{ pUser.username }}</strong></td>
-              <td>{{ pUser.email || '—' }}</td>
+              <td>{{ maskEmail(pUser.email) || '—' }}</td>
               <td><span class="badge badge-info">{{ pUser.role }}</span></td>
               <td>{{ pUser.user_office_name || 'N/A' }}</td>
               <td style="text-align: center;">
@@ -317,7 +333,7 @@ onMounted(() => {
     </section>
 
     <!-- Navigation Tabs for Sections -->
-    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem;">
       <button
         type="button"
         class="btn btn-sm"
@@ -339,7 +355,21 @@ onMounted(() => {
         <Building2 :size="15" />
         <span>User Offices ({{ adminData.records.user_office_table.length }})</span>
       </button>
+
+      <button
+        type="button"
+        class="btn btn-sm"
+        :class="activeSection === 'email' ? 'btn-primary' : 'btn-secondary'"
+        style="display: inline-flex; align-items: center; gap: 6px;"
+        @click="activeSection = 'email'"
+      >
+        <Mail :size="15" />
+        <span>Email Settings</span>
+      </button>
     </div>
+
+    <!-- ── Email (SMTP) Settings for password recovery ── -->
+    <EmailSettingsPanel v-if="activeSection === 'email'" />
 
     <!-- ── Users Management Section ── -->
     <section v-if="activeSection === 'users'" class="panel">
@@ -372,7 +402,7 @@ onMounted(() => {
             <tr v-for="user in paginatedUsers" :key="user.user_id">
               <td><strong>{{ user.name || user.username }}</strong></td>
               <td style="font-family: var(--font-mono); font-size: 0.825rem;">{{ user.username }}</td>
-              <td>{{ user.email || '—' }}</td>
+              <td>{{ maskEmail(user.email) || '—' }}</td>
               <td>{{ user.user_office_name || 'N/A' }}</td>
               <td>
                 <span class="badge badge-neutral">{{ user.role }}</span>
@@ -396,7 +426,7 @@ onMounted(() => {
                     class="btn btn-sm btn-secondary"
                     style="color: var(--color-warning);"
                     title="Deactivate Account"
-                    @click="handleDeactivateUser(user.user_id)"
+                    @click="handleDeactivateUser(user.user_id, user.username)"
                   >
                     Deactivate
                   </button>

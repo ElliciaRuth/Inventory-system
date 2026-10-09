@@ -1,10 +1,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Clock, UserCheck, Users, AlertTriangle } from 'lucide-vue-next'
+import { maskEmail } from '../utils/maskEmail'
 import { settingsApi } from '../api/settings'
 import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
 import BackupPanel from '../components/BackupPanel.vue'
+import { confirmDialog } from '../composables/useConfirm'
 
 const authStore = useAuthStore()
 
@@ -124,18 +126,35 @@ async function run(key, action) {
   }
 }
 
-function deleteRecord(type, row) {
-  if (!confirm(`Delete this ${SECTION_TITLES[type] || 'record'}?`)) return
+async function deleteRecord(type, row) {
+  const ok = await confirmDialog({
+    title: `Delete ${(SECTION_TITLES[type] || 'record').toLowerCase()}?`,
+    message: 'This record will be permanently deleted. This cannot be undone.',
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
   run(`delete-${type}-${row[pkFor(type)]}`, () => settingsApi.deleteRecord(type, row[pkFor(type)]))
 }
 
-function activate(user) {
-  if (!confirm(`Activate ${user.username}?`)) return
+async function activate(user) {
+  const ok = await confirmDialog({
+    title: 'Activate user?',
+    message: `"${user.username}" will be able to log in to the system.`,
+    confirmText: 'Activate',
+  })
+  if (!ok) return
   run(`activate-${user.user_id}`, () => settingsApi.activateUser(user.user_id))
 }
 
-function deactivate(user) {
-  if (!confirm(`Deactivate ${user.username}? They will no longer be able to log in.`)) return
+async function deactivate(user) {
+  const ok = await confirmDialog({
+    title: 'Deactivate user?',
+    message: `"${user.username}" will no longer be able to log in. You can reactivate the account later.`,
+    confirmText: 'Deactivate',
+    variant: 'danger',
+  })
+  if (!ok) return
   run(`deactivate-${user.user_id}`, () => settingsApi.deactivateUser(user.user_id))
 }
 
@@ -193,7 +212,7 @@ onMounted(load)
               <tr v-for="u in data.pendingUsers" :key="u.user_id">
                 <td>{{ u.name }}</td>
                 <td>{{ u.username }}</td>
-                <td>{{ u.email }}</td>
+                <td>{{ maskEmail(u.email) }}</td>
                 <td>{{ u.role }}</td>
                 <td>{{ u.user_office_name || 'N/A' }}</td>
                 <td style="text-align: right;">
@@ -222,7 +241,7 @@ onMounted(load)
                   <tr v-for="u in filteredUsers(activityId)" :key="u.user_id">
                     <td>{{ u.name }}</td>
                     <td>{{ u.username }}</td>
-                    <td>{{ u.email }}</td>
+                    <td>{{ maskEmail(u.email) }}</td>
                     <td>{{ u.role }}</td>
                     <td>{{ u.user_office_name }}</td>
                     <td><span class="badge" :class="activityId === 1 ? 'badge-success' : 'badge-danger'">{{ u.activity_status }}</span></td>

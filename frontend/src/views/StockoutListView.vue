@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { stockoutApi } from '../api/stockout'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 const items = ref([])
 const loading = ref(true)
@@ -68,7 +69,13 @@ async function saveEdit(item) {
 }
 
 async function remove(item) {
-  if (!confirm('Remove this item from your list?')) return
+  const ok = await confirmDialog({
+    title: 'Remove item?',
+    message: `"${item.item_name || 'This item'}" will be removed from your stock-out list.`,
+    confirmText: 'Remove',
+    variant: 'danger',
+  })
+  if (!ok) return
   busyId.value = Number(item.temp_stockout_item_id)
   try {
     await stockoutApi.removeDraftItem(item.temp_stockout_item_id)
@@ -82,7 +89,12 @@ async function remove(item) {
 }
 
 async function submit() {
-  if (!confirm("Submit this list for approval? You won't be able to edit it after submission.")) return
+  const ok = await confirmDialog({
+    title: 'Submit for approval?',
+    message: "You won't be able to edit this list after it is submitted.",
+    confirmText: 'Submit',
+  })
+  if (!ok) return
   submitting.value = true
   try {
     const res = await stockoutApi.submitDraft()

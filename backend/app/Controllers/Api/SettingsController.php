@@ -2,7 +2,9 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\Mailer;
 use App\Models\SettingsModel;
+use App\Models\SmtpSettingsModel;
 use App\Models\UserModel;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -186,6 +188,109 @@ class SettingsController extends BaseApiController
         ], 'Inventory settings saved.');
     }
 
+    // ── Email (SMTP) settings — Technical Staff ───────────────────────────
+    // The Gmail account used to send password-reset codes. The App Password is
+    // stored encrypted and never sent back to the browser.
+
+    /**
+     * GET /api/settings/email
+     */
+    public function emailSettings(): ResponseInterface
+    {
+        $config = (new SmtpSettingsModel())->getActive();
+        if (! $config) {
+            return $this->respondSuccess(['configured' => false], 'Email is not configured');
+        }
+
+        $configuredBy = $config['configured_by']
+            ? (new UserModel())->select('name, username')->find((int) $config['configured_by'])
+            : null;
+
+        return $this->respondSuccess([
+            'configured'    => true,
+            'smtp_email'    => $config['smtp_email'],
+            'configured_by' => $configuredBy ? ($configuredBy['name'] ?: $configuredBy['username']) : null,
+            'updated_at'    => $config['updated_at'] ?? $config['created_at'] ?? null,
+        ], 'Email settings retrieved');
+    }
+
+    /**
+     * POST /api/settings/email   { smtp_email, smtp_password? }
+     * The password may be left blank to keep the saved one (only when the account already exists).
+     */
+    public function saveEmailSettings(): ResponseInterface
+    {
+        $input    = $this->input();
+        $email    = trim((string) ($input['smtp_email'] ?? ''));
+        // Google shows App Passwords as "abcd efgh ijkl mnop"
+        $password = str_replace(' ', '', (string) ($input['smtp_password'] ?? ''));
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->respondError('Please enter a valid Gmail address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $model    = new SmtpSettingsModel();
+        $existing = $model->getActive();
+
+        if ($password === '' && ! $existing) {
+            return $this->respondError('Please enter the Gmail App Password.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($password !== '' && strlen($password) < 8) {
+            return $this->respondError('The App Password looks too short. Gmail App Passwords are 16 characters.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $data = [
+            'smtp_email'    => $email,
+            'configured_by' => $this->currentUserId(),
+        ];
+        if ($password !== '') {
+            $data['smtp_password'] = base64_encode(service('encrypter')->encrypt($password));
+        }
+
+        if ($existing) {
+            $model->update($existing['id'], $data);
+        } else {
+            $model->insert($data);
+        }
+
+        return $this->respondSuccess(null, 'Email settings saved. Send a test email to make sure they work.');
+    }
+
+    /**
+     * POST /api/settings/email/test   { to? }  — defaults to the current user's email
+     */
+    public function testEmailSettings(): ResponseInterface
+    {
+        $to = trim((string) ($this->input()['to'] ?? ''));
+        if ($to === '') {
+            $to = (string) ((new UserModel())->find($this->currentUserId())['email'] ?? '');
+        }
+        if (! filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            return $this->respondError('Enter an email address to send the test to.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $mailer = new Mailer();
+        if (! $mailer->isConfigured()) {
+            return $this->respondError('Save the email settings first.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $error = $mailer->send(
+            $to,
+            'Test Email - BSU Inventory',
+            '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;">' .
+            '<h2 style="color:#1a5209;">Email is working</h2>' .
+            '<p style="color:#475569;line-height:1.6;">This test confirms the BSU Inventory System can send email. ' .
+            'Password-reset codes will be sent from this account.</p>' .
+            '</div>'
+        );
+
+        if ($error !== null) {
+            return $this->respondError($error, [], ResponseInterface::HTTP_BAD_GATEWAY);
+        }
+
+        return $this->respondSuccess(['to' => $to], "Test email sent to {$to}. Check the inbox (and Spam folder).");
+    }
+
     /**
      * Definition for a type the current level may manage, or null.
      */
@@ -205,7 +310,7 @@ class SettingsController extends BaseApiController
 
     private function saveUser(int $id, array $payload): ResponseInterface
     {
-        $payload['name']             = trim((string) ($payload['name'] ?? ''));
+        $payload['name']             = $this->cleanName((string) ($payload['name'] ?? ''));
         $payload['username']         = trim((string) ($payload['username'] ?? ''));
         $payload['email']            = trim((string) ($payload['email'] ?? ''));
         $payload['lvl_of_access_id'] = (int) ($payload['lvl_of_access_id'] ?? 0);
@@ -213,6 +318,9 @@ class SettingsController extends BaseApiController
 
         if ($payload['username'] === '' || $payload['lvl_of_access_id'] <= 0 || $payload['user_office_id'] <= 0) {
             return $this->respondError('Please fill in the required user fields.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($error = $this->nameError($payload['name'], 'Full name', allowComma: true)) {
+            return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $userModel = new UserModel();

@@ -21,6 +21,7 @@ import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
+import { toast } from '../composables/useToast'
 
 // meta.public   — reachable without logging in
 // meta.minLevel — lowest access level allowed (mirrors the backend route filters)
@@ -210,11 +211,15 @@ router.beforeEach(async (to) => {
 })
 
 // The API reports an expired/missing session (401) or a pending setup step (403)
-onAuthFailure(({ type, step }) => {
+onAuthFailure(({ type, step, code, message }) => {
   const authStore = useAuthStore()
   const current = router.currentRoute.value
 
   if (type === 'unauthenticated') {
+    // Explain why the user is being sent to the login page (once, not per failed request)
+    if (authStore.isAuthenticated && (code === 'session_expired' || code === 'account_inactive') && message) {
+      toast(message, 'info', 6000)
+    }
     authStore.clearSession()
     if (!current.meta.public) {
       router.push({ name: 'login', query: current.fullPath !== '/' ? { redirect: current.fullPath } : {} })

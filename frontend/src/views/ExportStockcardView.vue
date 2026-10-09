@@ -99,7 +99,9 @@ const selectedProductLabel = computed(() => {
 
 // Paper size description for preview
 const paperSizeLabel = computed(() => {
-  return paperSize.value === 'short' ? 'Short (8.5″ × 11″ Letter)' : 'Long (8.5″ × 13″ Folio)'
+  if (paperSize.value === 'short') return 'Short (8.5″ × 11″ Letter)'
+  if (paperSize.value === 'a4') return 'A4 (210 × 297 mm)'
+  return 'Long (8.5″ × 13″ Folio)'
 })
 
 // Sort order description for preview
@@ -374,6 +376,25 @@ onMounted(() => {
                       </div>
                     </div>
                   </label>
+
+                  <label
+                    class="ex-card-radio"
+                    :class="{ 'is-selected': paperSize === 'a4' }"
+                  >
+                    <input
+                      v-model="paperSize"
+                      type="radio"
+                      name="paper_size"
+                      value="a4"
+                    />
+                    <div class="ex-card-radio-body">
+                      <File :size="20" class="ex-card-radio-icon" />
+                      <div class="ex-card-radio-text">
+                        <strong>A4</strong>
+                        <small>8.27″ × 11.69″ (210 × 297 mm)</small>
+                      </div>
+                    </div>
+                  </label>
                 </div>
               </div>
 
@@ -531,9 +552,6 @@ onMounted(() => {
   .ex-layout {
     grid-template-columns: 1fr;
   }
-  .ex-sidebar {
-    order: -1;
-  }
 }
 
 /* ── Panel Header & Body ────────────────────────────────── */
@@ -621,6 +639,12 @@ onMounted(() => {
 @media (max-width: 580px) {
   .ex-two-col {
     grid-template-columns: 1fr;
+  }
+  .ex-panel-header {
+    padding: 14px 16px;
+  }
+  .ex-panel-body {
+    padding: 16px;
   }
 }
 
@@ -714,6 +738,13 @@ onMounted(() => {
   gap: 20px;
   position: sticky;
   top: 92px;
+}
+
+/* Single column: the sidebar follows the options instead of sticking over them */
+@media (max-width: 960px) {
+  .ex-sidebar {
+    position: static;
+  }
 }
 
 /* Preview Card */

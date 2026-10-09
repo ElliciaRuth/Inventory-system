@@ -6,6 +6,8 @@ import { useAutoReload, deduplicateById, triggerAutoReload } from '../composable
 import ProductModal from '../components/ProductModal.vue'
 import AppPagination from '../components/AppPagination.vue'
 import { Pencil, Trash2 } from 'lucide-vue-next'
+import { confirmDialog } from '../composables/useConfirm'
+import { toast, errorMessage } from '../composables/useToast'
 
 const authStore = useAuthStore()
 const products = ref([])
@@ -83,14 +85,20 @@ function openEditModal(prod) {
 
 async function handleDelete(prod) {
   if (deletingId.value) return
-  if (confirm(`Are you sure you want to delete "${prod.product}"?`)) {
+  const ok = await confirmDialog({
+    title: 'Delete product?',
+    message: `"${prod.product}" will be permanently deleted. This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (ok) {
     deletingId.value = prod.product_id
     try {
       await productsApi.deleteProduct(prod.product_id)
       triggerAutoReload('delete-product')
       await loadData()
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete product.')
+      toast(errorMessage(err, 'Failed to delete product.'), 'error')
     } finally {
       deletingId.value = null
     }

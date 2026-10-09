@@ -2,6 +2,8 @@
 
 namespace App\Controllers\Api;
 
+use App\Filters\AuthFilter;
+use App\Libraries\Mailer;
 use App\Models\SmtpSettingsModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -71,6 +73,7 @@ class AuthController extends BaseApiController
         session()->regenerate();
         session()->set('user', $sessionData);
         session()->set('login_time', time());
+        session()->set('last_activity', time());
 
         // ── First login: user must change the password before anything else ──
         if ((int) ($user['must_change_password'] ?? 0) === 1) {
@@ -90,6 +93,13 @@ class AuthController extends BaseApiController
     public function me(): ResponseInterface
     {
         $sessionUser = session('user');
+
+        // An idle session counts as logged out (auth/me sits outside the auth filter)
+        if ($sessionUser && AuthFilter::isIdleExpired()) {
+            session()->destroy();
+            $sessionUser = null;
+        }
+
         if (! $sessionUser) {
             return $this->respondSuccess([
                 'authenticated' => false,
@@ -97,6 +107,9 @@ class AuthController extends BaseApiController
                 'pending_setup' => null,
             ], 'Not authenticated');
         }
+
+        // Also serves as the frontend's keep-alive while the user is active
+        session()->set('last_activity', time());
 
         $userId    = (int) ($sessionUser['id'] ?? 0);
         $userModel = new UserModel();
@@ -198,10 +211,18 @@ class AuthController extends BaseApiController
             return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $firstName  = trim((string) ($input['first_name'] ?? ''));
-        $lastName   = trim((string) ($input['last_name'] ?? ''));
-        $middleName = trim((string) ($input['middle_name'] ?? ''));
-        $suffix     = trim((string) ($input['suffix'] ?? ''));
+        $firstName  = $this->cleanName((string) ($input['first_name'] ?? ''));
+        $lastName   = $this->cleanName((string) ($input['last_name'] ?? ''));
+        $middleName = $this->cleanName((string) ($input['middle_name'] ?? ''));
+        $suffix     = $this->normalizeSuffix((string) ($input['suffix'] ?? ''));
+
+        $nameError = $this->nameError($firstName, 'First name')
+            ?? $this->nameError($lastName, 'Last name')
+            ?? $this->nameError($middleName, 'Middle name')
+            ?? ($suffix === null ? 'Suffix must be one of: Jr., Sr., II, III, IV, V, VI.' : null);
+        if ($nameError) {
+            return $this->respondError($nameError, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         // Compose the legacy 'name' column: "First [Middle] Last[, Suffix]"
         $nameParts = array_filter([$firstName, $middleName, $lastName]);
@@ -305,9 +326,13 @@ class AuthController extends BaseApiController
         }
 
         $input    = $this->input();
-        $name     = trim((string) ($input['name'] ?? ''));
+        $name     = $this->cleanName((string) ($input['name'] ?? ''));
         $username = trim((string) ($input['username'] ?? ''));
         $email    = trim((string) ($input['email'] ?? ''));
+
+        if ($error = $this->nameError($name, 'Full name', allowComma: true)) {
+            return $this->respondError($error, ['name' => $error], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         $rules = [
             'name'     => 'permit_empty|max_length[255]',
@@ -524,15 +549,19 @@ class AuthController extends BaseApiController
         $model = new UserModel();
         $user  = $model->findByEmail($email);
 
-        // Always report success to prevent email enumeration
-        $successMsg = 'If an account with that email exists, a 6-digit verification code has been sent.';
-
+        // Tell the user straight away when no account uses this email, so they
+        // aren't left waiting for a code that will never arrive.
         if (! $user) {
-            return $this->respondSuccess(null, $successMsg);
+            return $this->respondError(
+                'No account is registered with that email address. Check the spelling or contact the administrator.',
+                [],
+                ResponseInterface::HTTP_NOT_FOUND
+            );
         }
+        $successMsg = 'A 6-digit verification code has been sent to your email.';
 
-        $smtpConfig = (new SmtpSettingsModel())->getActive();
-        if (! $smtpConfig) {
+        $mailer = new Mailer();
+        if (! $mailer->isConfigured()) {
             return $this->respondError(
                 'Password recovery is not available yet. Please contact the system administrator.',
                 [],
@@ -548,40 +577,23 @@ class AuthController extends BaseApiController
             'password_reset_token'   => hash('sha256', $code),
             'password_reset_expires' => $expires,
         ]);
+        cache()->delete($this->resetAttemptsKey($email));
 
-        try {
-            $smtpPassword = service('encrypter')->decrypt(base64_decode($smtpConfig['smtp_password']));
-
-            $emailService = \Config\Services::email();
-            $emailService->initialize([
-                'protocol'   => 'smtp',
-                'SMTPHost'   => 'smtp.gmail.com',
-                'SMTPUser'   => $smtpConfig['smtp_email'],
-                'SMTPPass'   => $smtpPassword,
-                'SMTPPort'   => 587,
-                'SMTPCrypto' => 'tls',
-                'mailType'   => 'html',
-            ]);
-
-            $emailService->setFrom($smtpConfig['smtp_email'], 'BSU Inventory System');
-            $emailService->setTo($email);
-            $emailService->setSubject('Password Reset Code - BSU Inventory');
-            $emailService->setMessage(
-                '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">' .
-                '<h2 style="color:#0f3d3e;margin-bottom:16px;">Password Reset Code</h2>' .
-                '<p style="color:#475569;line-height:1.6;">You requested a password reset for your BSU Inventory account. Use the verification code below:</p>' .
-                '<div style="text-align:center;margin:28px 0;">' .
-                '<div style="display:inline-block;padding:18px 40px;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;border-radius:14px;font-size:32px;font-weight:700;letter-spacing:8px;">' . esc($code) . '</div>' .
-                '</div>' .
-                '<p style="color:#94a3b8;font-size:13px;">This code will expire in 15 minutes. If you did not request this, you can safely ignore this email.</p>' .
-                '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' .
-                '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p>' .
-                '</div>'
-            );
-
-            $emailService->send();
-        } catch (\Throwable $e) {
-            log_message('error', 'Password reset email failed: ' . $e->getMessage());
+        $error = $mailer->send(
+            $email,
+            'Password Reset Code - BSU Inventory',
+            '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">' .
+            '<h2 style="color:#0f3d3e;margin-bottom:16px;">Password Reset Code</h2>' .
+            '<p style="color:#475569;line-height:1.6;">You requested a password reset for your BSU Inventory account. Use the verification code below:</p>' .
+            '<div style="text-align:center;margin:28px 0;">' .
+            '<div style="display:inline-block;padding:18px 40px;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;border-radius:14px;font-size:32px;font-weight:700;letter-spacing:8px;">' . esc($code) . '</div>' .
+            '</div>' .
+            '<p style="color:#94a3b8;font-size:13px;">This code will expire in 15 minutes. If you did not request this, you can safely ignore this email.</p>' .
+            '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' .
+            '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p>' .
+            '</div>'
+        );
+        if ($error !== null) {
             return $this->respondError(
                 'Failed to send the reset email. Please try again later or contact the administrator.',
                 [],
@@ -595,6 +607,66 @@ class AuthController extends BaseApiController
     // ════════════════════════════════════════════════════════════════
     //  VERIFY CODE + RESET PASSWORD (public)
     // ════════════════════════════════════════════════════════════════
+
+    /** Wrong code guesses allowed per emailed code before a new code is required */
+    private const MAX_RESET_ATTEMPTS = 5;
+
+    /**
+     * Checks the emailed code without changing anything, so the page can ask
+     * for the new password only after a valid code.
+     * POST /api/auth/verify-reset-code   { email, code }
+     */
+    public function verifyResetCode(): ResponseInterface
+    {
+        $input = $this->input();
+        if (! $this->validateData($input, ['email' => 'required|valid_email', 'code' => 'required|exact_length[6]|numeric'])) {
+            return $this->respondError('Please enter the 6-digit code from your email.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->checkResetCode(trim((string) $input['email']), trim((string) $input['code']));
+        if (is_string($result)) {
+            return $this->respondError($result, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return $this->respondSuccess(null, 'Code verified. Choose your new password.');
+    }
+
+    /**
+     * The user the reset code belongs to, or an error message. Wrong guesses
+     * are counted; after MAX_RESET_ATTEMPTS the code is cancelled.
+     */
+    private function checkResetCode(string $email, string $code): array|string
+    {
+        $model = new UserModel();
+        $user  = $model->findByEmail($email);
+        if (! $user || empty($user['password_reset_token'])) {
+            return 'No active code for this email. Please request a new code.';
+        }
+        if (strtotime((string) $user['password_reset_expires']) <= time()) {
+            return 'This code has expired. Please request a new code.';
+        }
+
+        if (hash_equals((string) $user['password_reset_token'], hash('sha256', $code))) {
+            return $user;
+        }
+
+        $key      = $this->resetAttemptsKey($email);
+        $attempts = (int) cache($key) + 1;
+        if ($attempts >= self::MAX_RESET_ATTEMPTS) {
+            cache()->delete($key);
+            $model->update($user['user_id'], ['password_reset_token' => null, 'password_reset_expires' => null]);
+            return 'Too many incorrect attempts. Please request a new code.';
+        }
+        cache()->save($key, $attempts, 900);
+
+        $left = self::MAX_RESET_ATTEMPTS - $attempts;
+        return "Incorrect code. {$left} " . ($left === 1 ? 'attempt' : 'attempts') . ' left.';
+    }
+
+    private function resetAttemptsKey(string $email): string
+    {
+        return 'reset_attempts_' . md5(strtolower(trim($email)));
+    }
 
     /**
      * POST /api/auth/reset-password
@@ -615,13 +687,9 @@ class AuthController extends BaseApiController
         }
 
         $model = new UserModel();
-        $user  = $model->where('email', trim((string) $input['email']))
-            ->where('password_reset_token', hash('sha256', trim((string) $input['code'])))
-            ->where('password_reset_expires >', date('Y-m-d H:i:s'))
-            ->first();
-
-        if (! $user) {
-            return $this->respondError('Invalid or expired verification code. Please try again.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        $user  = $this->checkResetCode(trim((string) $input['email']), trim((string) $input['code']));
+        if (is_string($user)) {
+            return $this->respondError($user, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $password = (string) $input['password'];
@@ -634,6 +702,7 @@ class AuthController extends BaseApiController
             'password_reset_token'   => null,
             'password_reset_expires' => null,
         ]);
+        cache()->delete($this->resetAttemptsKey((string) $input['email']));
 
         return $this->respondSuccess(null, 'Password has been reset successfully. You can now log in with your new password.');
     }

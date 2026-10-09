@@ -6,6 +6,7 @@ import { useThemeStore } from '../stores/themeStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { triggerAutoReload, isReloading } from '../composables/useAutoReload'
 import { backupsApi } from '../api/backups'
+import { maskEmail } from '../utils/maskEmail'
 import bsuLogo from '../assets/images/bsu-logo.png'
 import bakeryLogo from '../assets/images/bakery-logo.png'
 import fpcLogo from '../assets/images/fpc-logo.png'
@@ -204,7 +205,6 @@ const menuColumns = computed(() => {
         title: 'SYSTEM SETTINGS',
         items: [
           { label: 'Settings', to: '/settings', icon: Settings, color: '#94a3b8', badge: notificationStore.counts.pendingUsers || 0 },
-          { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
         ],
       },
     ]
@@ -228,10 +228,9 @@ const menuColumns = computed(() => {
         ],
       },
       {
-        title: 'ITEMS & PROFILE',
+        title: 'ITEMS',
         items: [
           { label: 'Item Catalog', to: '/products', icon: Package, color: '#34d399' },
-          { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
         ],
       },
     ]
@@ -251,7 +250,6 @@ const menuColumns = computed(() => {
           color: '#fb923c',
           badge: notificationStore.counts.stockoutRequests || 0,
         },
-        { label: 'Edit Profile', to: '/profile', icon: User, color: '#10b981' },
       ],
     },
     {
@@ -472,16 +470,19 @@ onUnmounted(() => {
           <component :is="themeIconComponent" :size="18" />
         </button>
 
-        <!-- User Profile Chip (Desktop only) -->
+        <!-- Signed-in user chip → Edit Profile (avatar only on phones) -->
         <router-link
           to="/profile"
-          class="user-chip desktop-only"
-          title="View & Edit Profile"
+          class="user-chip"
+          :class="{ 'is-active': route.path === '/profile' }"
+          title="Edit profile"
+          aria-label="Edit profile"
+          @click="closeMegaMenu"
         >
           <div class="user-avatar">
             {{ (authStore.userName || 'A').charAt(0).toUpperCase() }}
           </div>
-          <div class="user-info">
+          <div class="user-info desktop-only">
             <span class="user-name">{{ authStore.user?.name || authStore.userName }}</span>
             <span class="user-role">{{ authStore.role }}</span>
           </div>
@@ -555,29 +556,12 @@ onUnmounted(() => {
                 </li>
               </ul>
             </div>
-
-            <!-- Bottom Footer Link (matching VIEW ALL FEATURES in Velt) -->
-            <div class="mega-columns-footer">
-              <router-link
-                to="/transactions"
-                class="mega-footer-link"
-                @click="closeMegaMenu"
-              >
-                <span>VIEW ALL TRANSACTIONS</span>
-                <ArrowRight :size="13" />
-              </router-link>
-            </div>
           </div>
 
           <!-- Right: User Account & System Status Card -->
           <div class="mega-account-panel">
-            <!-- Account Profile Header (Clickable -> /profile) -->
-            <router-link
-              to="/profile"
-              class="account-profile-card"
-              @click="closeMegaMenu"
-              title="Click to view & edit your profile"
-            >
+            <!-- Account Profile Header -->
+            <div class="account-profile-card">
               <div class="account-avatar">
                 {{ (authStore.userName || 'U').charAt(0).toUpperCase() }}
               </div>
@@ -592,7 +576,7 @@ onUnmounted(() => {
                   </span>
                 </div>
               </div>
-            </router-link>
+            </div>
 
             <!-- Office & Access Meta Info -->
             <div class="account-meta-box">
@@ -615,7 +599,7 @@ onUnmounted(() => {
                   <User :size="13" class="meta-icon" />
                   <span>Email:</span>
                 </span>
-                <span class="meta-value" :title="authStore.user.email">{{ authStore.user.email }}</span>
+                <span class="meta-value">{{ maskEmail(authStore.user.email) }}</span>
               </div>
             </div>
 
@@ -635,15 +619,6 @@ onUnmounted(() => {
 
             <!-- Bottom Action Buttons -->
             <div class="feature-action-buttons">
-              <router-link
-                to="/profile"
-                class="feature-btn-secondary"
-                @click="closeMegaMenu"
-              >
-                <User :size="14" />
-                <span>Edit Profile</span>
-              </router-link>
-
               <button
                 type="button"
                 class="feature-btn-primary"
@@ -804,12 +779,18 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.14);
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: #ffffff;
+  text-decoration: none;
   cursor: pointer;
   transition: all var(--transition-fast, 0.2s ease);
 }
 
-.user-chip:hover {
+.user-chip:hover,
+.user-chip.is-active {
   background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.user-chip:hover {
   transform: translateY(-1px);
 }
 
@@ -1303,13 +1284,6 @@ onUnmounted(() => {
   border-radius: 14px;
   text-decoration: none;
   color: var(--text-main);
-  transition: all var(--transition-fast, 0.2s);
-}
-
-.account-profile-card:hover {
-  border-color: var(--color-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
 }
 
 .account-avatar {
@@ -1478,32 +1452,12 @@ html[data-theme='bsu'] .account-avatar {
 /* Action Buttons (Learn More & View Docs style) */
 .feature-action-buttons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   align-items: center;
 }
 
-.feature-btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 38px;
-  border-radius: 9999px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-main);
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-decoration: none;
-  transition: all var(--transition-fast, 0.2s);
-}
 
-.feature-btn-secondary:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-primary-light);
-}
 
 .feature-btn-primary {
   display: inline-flex;
@@ -1556,6 +1510,9 @@ html[data-theme='bsu'] .feature-btn-primary {
 
   .desktop-only {
     display: none !important;
+  }
+  .user-chip {
+    padding: 0.3rem;
   }
 }
 
@@ -1690,10 +1647,6 @@ html[data-theme='bsu'] .feature-btn-primary {
   .mega-columns-wrap {
     grid-template-columns: 1fr;
     gap: 16px;
-  }
-
-  .feature-action-buttons {
-    grid-template-columns: 1fr 1fr;
   }
 
   /* Flyout dropdown stays aligned on mobile */

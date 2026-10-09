@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useThemeStore } from '../stores/themeStore'
 import AuthLogoHeader from '../components/AuthLogoHeader.vue'
+import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.vue'
 import { AlertTriangle, CheckCircle2, Palette, Moon, Sun } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -57,6 +58,30 @@ const isPasswordValid = computed(() => {
   return ruleLen.value && ruleUpper.value && ruleLower.value && ruleNum.value && ruleSeq.value
 })
 
+// Names: letters (incl. ñ/accents), spaces, hyphens, apostrophes and periods — mirrors the backend
+const NAME_PATTERN = /^\p{L}[\p{L} .'-]*$/u
+const NAME_FIELDS = { first_name: 'First name', last_name: 'Last name', middle_name: 'Middle name' }
+const SUFFIXES = ['Jr.', 'Sr.', 'II', 'III', 'IV', 'V', 'VI']
+
+function nameError(field) {
+  const value = form.value[field].trim()
+  if (value === '' || NAME_PATTERN.test(value)) return ''
+  return `${NAME_FIELDS[field]} can only contain letters, spaces, hyphens (-), apostrophes (') and periods (.).`
+}
+const nameErrors = computed(() => ({
+  first_name: nameError('first_name'),
+  last_name: nameError('last_name'),
+  middle_name: nameError('middle_name'),
+}))
+
+// On blur: collapse spaces and capitalise each word ("eduardo  gimeno" → "Eduardo Gimeno")
+function tidyName(field) {
+  form.value[field] = form.value[field]
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/(^|[\s'-])(\p{Ll})/gu, (_, sep, ch) => sep + ch.toUpperCase())
+}
+
 async function fetchOptions() {
   loadingOptions.value = true
   try {
@@ -78,8 +103,13 @@ async function handleRegister() {
   errorMessage.value = ''
   successMessage.value = ''
 
-  if (!form.value.first_name || !form.value.last_name) {
+  if (!form.value.first_name.trim() || !form.value.last_name.trim()) {
     errorMessage.value = 'Please provide both First Name and Last Name.'
+    return
+  }
+  const badName = Object.values(nameErrors.value).find(Boolean)
+  if (badName) {
+    errorMessage.value = badName
     return
   }
   if (!form.value.username || !form.value.email) {
@@ -205,9 +235,13 @@ onMounted(() => {
                 v-model="form.first_name"
                 type="text"
                 class="login-field-input"
+                :class="{ 'is-invalid': nameErrors.first_name }"
                 placeholder="Enter first name"
+                :aria-invalid="!!nameErrors.first_name"
+                @blur="tidyName('first_name')"
                 required
               />
+              <small v-if="nameErrors.first_name" class="field-error">{{ nameErrors.first_name }}</small>
             </div>
 
             <!-- Family Name (Last Name) -->
@@ -219,9 +253,13 @@ onMounted(() => {
                 v-model="form.last_name"
                 type="text"
                 class="login-field-input"
+                :class="{ 'is-invalid': nameErrors.last_name }"
                 placeholder="Enter family / last name"
+                :aria-invalid="!!nameErrors.last_name"
+                @blur="tidyName('last_name')"
                 required
               />
+              <small v-if="nameErrors.last_name" class="field-error">{{ nameErrors.last_name }}</small>
             </div>
 
             <!-- Middle Name (optional) -->
@@ -233,8 +271,12 @@ onMounted(() => {
                 v-model="form.middle_name"
                 type="text"
                 class="login-field-input"
+                :class="{ 'is-invalid': nameErrors.middle_name }"
                 placeholder="Enter middle name"
+                :aria-invalid="!!nameErrors.middle_name"
+                @blur="tidyName('middle_name')"
               />
+              <small v-if="nameErrors.middle_name" class="field-error">{{ nameErrors.middle_name }}</small>
             </div>
 
             <!-- Suffix (optional) -->
@@ -242,13 +284,10 @@ onMounted(() => {
               <label class="login-field-label">
                 Suffix <span style="color: #94a3b8; font-weight: 400; font-size: 0.85em;">(optional — e.g. Jr., Sr., III)</span>
               </label>
-              <input
-                v-model="form.suffix"
-                type="text"
-                class="login-field-input"
-                placeholder="e.g. Jr., Sr., III"
-                style="max-width: 180px;"
-              />
+              <select v-model="form.suffix" class="login-field-select" style="max-width: 180px;">
+                <option value="">None</option>
+                <option v-for="sfx in SUFFIXES" :key="sfx" :value="sfx">{{ sfx }}</option>
+              </select>
             </div>
 
             <!-- Username -->
@@ -349,6 +388,7 @@ onMounted(() => {
                   v-model="form.confirm_password"
                   :type="showConfirmPassword ? 'text' : 'password'"
                   class="login-field-input"
+                  :class="matchClass(form.password, form.confirm_password)"
                   placeholder="Confirm password"
                   autocomplete="new-password"
                   required
@@ -394,6 +434,7 @@ onMounted(() => {
                   </svg>
                 </button>
               </div>
+              <PasswordMatchHint :password="form.password" :confirm="form.confirm_password" />
             </div>
 
             <!-- Level of Access -->
@@ -461,3 +502,19 @@ onMounted(() => {
     </button>
   </div>
 </template>
+
+<style scoped>
+.login-field-input.is-invalid,
+.login-field-input.is-invalid:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 4px #dc26261f;
+}
+
+.field-error {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #dc2626;
+}
+</style>

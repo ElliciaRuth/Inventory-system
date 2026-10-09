@@ -27,6 +27,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
     $routes->get('auth/register-options', 'AuthController::registerOptions');
     $routes->post('auth/register', 'AuthController::register');
     $routes->post('auth/forgot-password', 'AuthController::forgotPassword');
+    $routes->post('auth/verify-reset-code', 'AuthController::verifyResetCode');
     $routes->post('auth/reset-password', 'AuthController::resetPassword');
 
     $routes->group('', ['filter' => 'auth'], static function (RouteCollection $routes): void {
@@ -79,6 +80,10 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('settings', 'SettingsController::index', ['filter' => 'level:2']);
         $routes->get('settings/system', 'SettingsController::systemSettings', ['filter' => 'level:2']);
         $routes->post('settings/system', 'SettingsController::saveSystemSettings', ['filter' => 'level:3']);
+        // Email (SMTP) for password recovery — must come before the settings/(:segment) catch-alls
+        $routes->get('settings/email', 'SettingsController::emailSettings', ['filter' => 'level:4']);
+        $routes->post('settings/email', 'SettingsController::saveEmailSettings', ['filter' => 'level:4']);
+        $routes->post('settings/email/test', 'SettingsController::testEmailSettings', ['filter' => 'level:4']);
         $routes->post('settings/users/(:num)/activate', 'SettingsController::activate/$1', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/deactivate', 'SettingsController::deactivate/$1', ['filter' => 'level:3']);
         $routes->get('settings/(:segment)/(:num)', 'SettingsController::fetch/$1/$2', ['filter' => 'level:2']);

@@ -3,10 +3,15 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Navbar from './components/Navbar.vue'
 import ToastContainer from './components/ToastContainer.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useThemeStore } from './stores/themeStore'
+import { useIdleTimeout } from './composables/useIdleTimeout'
 
 const route = useRoute()
 const themeStore = useThemeStore()
+
+// Auto-logout after 15 minutes of inactivity
+useIdleTimeout()
 
 const alertCount = ref(0)
 // Standalone pages without the navbar
@@ -29,5 +34,6 @@ onMounted(() => {
       <router-view :key="$route.fullPath" @update-alerts="handleUpdateAlerts" />
     </main>
     <ToastContainer />
+    <ConfirmDialog />
   </div>
 </template>

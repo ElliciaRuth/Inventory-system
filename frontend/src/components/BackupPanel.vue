@@ -5,6 +5,7 @@ import { backupsApi } from '../api/backups'
 import { triggerBlobDownload } from '../api/export'
 import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 const authStore = useAuthStore()
 
@@ -61,16 +62,28 @@ function backupNow() {
   run('backup', () => backupsApi.run())
 }
 
-function restore(backup) {
-  if (!confirm(`Restore "${backup.backup_filename}"? Existing records will be overwritten with the data in this backup.`)) return
+async function restore(backup) {
+  const ok = await confirmDialog({
+    title: 'Restore this backup?',
+    message: `Existing records will be overwritten with the data in "${backup.backup_filename}". This cannot be undone.`,
+    confirmText: 'Restore',
+    variant: 'warning',
+  })
+  if (!ok) return
   run(`restore-${backup.backup_id}`, () => backupsApi.restoreFromBackup(backup.backup_id))
 }
 
-function restoreFromFile(event) {
+async function restoreFromFile(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
-  if (!confirm(`Restore from "${file.name}"? Existing records will be overwritten with the data in this file.`)) return
+  const ok = await confirmDialog({
+    title: 'Restore from file?',
+    message: `Existing records will be overwritten with the data in "${file.name}". This cannot be undone.`,
+    confirmText: 'Restore',
+    variant: 'warning',
+  })
+  if (!ok) return
   run('restore-file', () => backupsApi.restoreFromFile(file))
 }
 

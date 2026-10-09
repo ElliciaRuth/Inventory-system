@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { stockoutApi } from '../api/stockout'
 import { useAutoReload, triggerAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 const requests = ref([])
 const loading = ref(true)
@@ -62,13 +63,24 @@ function approve(item) {
   run(`approve-${itemId(item)}`, () => stockoutApi.approveItem(itemId(item)), 'Item approved.')
 }
 
-function reject(item) {
-  if (!confirm(`Reject ${item.item_name}?`)) return
+async function reject(item) {
+  const ok = await confirmDialog({
+    title: 'Reject item?',
+    message: `"${item.item_name}" will be rejected and will not be deducted from stock.`,
+    confirmText: 'Reject',
+    variant: 'danger',
+  })
+  if (!ok) return
   run(`reject-${itemId(item)}`, () => stockoutApi.rejectItem(itemId(item)), 'Item rejected.')
 }
 
-function approveAll(request) {
-  if (!confirm(`Approve all items in request #${request.temp_stockout_id}?`)) return
+async function approveAll(request) {
+  const ok = await confirmDialog({
+    title: 'Approve all items?',
+    message: `Every item in request #${request.temp_stockout_id} will be approved and deducted from stock.`,
+    confirmText: 'Approve all',
+  })
+  if (!ok) return
   run(`all-${request.temp_stockout_id}`, () => stockoutApi.approveAll(request.temp_stockout_id), 'Request approved.')
 }
 
