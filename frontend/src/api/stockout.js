@@ -50,8 +50,16 @@ export const stockoutApi = {
     return response.data
   },
 
-  async rejectItem(itemId) {
-    const response = await client.post(`/stockout/reject-item/${itemId}`)
+  // The reason is shown to the staff member who requested the item
+  async rejectItem(itemId, reason) {
+    const response = await client.post(`/stockout/reject-item/${itemId}`, { reason })
+    return response.data
+  },
+
+  // Requested items and their outcome: own requests for staff, the office's for custodians/managers
+  // params: { status: '' | 'pending' | 'approved' | 'rejected', search, page, limit }
+  async getHistory(params = {}) {
+    const response = await client.get('/stockout/history', { params })
     return response.data
   },
 

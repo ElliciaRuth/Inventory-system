@@ -8,6 +8,9 @@ class DashboardModel extends Model
 {
     protected $table = 'product_table';
 
+    /** Batches this close to expiry always get a daily reminder, whatever the product's warning days. */
+    public const EXPIRY_REMINDER_DAYS = 3;
+
     public function overview(int $userOfficeId = 0): array
     {
         $lowStock      = $this->lowStock($userOfficeId);
@@ -36,10 +39,10 @@ class DashboardModel extends Model
 
     public function lowStock(int $userOfficeId = 0): array
     {
-        $officeFilter = $userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '';
+        $officeFilter = ($userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '') . ' AND p.archived_at IS NULL';
 
         return $this->db->query(
-            'SELECT p.product AS item,
+            'SELECT p.product_id, p.product AS item,
                     COALESCE(SUM(b.current_qty), 0) AS stock_left,
                     COALESCE(p.product_reorder_point, 0) AS re_order_point
              FROM product_table p
@@ -54,10 +57,11 @@ class DashboardModel extends Model
 
     public function expiringSoon(int $userOfficeId = 0): array
     {
-        $officeFilter = $userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '';
+        $officeFilter = ($userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '') . ' AND p.archived_at IS NULL';
 
         return $this->db->query(
-            'SELECT b.batch_id, p.product AS item, b.expiration_date, b.current_qty AS remaining_qty,
+            'SELECT b.batch_id, b.batch_no, p.product_id, p.product AS item, b.expiration_date, b.manufacturing_date,
+                    b.current_qty AS remaining_qty,
                     DATEDIFF(b.expiration_date, CURDATE()) AS days_left,
                     p.expiry_warning_days,
                     p.expiry_danger_days
@@ -66,17 +70,37 @@ class DashboardModel extends Model
              WHERE b.current_qty > 0
                AND b.expiration_date IS NOT NULL
                AND b.expiration_date >= CURDATE()
-               AND DATEDIFF(b.expiration_date, CURDATE()) <= p.expiry_warning_days' . $officeFilter . '
+               AND DATEDIFF(b.expiration_date, CURDATE()) <= GREATEST(p.expiry_warning_days, ' . self::EXPIRY_REMINDER_DAYS . ')' . $officeFilter . '
              ORDER BY b.expiration_date ASC'
+        )->getResultArray();
+    }
+
+    /**
+     * Batches past their expiration date that still have stock on hand (most recently expired first).
+     */
+    public function expiredInStock(int $userOfficeId = 0): array
+    {
+        $officeFilter = ($userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '') . ' AND p.archived_at IS NULL';
+
+        return $this->db->query(
+            'SELECT b.batch_id, b.batch_no, p.product_id, p.product AS item, b.expiration_date, b.manufacturing_date,
+                    b.current_qty AS remaining_qty,
+                    DATEDIFF(CURDATE(), b.expiration_date) AS days_ago
+             FROM batch_table b
+             INNER JOIN product_table p ON b.product_id = p.product_id
+             WHERE b.current_qty > 0
+               AND b.expiration_date IS NOT NULL
+               AND b.expiration_date < CURDATE()' . $officeFilter . '
+             ORDER BY b.expiration_date DESC'
         )->getResultArray();
     }
 
     public function outOfStock(int $userOfficeId = 0): array
     {
-        $officeFilter = $userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '';
+        $officeFilter = ($userOfficeId > 0 ? ' AND p.user_office_id = ' . (int) $userOfficeId : '') . ' AND p.archived_at IS NULL';
 
         return $this->db->query(
-            'SELECT p.product AS item
+            'SELECT p.product_id, p.product AS item
              FROM product_table p
              LEFT JOIN batch_table b ON p.product_id = b.product_id
              WHERE 1=1' . $officeFilter . '
@@ -90,7 +114,7 @@ class DashboardModel extends Model
         $officeFilter = $userOfficeId > 0 ? ' AND t.user_office_id = ' . (int) $userOfficeId : '';
 
         return $this->db->query(
-            'SELECT p.product AS item,
+            'SELECT p.product_id, p.product AS item,
                     t.transaction_qty,
                     tt.transaction_type,
                     t.transaction_date AS date
@@ -106,7 +130,7 @@ class DashboardModel extends Model
 
     public function totalItems(int $userOfficeId = 0): int
     {
-        $builder = $this->db->table('product_table')->selectCount('product_id', 'total');
+        $builder = $this->db->table('product_table')->selectCount('product_id', 'total')->where('archived_at', null);
         if ($userOfficeId > 0) {
             $builder->where('user_office_id', $userOfficeId);
         }

@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\AuditLog;
 use App\Models\EntityModel;
 use App\Models\ProductModel;
 use App\Models\ProductTypeModel;
@@ -31,9 +32,10 @@ class ProductController extends BaseApiController
     {
         $search   = trim((string) ($this->request->getGet('search') ?? ''));
         $typeId   = (int) ($this->request->getGet('type_id') ?? 0);
+        $archived = (string) ($this->request->getGet('archived') ?? '') === '1';
         $officeId = $this->currentOfficeId();
 
-        $products = $this->productModel->searchProducts($search, $officeId, $typeId);
+        $products = $this->productModel->searchProducts($search, $officeId, $typeId, $archived);
 
         return $this->respondSuccess($products, 'Products retrieved successfully');
     }
@@ -101,6 +103,10 @@ class ProductController extends BaseApiController
             return $this->respondError('Failed to create product', $this->productModel->errors());
         }
 
+        AuditLog::record('product.created', 'product', (int) $newId, 'Created product "' . ($payload['product'] ?? '') . "\" (no. {$productNo})", [
+            'after' => $payload,
+        ]);
+
         return $this->respondSuccess(
             $this->productModel->findProduct((int) $newId),
             'Product created successfully',
@@ -160,10 +166,20 @@ class ProductController extends BaseApiController
         }
 
         $message = 'Product updated successfully';
-        if (($input['product_action'] ?? '') === 'new') {
+        $cleared = ($input['product_action'] ?? '') === 'new';
+        if ($cleared) {
             db_connect()->table('batch_table')->where('product_id', $id)->delete();
             $message = 'New product created under the same product no. All previous stock and transactions have been cleared.';
         }
+
+        $changed = array_filter($payload, static fn ($v, $k) => (string) ($existing[$k] ?? '') !== (string) $v, ARRAY_FILTER_USE_BOTH);
+        AuditLog::record($cleared ? 'product.reset' : 'product.updated', 'product', $id,
+            ($cleared ? 'Reused product "' : 'Updated product "') . $existing['product'] . '"' . ($cleared ? ' as a new product; all its stock and transactions were cleared' : ''),
+            [
+                'before' => array_intersect_key($existing, $changed),
+                'after'  => $changed,
+            ]
+        );
 
         return $this->respondSuccess($this->productModel->findProduct($id), $message);
     }
@@ -174,8 +190,9 @@ class ProductController extends BaseApiController
      */
     public function delete($id = null): ResponseInterface
     {
-        $id = (int) $id;
-        if (! $this->ownedProduct($id)) {
+        $id      = (int) $id;
+        $product = $this->ownedProduct($id);
+        if (! $product) {
             return $this->respondError('Product not found', [], ResponseInterface::HTTP_NOT_FOUND);
         }
 
@@ -199,12 +216,73 @@ class ProductController extends BaseApiController
         } catch (\Throwable $e) {
             $msg = $e->getMessage();
             if (stripos($msg, 'foreign key') !== false || stripos($msg, 'constraint') !== false) {
-                return $this->respondError('Cannot delete: this product has existing transactions.', [], ResponseInterface::HTTP_CONFLICT);
+                return $this->respondError('This product has stock history, so it can\'t be deleted. Archive it instead: it disappears from lists but its records are kept.', ['can_archive' => true], ResponseInterface::HTTP_CONFLICT);
             }
             return $this->respondError('Delete failed.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
+        AuditLog::record('product.deleted', 'product', $id, 'Deleted product "' . $product['product'] . '"', ['deleted' => $product]);
+
         return $this->respondSuccess(null, 'Product deleted successfully');
+    }
+
+    /**
+     * Archive: hide a product that is no longer used, keeping all its records.
+     * POST /api/products/{id}/archive   { reason? }
+     */
+    public function archive($id = null): ResponseInterface
+    {
+        $id      = (int) $id;
+        $product = $this->ownedProduct($id);
+        if (! $product) {
+            return $this->respondError('Product not found', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+        if (! empty($product['archived_at'])) {
+            return $this->respondError('This product is already archived.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $blockers = $this->productModel->archiveBlockers($id, (int) $product['user_office_id']);
+        if ($blockers !== []) {
+            return $this->respondError('Can\'t archive "' . $product['product'] . '" yet: ' . implode('; ', $blockers) . '.', ['blockers' => $blockers], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $reason = mb_substr(trim(preg_replace('/\s+/', ' ', (string) ($this->input()['reason'] ?? ''))), 0, 255);
+        $this->productModel->update($id, [
+            'archived_at'    => date('Y-m-d H:i:s'),
+            'archived_by'    => $this->currentUserId() ?: null,
+            'archive_reason' => $reason,
+        ]);
+
+        AuditLog::record('product.archived', 'product', $id, 'Archived product "' . $product['product'] . '"' . ($reason !== '' ? " — {$reason}" : ''), [
+            'reason' => $reason,
+        ]);
+
+        return $this->respondSuccess($this->productModel->findProduct($id), 'Product archived. Its records are kept; restore it any time from the Archived tab.');
+    }
+
+    /**
+     * Restore an archived product to the active lists.
+     * POST /api/products/{id}/restore
+     */
+    public function restore($id = null): ResponseInterface
+    {
+        $id      = (int) $id;
+        $product = $this->ownedProduct($id);
+        if (! $product) {
+            return $this->respondError('Product not found', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+        if (empty($product['archived_at'])) {
+            return $this->respondError('This product is not archived.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $this->productModel->update($id, ['archived_at' => null, 'archived_by' => null, 'archive_reason' => '']);
+
+        AuditLog::record('product.restored', 'product', $id, 'Restored archived product "' . $product['product'] . '"', [
+            'archived_at' => $product['archived_at'],
+            'reason_was'  => $product['archive_reason'] ?? '',
+        ]);
+
+        return $this->respondSuccess($this->productModel->findProduct($id), 'Product restored.');
     }
 
     /**
@@ -317,7 +395,7 @@ class ProductController extends BaseApiController
 
     private function resolveTypeId(array $input, int $officeId): int
     {
-        if (! empty($input['type_id'])) {
+        if (! empty($input['type_id']) && $this->ownLookup('type_of_product', 'type_id', (int) $input['type_id'], $officeId)) {
             return (int) $input['type_id'];
         }
         return ! empty($input['type_name']) ? $this->typeModel->firstOrCreate(trim($input['type_name']), $officeId) : 0;
@@ -325,7 +403,7 @@ class ProductController extends BaseApiController
 
     private function resolveUnitId(array $input, int $officeId): int
     {
-        if (! empty($input['unit_id'])) {
+        if (! empty($input['unit_id']) && $this->ownLookup('unit_table', 'unit_id', (int) $input['unit_id'], $officeId)) {
             return (int) $input['unit_id'];
         }
         return ! empty($input['unit_name']) ? $this->unitModel->firstOrCreate(trim($input['unit_name']), $officeId) : 0;
@@ -333,9 +411,20 @@ class ProductController extends BaseApiController
 
     private function resolveEntityId(array $input, int $officeId): int
     {
-        if (! empty($input['entity_id'])) {
+        if (! empty($input['entity_id']) && $this->ownLookup('entity_table', 'entity_id', (int) $input['entity_id'], $officeId)) {
             return (int) $input['entity_id'];
         }
         return ! empty($input['entity_name']) ? $this->entityModel->firstOrCreate(trim($input['entity_name']), $officeId) : 0;
+    }
+
+    /** An id sent by the browser counts only when the row belongs to the product's office. */
+    private function ownLookup(string $table, string $pk, int $id, int $officeId): bool
+    {
+        $builder = db_connect()->table($table)->where($pk, $id);
+        if ($officeId > 0) {
+            $builder->where('user_office_id', $officeId);
+        }
+
+        return $builder->countAllResults() > 0;
     }
 }

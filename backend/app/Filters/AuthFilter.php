@@ -14,7 +14,7 @@ use CodeIgniter\HTTP\ResponseInterface;
  * - Enforces a 15-minute inactivity timeout (from last_activity)
  * - Rejects sessions whose user was deactivated or deleted
  * - Blocks everything except the matching setup endpoint while a forced
- *   first-login step (password change / SMTP / recovery email) is pending
+ *   first-login password change is pending
  * - Sets security response headers on every authenticated response
  */
 class AuthFilter implements FilterInterface
@@ -30,9 +30,7 @@ class AuthFilter implements FilterInterface
      * auth/me and auth/logout are always allowed so the frontend can route the user.
      */
     private const FORCED_STEPS = [
-        'must_change_password'      => ['password_change_required', ['api/auth/change-password']],
-        'must_setup_smtp'           => ['smtp_setup_required', ['api/auth/setup-smtp']],
-        'must_setup_recovery_email' => ['recovery_email_setup_required', ['api/auth/setup-recovery-email']],
+        'must_change_password' => ['password_change_required', ['api/auth/change-password']],
     ];
 
     public function before(RequestInterface $request, $arguments = null)
@@ -58,20 +56,34 @@ class AuthFilter implements FilterInterface
         session()->set('last_activity', time());
 
         // ── 3. Verify the session user still exists and is active ─────────
-        $userId = (int) (session('user')['id'] ?? 0);
-        if ($userId > 0) {
-            $row = db_connect()
-                ->table('user_table')
-                ->select('user_activity_id')
-                ->where('user_id', $userId)
-                ->get()
-                ->getRowArray();
+        $sessionUser = session('user');
+        $userId      = (int) ($sessionUser['id'] ?? 0);
+        $row         = $userId > 0
+            ? db_connect()
+                ->table('user_table u')
+                ->select('u.user_activity_id, u.user_office_id, COALESCE(loa.lvl_of_access, 0) AS level_id, COALESCE(loa.role, "") AS role', false)
+                ->join('level_of_access loa', 'loa.lvl_of_access_id = u.lvl_of_access_id', 'left')
+                ->where('u.user_id', $userId)
+                ->get(1)
+                ->getRowArray()
+            : null;
 
-            // Deactivated or deleted → kick out immediately
-            if (! $row || (int) $row['user_activity_id'] !== 1) {
-                session()->destroy();
-                return $this->deny(401, 'Your account has been deactivated. Please contact an administrator.', 'account_inactive');
-            }
+        // Deactivated or deleted (or a session without a user id) → kick out immediately
+        if (! $row || (int) $row['user_activity_id'] !== 1) {
+            session()->destroy();
+            return $this->deny(401, 'Your account has been deactivated. Please contact an administrator.', 'account_inactive');
+        }
+
+        // ── 3b. Role and office as they are now, not as they were at login ─
+        // The level and route filters read them from the session, so a demotion or office
+        // move must apply to the very next request.
+        $levelId  = (int) $row['level_id'];
+        $officeId = (int) ($row['user_office_id'] ?? 0);
+        if ($levelId !== (int) ($sessionUser['level_id'] ?? 0) || $officeId !== (int) ($sessionUser['user_office_id'] ?? 0)) {
+            $sessionUser['level_id']       = $levelId;
+            $sessionUser['role']           = $row['role'];
+            $sessionUser['user_office_id'] = $officeId;
+            session()->set('user', $sessionUser);
         }
 
         // ── 4. Forced first-login steps ──────────────────────────────────

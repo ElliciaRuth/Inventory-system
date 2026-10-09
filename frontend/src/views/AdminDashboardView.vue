@@ -1,13 +1,12 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
-import { Users, Clock, Building2, Trash2, Pencil, Check, Mail } from 'lucide-vue-next'
+import { Users, Clock, Building2, Trash2, Pencil, Check, ShieldCheck } from 'lucide-vue-next'
 import { adminApi } from '../api/admin'
 import { maskEmail } from '../utils/maskEmail'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import StatCard from '../components/StatCard.vue'
 import AppPagination from '../components/AppPagination.vue'
-import EmailSettingsPanel from '../components/EmailSettingsPanel.vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { toast, errorMessage } from '../composables/useToast'
 
@@ -33,7 +32,7 @@ const adminData = ref({
 // Search queries per section
 const searchUsers = ref('')
 const searchOffices = ref('')
-const activeSection = ref('users') // 'users' | 'offices' | 'email'
+const activeSection = ref('users') // 'users' | 'offices'
 
 // Modal state
 const isModalOpen = ref(false)
@@ -238,6 +237,9 @@ onMounted(() => {
         <p class="hero-subtitle">
           Manage system users, offices, and account activations from this central administration hub.
         </p>
+        <router-link to="/audit-log" class="btn btn-secondary" style="margin-top: 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+          <ShieldCheck :size="15" /> View Audit Log
+        </router-link>
       </div>
 
       <div class="hero-badge-widget">
@@ -355,21 +357,7 @@ onMounted(() => {
         <Building2 :size="15" />
         <span>User Offices ({{ adminData.records.user_office_table.length }})</span>
       </button>
-
-      <button
-        type="button"
-        class="btn btn-sm"
-        :class="activeSection === 'email' ? 'btn-primary' : 'btn-secondary'"
-        style="display: inline-flex; align-items: center; gap: 6px;"
-        @click="activeSection = 'email'"
-      >
-        <Mail :size="15" />
-        <span>Email Settings</span>
-      </button>
     </div>
-
-    <!-- ── Email (SMTP) Settings for password recovery ── -->
-    <EmailSettingsPanel v-if="activeSection === 'email'" />
 
     <!-- ── Users Management Section ── -->
     <section v-if="activeSection === 'users'" class="panel">

@@ -248,7 +248,7 @@ class ReportModel extends Model
         $builder->join('product_copy_table pc', 'COALESCE(t.copy_id, b.copy_id) = pc.copy_id', 'left');
         $builder->where('t.transaction_date >=', $monthStart);
         $builder->where('t.transaction_date <', $nextMonth);
-        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return']);
+        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return', 'adjust_in']);
 
         if ($userOfficeId > 0) {
             $builder->where('t.user_office_id', $userOfficeId);
@@ -297,8 +297,8 @@ class ReportModel extends Model
             $runningValue[$key] -= $issuedCost;
         }
 
-        // Return: adds stock back
-        if ($typeName === 'return') {
+        // Return and Adjust In: add stock back (shown under purchase in reports)
+        if ($typeName === 'return' || $typeName === 'adjust_in') {
             $unitCost = (float) ($row['transaction_unit_cost'] ?? 0);
             $qty      = (float) ($row['transaction_qty'] ?? 0);
             // Return adds stock + value back (shown under purchase in reports)
@@ -311,7 +311,7 @@ class ReportModel extends Model
     private function purchaseValues(array $row, array &$batches, float &$runningQty, float &$runningValue): array
     {
         $typeName = strtolower($row['transaction_type'] ?? '');
-        if (! in_array($typeName, ['receipt', 'return'], true)) {
+        if (! in_array($typeName, ['receipt', 'return', 'adjust_in'], true)) {
             return [0, 0.0, 0.0];
         }
 
@@ -530,7 +530,7 @@ class ReportModel extends Model
         $builder->join('product_copy_table pc', 'COALESCE(t.copy_id, b.copy_id) = pc.copy_id', 'left');
         $builder->where('t.transaction_date >=', $dateFrom);
         $builder->where('t.transaction_date <', $dateTo);
-        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return']);
+        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return', 'adjust_in']);
 
         if ($userOfficeId > 0) {
             $builder->where('t.user_office_id', $userOfficeId);

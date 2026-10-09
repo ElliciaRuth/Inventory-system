@@ -53,6 +53,7 @@ class ReportsController extends BaseApiController
                 b.batch_no,
                 b.barcode_value,
                 b.current_qty,
+                b.manufacturing_date,
                 b.expiration_date,
                 b.date_received,
                 p.product_id,

@@ -1,0 +1,10 @@
+# Barcode images only. Even if an SVG here were tampered with, it can't run scripts
+# (opening it directly would otherwise run them with the viewer's session).
+<IfModule mod_headers.c>
+    Header set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>
+
+<FilesMatch "\.(?!svg$)[^.]+$">
+    Require all denied
+</FilesMatch>

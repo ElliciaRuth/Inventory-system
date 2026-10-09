@@ -1,6 +1,0 @@
-{
-    "backup_dir": "writable/backups/",
-    "backup_dir_2": "",
-    "backup_interval_hours": 24,
-    "backup_time": "12:00"
-}

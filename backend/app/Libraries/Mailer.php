@@ -2,75 +2,122 @@
 
 namespace App\Libraries;
 
-use App\Models\SmtpSettingsModel;
+use CodeIgniter\Email\Email;
+use Config\PasswordReset;
 
 /**
- * Sends system email through the Gmail account saved in smtp_settings
- * (configured by Technical Staff under User Management → Email Settings).
+ * Sends email over SMTP with CodeIgniter's Email class, from a user's own account with an
+ * app password they typed in (forgot password). There is no system email account.
+ *
+ * The app password is only kept for the one send: never logged, returned or stored.
  */
 class Mailer
 {
-    private ?array $config;
+    /** Why a send failed */
+    public const FAILED_SIGN_IN = 'sign_in';  // the provider rejected the address / app password
+    public const FAILED_NETWORK = 'network';  // the mail server couldn't be reached (no internet?)
+    public const FAILED_OTHER   = 'other';
 
-    public function __construct()
-    {
-        $this->config = (new SmtpSettingsModel())->getActive();
-    }
+    /**
+     * Send from the user's own account ($account signs in with $appPassword). The mail server is
+     * chosen from Config\PasswordReset by the account's domain. Returns null on success, else one
+     * of the FAILED_* reasons.
+     */
+    public function sendFromOwnAccount(
+        string $account,
+        #[\SensitiveParameter] string $appPassword,
+        string $to,
+        string $subject,
+        string $html
+    ): ?string {
+        $servers = config(PasswordReset::class)->smtpServers;
+        $domain  = strtolower((string) substr(strrchr($account, '@') ?: '', 1));
+        $server  = $servers[$domain] ?? $servers['*'];
 
-    public function isConfigured(): bool
-    {
-        return $this->config !== null;
+        return $this->deliver($server, $account, $appPassword, $to, $subject, $html);
     }
 
     /**
-     * Sends an HTML email. Returns null on success, or a short error message.
-     * The full SMTP transcript is written to the log on failure.
+     * One SMTP send with these credentials. Null on success, else a FAILED_* reason.
+     *
+     * @param array{host: string, port: int, crypto: string} $server
      */
-    public function send(string $to, string $subject, string $html): ?string
-    {
-        if (! $this->config) {
-            return 'Email is not configured.';
-        }
+    private function deliver(
+        array $server,
+        string $account,
+        #[\SensitiveParameter] string $password,
+        string $to,
+        string $subject,
+        string $html
+    ): ?string {
+        // Exception traces must not carry argument values: a failure part-way through the
+        // sign-in could otherwise put (part of) the encoded password into the error log
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '1');
+
+        // A fresh instance, not the shared service, so the password can't linger for later use
+        $email = new Email(config(\Config\Email::class));
+        $debug = '';
 
         try {
-            $password = service('encrypter')->decrypt(base64_decode($this->config['smtp_password']));
-        } catch (\Throwable $e) {
-            log_message('error', 'SMTP password could not be decrypted: ' . $e->getMessage());
-            return 'The saved email password could not be read. Please save the email settings again.';
-        }
+            $email->initialize([
+                'protocol'    => 'smtp',
+                'SMTPHost'    => $server['host'],
+                'SMTPPort'    => $server['port'],
+                'SMTPCrypto'  => $server['crypto'],
+                'SMTPUser'    => $account,
+                'SMTPPass'    => $password,
+                'SMTPTimeout' => 15,
+                'mailType'    => 'html',
+            ]);
+            $email->setFrom($account, 'BSU Inventory System');
+            $email->setTo($to);
+            $email->setSubject($subject);
+            $email->setMessage($html);
 
-        $email = \Config\Services::email();
-        $email->initialize([
-            'protocol'    => 'smtp',
-            'SMTPHost'    => 'smtp.gmail.com',
-            'SMTPUser'    => $this->config['smtp_email'],
-            'SMTPPass'    => $password,
-            'SMTPPort'    => 587,
-            'SMTPCrypto'  => 'tls',
-            'SMTPTimeout' => 15,
-            'mailType'    => 'html',
-        ]);
-        $email->setFrom($this->config['smtp_email'], 'BSU Inventory System');
-        $email->setTo($to);
-        $email->setSubject($subject);
-        $email->setMessage($html);
-
-        try {
-            // send() returns false (it does not throw) when Gmail rejects the login or message
-            if ($email->send(false)) {
-                return null;
+            // send() returns false (it does not throw) when the provider rejects the login or message
+            $sent = $email->send(false);
+            if (! $sent) {
+                // The SMTP conversation as text: server replies only, no credentials
+                $debug = strip_tags($email->printDebugger([]));
             }
-            $debug = $email->printDebugger(['headers']);
         } catch (\Throwable $e) {
+            $sent  = false;
             $debug = $e->getMessage();
+        } finally {
+            $email->SMTPPass = '';
+            $email->clear();
+            if ($ignoreArgs !== false) {
+                ini_set('zend.exception_ignore_args', $ignoreArgs);
+            }
+        }
+        $password = '';
+
+        if ($sent) {
+            return null;
         }
 
-        log_message('error', 'Email to {to} failed: {debug}', ['to' => $to, 'debug' => strip_tags($debug)]);
+        $reason = $this->failureReason($debug);
+        log_message('error', 'Email via {host} failed ({reason}): {debug}', [
+            'host'   => $server['host'],
+            'reason' => $reason,
+            'debug'  => mb_substr($debug, 0, 1500),
+        ]);
 
-        if (stripos($debug, '535') !== false || stripos($debug, 'Username and Password not accepted') !== false) {
-            return 'Gmail rejected the login. Check the Gmail address and use a 16-character App Password, not your normal Gmail password.';
+        return $reason;
+    }
+
+    private function failureReason(string $debug): string
+    {
+        // 535 / 534: Gmail's "Username and Password not accepted" / "Application-specific password required"
+        if (preg_match('/\b53[345]\b|not accepted|authenticat|Application-specific password/i', $debug)) {
+            return self::FAILED_SIGN_IN;
+        }
+        // The mail server never greeted us (SMTP "220"): it couldn't be reached at all
+        if (! preg_match('/\b220\b/', $debug)
+            || preg_match('/getaddrinfo|php_network|timed out|refused|unable to connect|failed to connect|no route|network is unreachable|could not resolve/i', $debug)) {
+            return self::FAILED_NETWORK;
         }
 
-        return 'The email could not be sent. Check the Gmail address, App Password and internet connection.';
+        return self::FAILED_OTHER;
     }
 }

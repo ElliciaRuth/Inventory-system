@@ -1,8 +1,21 @@
 <FilesMatch "^(add_product|add_stock|adjust|batchlist|config|delete|edit_product|get_data|home|login|logout|other|productlist|save|stockcard)\.php$">
     Require all denied
 </FilesMatch>
+
+# .env (encryption key, database password) and other dot files
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
+
+    # Never serve dot files/folders, the source, the packages, the writable data
+    # (backups, sessions, logs, import previews) or the tooling files
+    RewriteRule (^|/)\. - [F,L]
+    RewriteRule ^(app|system|tests|vendor|writable)(/|$) - [F,L]
+    RewriteRule ^(env|spark|composer\.json|composer\.lock|phpunit\.xml\.dist|preload\.php|LICENSE)$ - [F,L]
+    RewriteRule \.(sql|log|lock|bak|zip|bsubackup)$ - [F,L,NC]
 
     # Remove index.php from URLs
     RewriteCond %{REQUEST_FILENAME} !-f

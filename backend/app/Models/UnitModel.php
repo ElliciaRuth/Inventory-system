@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Libraries\StockcardWorkbookParser;
 use CodeIgniter\Model;
 
 class UnitModel extends Model
@@ -27,6 +28,9 @@ class UnitModel extends Model
         if ($name === '') {
             return 0;
         }
+
+        // "pieces", "pc" → "pcs"; "kls", "kilos" → "kilo"; "packs" → "pack" …
+        $name = StockcardWorkbookParser::UNIT_SYNONYMS[strtolower($name)] ?? $name;
 
         $existing = $this->where('unit', $name)
                          ->where('user_office_id', $userOfficeId)

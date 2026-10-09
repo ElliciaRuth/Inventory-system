@@ -4,6 +4,7 @@ namespace Config;
 
 use App\Filters\AuthFilter;
 use App\Filters\LevelFilter;
+use App\Filters\RequestGuard;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -38,6 +39,7 @@ class Filters extends BaseFilters
         'performance'   => PerformanceMetrics::class,
         'auth'          => AuthFilter::class,
         'level'         => LevelFilter::class,
+        'requestguard'  => RequestGuard::class,
     ];
 
     /**
@@ -107,5 +109,8 @@ class Filters extends BaseFilters
      *
      * @var array<string, array<string, list<string>>>
      */
-    public array $filters = [];
+    public array $filters = [
+        // Size, shape and rate limits for every API request (Config\RequestLimits)
+        'requestguard' => ['before' => ['api', 'api/*']],
+    ];
 }

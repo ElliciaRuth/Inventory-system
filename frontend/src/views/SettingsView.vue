@@ -6,6 +6,7 @@ import { settingsApi } from '../api/settings'
 import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
 import BackupPanel from '../components/BackupPanel.vue'
+import AppPagination from '../components/AppPagination.vue'
 import { confirmDialog } from '../composables/useConfirm'
 
 const authStore = useAuthStore()
@@ -17,6 +18,14 @@ const SECTION_TITLES = {
   reference_table: 'Reference',
   type_of_product: 'Product Type',
   office_table: 'Office',
+}
+
+const SECTION_PLURALS = {
+  entity_table: 'entities',
+  unit_table: 'units',
+  reference_table: 'references',
+  type_of_product: 'product types',
+  office_table: 'offices',
 }
 
 const data = ref({ definitions: {}, records: {}, pendingUsers: [], levels: [], userOffices: [] })
@@ -61,6 +70,28 @@ function rowsFor(type) {
   const rows = data.value.records[type] || []
   if (!q) return rows
   return rows.filter((row) => columnsFor(type).some((c) => String(row[c] ?? '').toLowerCase().includes(q)))
+}
+
+// Pagination per record section (Entity, Unit, Reference…), like the other lists
+const pages = reactive({})
+const pageSizes = reactive({})
+
+function pageSizeFor(type) {
+  return pageSizes[type] || 15
+}
+
+function totalPagesFor(type) {
+  return Math.max(1, Math.ceil(rowsFor(type).length / pageSizeFor(type)))
+}
+
+// Stays on a valid page when a search or delete shortens the list
+function pageFor(type) {
+  return Math.min(pages[type] || 1, totalPagesFor(type))
+}
+
+function pagedRowsFor(type) {
+  const start = (pageFor(type) - 1) * pageSizeFor(type)
+  return rowsFor(type).slice(start, start + pageSizeFor(type))
 }
 
 function pkFor(type) {
@@ -265,7 +296,7 @@ onMounted(load)
         </button>
         <div v-if="openSection === type" class="section-body">
           <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
-            <input v-model="searches[type]" type="text" class="form-input" :placeholder="`Search ${SECTION_TITLES[type] || type}…`" style="max-width: 320px;" />
+            <input v-model="searches[type]" type="text" class="form-input" :placeholder="`Search ${SECTION_TITLES[type] || type}…`" style="max-width: 320px;" @input="pages[type] = 1" />
             <button type="button" class="btn btn-primary" @click="openModal(type)">+ Add {{ SECTION_TITLES[type] || type }}</button>
           </div>
           <div class="table-responsive">
@@ -278,7 +309,7 @@ onMounted(load)
               </thead>
               <tbody>
                 <tr v-if="!rowsFor(type).length"><td :colspan="columnsFor(type).length + 1" style="text-align: center; color: var(--text-muted);">No records.</td></tr>
-                <tr v-for="row in rowsFor(type)" :key="row[pkFor(type)]">
+                <tr v-for="row in pagedRowsFor(type)" :key="row[pkFor(type)]">
                   <td v-for="col in columnsFor(type)" :key="col">{{ row[col] }}</td>
                   <td style="text-align: right; white-space: nowrap;">
                     <button type="button" class="btn btn-sm btn-secondary" @click="openModal(type, row)">Edit</button>
@@ -288,6 +319,18 @@ onMounted(load)
               </tbody>
             </table>
           </div>
+
+          <AppPagination
+            v-if="rowsFor(type).length > 0"
+            :current-page="pageFor(type)"
+            :total-pages="totalPagesFor(type)"
+            :total-items="rowsFor(type).length"
+            :page-size="pageSizeFor(type)"
+            :page-size-options="[5, 10, 15, 25, 50, 100]"
+            :item-name="SECTION_PLURALS[type] || 'records'"
+            @update:current-page="pages[type] = $event"
+            @update:page-size="pageSizes[type] = $event; pages[type] = 1"
+          />
         </div>
       </section>
     </template>
@@ -316,7 +359,12 @@ onMounted(load)
               <label class="form-label">User Office</label>
               <select v-model="modal.values[field]" class="form-select" required>
                 <option value="">Select user office</option>
-                <option v-for="o in data.userOffices" :key="o.user_office_id" :value="String(o.user_office_id)">{{ o.user_office_name }}</option>
+                <!-- Managers keep accounts in their own office (enforced by the server too) -->
+                <option
+                  v-for="o in data.userOffices.filter((o) => authStore.levelId >= 4 || Number(o.user_office_id) === Number(authStore.user?.user_office_id))"
+                  :key="o.user_office_id"
+                  :value="String(o.user_office_id)"
+                >{{ o.user_office_name }}</option>
               </select>
             </template>
             <template v-else-if="field === 'password'">
@@ -360,5 +408,27 @@ onMounted(load)
 
 .section-body {
   padding: 0 1.25rem 1.25rem;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .section-body {
+    padding: 0 0.9rem 1rem;
+  }
+
+  /* On phones the tables keep one line per cell and scroll sideways inside their box */
+  .settings-section :deep(.table-responsive) {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .settings-section :deep(.data-table th),
+  .settings-section :deep(.data-table td) {
+    white-space: nowrap;
+  }
+
+  .settings-section :deep(.data-table td[colspan]) {
+    white-space: normal;
+  }
 }
 </style>

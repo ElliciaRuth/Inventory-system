@@ -13,6 +13,7 @@ export const useNotificationStore = defineStore('notification', {
       borrows: 0,
       pendingUsers: 0,
       stockoutRequests: 0,
+      stockoutDecisions: 0,
     },
     readIds: [],
     dismissedIds: [],

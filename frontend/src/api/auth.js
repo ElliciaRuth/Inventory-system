@@ -41,21 +41,9 @@ export const authApi = {
     return response.data
   },
 
-  async setupSmtp(smtpEmail, smtpPassword) {
-    const response = await client.post('/auth/setup-smtp', {
-      smtp_email: smtpEmail,
-      smtp_password: smtpPassword,
-    })
-    return response.data
-  },
-
-  async setupRecoveryEmail(recoveryEmail) {
-    const response = await client.post('/auth/setup-recovery-email', { recovery_email: recoveryEmail })
-    return response.data
-  },
-
-  async forgotPassword(email) {
-    const response = await client.post('/auth/forgot-password', { email })
+  // appKey: the app password of the user's own email account; sent once over HTTPS, never kept
+  async forgotPassword(email, appKey = '') {
+    const response = await client.post('/auth/forgot-password', { email, app_key: appKey })
     return response.data
   },
 

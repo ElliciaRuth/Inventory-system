@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Models\StockoutModel;
+use App\Libraries\AuditLog;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -61,6 +62,19 @@ class StockoutController extends BaseApiController
         }
 
         $db = db_connect();
+
+        // Only this office's products can be requested
+        $productBuilder = $db->table('product_table')->where('product_id', $productId);
+        if ($userOfficeId > 0) {
+            $productBuilder->where('user_office_id', $userOfficeId);
+        }
+        if ($productBuilder->countAllResults() === 0) {
+            return $this->respondError('Product not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+
+        if ($this->model->productArchived($productId)) {
+            return $this->respondError('This item is no longer stocked (archived).', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         $copyBuilder = $db->table('product_copy_table')->where('product_id', $productId);
         if ($userOfficeId > 0) {
@@ -154,7 +168,20 @@ class StockoutController extends BaseApiController
             return $this->respondError('Cannot submit an empty list.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->model->submitForApproval((int) $draft['temp_stockout_id']);
+        $requestId = (int) $draft['temp_stockout_id'];
+        if ($archived = $this->model->archivedProductsIn($requestId)) {
+            return $this->respondError(
+                'These items are no longer stocked (archived); remove them from your list first: ' . implode(', ', $archived) . '.',
+                ['archived' => $archived],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+        $items     = $this->model->getItems($requestId);
+        $this->model->submitForApproval($requestId);
+        AuditLog::record('stockout.submitted', 'stockout_request', $requestId,
+            "Submitted stock-out request #{$requestId} (" . count($items) . ' item' . (count($items) === 1 ? '' : 's') . ')',
+            ['items' => $this->itemList($items)]
+        );
 
         return $this->respondSuccess(null, 'Stock-out request submitted for approval.');
     }
@@ -184,7 +211,12 @@ class StockoutController extends BaseApiController
             return $this->respondError('Item not found.', [], ResponseInterface::HTTP_NOT_FOUND);
         }
 
+        $before = $this->itemRow($itemId);
         $result = $this->model->approveItem($itemId, $this->currentUserId());
+
+        if ($result === 'archived') {
+            return $this->respondError('This product has been archived; restore it on the Products page before accepting, or reject the request.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         if ($result === 'insufficient_stock') {
             return $this->respondError('Cannot approve: requested quantity exceeds available stock.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -193,6 +225,11 @@ class StockoutController extends BaseApiController
         if (! $result) {
             return $this->respondError('Item could not be approved.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
+
+        AuditLog::record('stockout.approved', 'stockout_item', $itemId,
+            'Accepted ' . $this->itemLabel($before) . " (request #{$before['temp_stockout_id']})",
+            ['request_id' => (int) $before['temp_stockout_id']]
+        );
 
         return $this->respondSuccess(null, 'Item approved and stock deducted.');
     }
@@ -218,6 +255,11 @@ class StockoutController extends BaseApiController
             );
         }
 
+        AuditLog::record('stockout.approved_all', 'stockout_request', $requestId,
+            "Accepted all of request #{$requestId}: {$approved} approved, {$skipped} skipped (insufficient stock)",
+            ['approved' => $approved, 'skipped' => $skipped]
+        );
+
         $msg = "{$approved} item(s) approved and stock deducted.";
         if ($skipped > 0) {
             $msg .= " {$skipped} item(s) skipped (insufficient stock).";
@@ -227,7 +269,8 @@ class StockoutController extends BaseApiController
     }
 
     /**
-     * POST /api/stockout/reject-item/{itemId}
+     * Reject an item; the reason is shown to the staff member who requested it.
+     * POST /api/stockout/reject-item/{itemId}   { reason }
      */
     public function rejectItem(int $itemId): ResponseInterface
     {
@@ -235,9 +278,58 @@ class StockoutController extends BaseApiController
             return $this->respondError('Item not found.', [], ResponseInterface::HTTP_NOT_FOUND);
         }
 
-        $this->model->rejectItem($itemId);
+        $reason = trim(preg_replace('/\s+/', ' ', (string) ($this->input()['reason'] ?? '')));
+        if (mb_strlen($reason) < 3) {
+            return $this->respondError('Give a short reason for rejecting this item.', ['reason' => 'Required.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if (mb_strlen($reason) > 500) {
+            return $this->respondError('Keep the reason under 500 characters.', ['reason' => 'Too long.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
-        return $this->respondSuccess(null, 'Item rejected.');
+        $before = $this->itemRow($itemId);
+        if (! $this->model->rejectItem($itemId, $this->currentUserId(), $reason)) {
+            return $this->respondError('This item was already accepted or rejected.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        AuditLog::record('stockout.rejected', 'stockout_item', $itemId,
+            'Rejected ' . $this->itemLabel($before) . " (request #{$before['temp_stockout_id']})",
+            ['request_id' => (int) $before['temp_stockout_id'], 'reason' => $reason]
+        );
+
+        return $this->respondSuccess(null, 'Item rejected. The requester will see your reason.');
+    }
+
+    /**
+     * Requested items and their outcome. Staff see their own requests; custodians and
+     * managers see all requests of their office.
+     * GET /api/stockout/history?status=&search=&page=&limit=
+     */
+    public function history(): ResponseInterface
+    {
+        $level = $this->currentLevelId();
+        $page  = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $limit = max(5, min(100, (int) ($this->request->getGet('limit') ?? 15)));
+
+        $result = $this->model->history(
+            $this->currentOfficeId(),
+            $level <= 1 ? $this->currentUserId() : null,
+            [
+                'status' => (string) ($this->request->getGet('status') ?? ''),
+                'search' => (string) ($this->request->getGet('search') ?? ''),
+            ],
+            $page,
+            $limit
+        );
+
+        return $this->respondSuccess([
+            'items'      => $result['rows'],
+            'counts'     => $result['counts'],
+            'total'      => $result['total'],
+            'page'       => $page,
+            'limit'      => $limit,
+            'totalPages' => max(1, (int) ceil($result['total'] / $limit)),
+            'scope'      => $level <= 1 ? 'mine' : 'office',
+        ], 'Request history retrieved');
     }
 
     /**
@@ -255,9 +347,43 @@ class StockoutController extends BaseApiController
             return $this->respondError('Quantity must be greater than 0.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $before = $this->itemRow($itemId);
+        if (($before['status'] ?? '') !== 'pending') {
+            // Accepted lines already took the stock; rejected ones are closed
+            return $this->respondError('This item was already accepted or rejected.', [], ResponseInterface::HTTP_CONFLICT);
+        }
         $this->model->updateItem($itemId, ['quantity' => $quantity]);
+        AuditLog::record('stockout.quantity_changed', 'stockout_item', $itemId,
+            'Changed requested quantity of ' . $this->itemLabel($before) . " to {$quantity} (request #{$before['temp_stockout_id']})",
+            ['before' => (float) $before['quantity'], 'after' => $quantity]
+        );
 
         return $this->respondSuccess(null, 'Quantity updated successfully.');
+    }
+
+    /** A request line with its product name, for the audit trail. */
+    private function itemRow(int $itemId): array
+    {
+        return db_connect()->table('temp_stockout_item i')
+            ->select('i.*, p.product')
+            ->join('product_table p', 'p.product_id = i.product_id', 'left')
+            ->where('i.temp_stockout_item_id', $itemId)
+            ->get(1)->getRowArray() ?? ['temp_stockout_id' => 0, 'quantity' => 0, 'product' => ''];
+    }
+
+    private function itemLabel(array $item): string
+    {
+        $qty = rtrim(rtrim(number_format((float) ($item['quantity'] ?? 0), 2, '.', ''), '0'), '.');
+
+        return "{$qty} × " . (($item['product'] ?? '') ?: 'item');
+    }
+
+    private function itemList(array $items): array
+    {
+        return array_map(static fn ($i) => [
+            'product'  => $i['item_name'] ?? $i['product'] ?? '',
+            'quantity' => (float) ($i['quantity'] ?? 0),
+        ], $items);
     }
 
     private function draft(): array

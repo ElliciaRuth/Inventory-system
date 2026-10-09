@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\AuditLog;
 use App\Models\AdjustmentReasonModel;
 use App\Models\OfficeModel;
 use App\Models\ProductCopyModel;
@@ -15,6 +16,9 @@ use Throwable;
 
 class StockController extends BaseApiController
 {
+    /** Most counted items one physical count may submit. */
+    private const MAX_COUNT_LINES = 1500;
+
     private ProductModel $productModel;
     private TransactionModel $transactionModel;
 
@@ -39,17 +43,20 @@ class StockController extends BaseApiController
         $search     = trim((string) ($this->request->getGet('search') ?? ''));
 
         $productId  = (int) ($this->request->getGet('item_id') ?? 0);
-        if ($productId === 0) {
+        if ($productId === 0 || ! $this->productInOffice($productId)) {
+            // Another office's product id: show this office's first product instead of its card
             $productId = $this->productModel->firstProductId($officeId);
         }
 
         $itemInfo   = [];
+        $batches    = [];
         $stockcard  = [];
         $totalPages = 1;
         $total      = 0;
 
         if ($productId > 0) {
             $itemInfo = $this->productModel->stockcardInfo($productId);
+            $batches  = $this->productModel->datedBatches($productId, $officeId);
             $history  = $this->transactionModel->paginatedHistory(
                 $productId, $filterType, $page, $limit, $year, $month, $search, $officeId
             );
@@ -61,7 +68,8 @@ class StockController extends BaseApiController
         return $this->respondSuccess([
             'itemId'     => $productId,
             'itemInfo'   => $itemInfo,
-            'items'      => $this->productModel->listForSelect($officeId),
+            'batches'    => $batches,
+            'items'      => $this->productModel->listForSelect($officeId, $productId),
             'stockcard'  => $stockcard,
             'total'      => $total,
             'page'       => $page,
@@ -102,6 +110,9 @@ class StockController extends BaseApiController
             'transactionTypes'  => $db->table('transaction_type_table')->orderBy('transaction_type_id', 'ASC')->get()->getResultArray(),
             'adjustmentReasons' => $reasonModel->orderedList(),
             'copiesMap'         => $copyModel->allCopiesGrouped($officeId),
+            // Units that can borrow from this one (the other Bakery / FPC offices)
+            'borrowerUnits'     => $db->table('user_office_table')->select('user_office_id, user_office_name')
+                ->where('user_office_id !=', $officeId)->orderBy('user_office_name', 'ASC')->get()->getResultArray(),
         ], 'Stock options retrieved');
     }
 
@@ -129,6 +140,10 @@ class StockController extends BaseApiController
         $officeId = $this->currentOfficeId();
         $userId   = $this->currentUserId();
 
+        if (! $this->productInOffice((int) $input['product_id'])) {
+            return $this->respondError('Product not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+
         $payload = array_merge($input, [
             'user_office_id' => $officeId,
             'user_id'        => $userId,
@@ -137,20 +152,38 @@ class StockController extends BaseApiController
         try {
             $db = db_connect();
             $service = new InventoryService($db);
-            $service->saveStock($payload);
+            $result  = $service->saveStock($payload);
 
             $productId = (int) $payload['product_id'];
             $updatedStock = $this->transactionModel->currentStock($productId, $officeId);
 
+            $this->auditMovement($result, $updatedStock);
+
             return $this->respondSuccess([
                 'product_id'    => $productId,
                 'updated_stock' => $updatedStock,
+                'batches'       => $result['batches'],
+                'borrow_id'     => $result['borrow_id'] ?? null,
             ], 'Stock transaction recorded successfully', ResponseInterface::HTTP_CREATED);
         } catch (DomainException $e) {
             return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Throwable $e) {
-            return $this->respondError('Failed to record stock transaction: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            // Database errors stay in the log; they can describe the schema
+            log_message('error', 'Stock transaction failed: ' . $e->getMessage());
+
+            return $this->respondError('Failed to record stock transaction. Nothing was saved; the details were written to the server log.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /** Whether the product belongs to the signed-in user's office (any office for a global account). */
+    private function productInOffice(int $productId): bool
+    {
+        $builder = db_connect()->table('product_table')->where('product_id', $productId);
+        if ($this->currentOfficeId() > 0) {
+            $builder->where('user_office_id', $this->currentOfficeId());
+        }
+
+        return $productId > 0 && $builder->countAllResults() > 0;
     }
 
     /**
@@ -184,15 +217,19 @@ class StockController extends BaseApiController
             return $this->respondError('Transaction not found.', [], 404);
         }
 
+        if (! empty($txn['borrow_id'])) {
+            return $this->respondError('This entry belongs to a borrow record. Record a Return instead of editing it, so the borrow stays correct.', [], 422);
+        }
+
         $oldQty    = (float) $txn['transaction_qty'];
         $batchId   = (int) $txn['batch_id'];
         $oldTypeId = (int) $txn['transaction_type_id'];
         $finalType = $newTypeId ?? $oldTypeId;
 
-        // Resolve stock-adding type IDs from DB (both 'receipt' and 'return' add to stock)
+        // Resolve stock-adding type IDs from DB (receipt, return and adjust_in add to stock)
         $stockInTypes = $db->table('transaction_type_table')
             ->select('transaction_type_id')
-            ->whereIn('transaction_type', ['receipt', 'return'])
+            ->whereIn('transaction_type', TransactionModel::STOCK_IN_TYPES)
             ->get()->getResultArray();
         $stockInTypeIds = array_column($stockInTypes, 'transaction_type_id');
 
@@ -284,6 +321,17 @@ class StockController extends BaseApiController
         $productId = (int) $batch['product_id'];
         $newStock = $transModel->currentStock($productId, $userOfficeId);
 
+        $after = $db->table('transaction_table')->where('transaction_id', $transactionId)->get(1)->getRowArray();
+        AuditLog::record('stock.transaction_edited', 'transaction', $transactionId,
+            'Edited ledger entry #' . $transactionId . ' of ' . $this->productName($productId) . " (qty {$oldQty} → {$newQty})",
+            [
+                'batch_no'  => $batch['batch_no'] ?? '',
+                'before'    => $this->auditFields($txn),
+                'after'     => $this->auditFields($after ?? []),
+                'batch_qty' => ['before' => $currentBatchQty, 'after' => $newBatchQty],
+            ]
+        );
+
         return $this->respondSuccess([
             'product_id' => $productId,
             'new_qty'    => $newQty,
@@ -314,13 +362,17 @@ class StockController extends BaseApiController
             return $this->respondError('Transaction not found.', [], 404);
         }
 
+        if (! empty($txn['borrow_id'])) {
+            return $this->respondError('This entry belongs to a borrow record and cannot be deleted; the borrow history would no longer add up.', [], 422);
+        }
+
         $qty     = (float) $txn['transaction_qty'];
         $batchId = (int) $txn['batch_id'];
         $typeId  = (int) $txn['transaction_type_id'];
 
         $stockInTypes = $db->table('transaction_type_table')
             ->select('transaction_type_id')
-            ->whereIn('transaction_type', ['receipt', 'return'])
+            ->whereIn('transaction_type', TransactionModel::STOCK_IN_TYPES)
             ->get()->getResultArray();
         $stockInTypeIds = array_column($stockInTypes, 'transaction_type_id');
 
@@ -360,6 +412,15 @@ class StockController extends BaseApiController
         $productId = (int) $batch['product_id'];
         $newStock = $transModel->currentStock($productId, $userOfficeId);
 
+        AuditLog::record('stock.transaction_deleted', 'transaction', $transactionId,
+            'Deleted ledger entry #' . $transactionId . ' of ' . $this->productName($productId) . " (qty {$qty})",
+            [
+                'batch_no'  => $batch['batch_no'] ?? '',
+                'deleted'   => $this->auditFields($txn),
+                'batch_qty' => ['before' => $currentBatchQty, 'after' => $newBatchQty],
+            ]
+        );
+
         return $this->respondSuccess([
             'product_id' => $productId,
             'new_stock'  => $newStock,
@@ -382,13 +443,14 @@ class StockController extends BaseApiController
 
         $db      = db_connect();
         $builder = $db->table('transaction_table t')
-            ->select('t.transaction_id')
+            ->select('t.transaction_id, t.transaction_unit_cost, b.product_id')
             ->join('batch_table b', 'b.batch_id = t.batch_id')
             ->where('t.transaction_id', $transactionId);
         if ($this->currentOfficeId() > 0) {
             $builder->where('b.user_office_id', $this->currentOfficeId());
         }
-        if (! $builder->get(1)->getRowArray()) {
+        $existing = $builder->get(1)->getRowArray();
+        if (! $existing) {
             return $this->respondError('Transaction not found.', [], 404);
         }
 
@@ -397,10 +459,158 @@ class StockController extends BaseApiController
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);
 
+        AuditLog::record('stock.cost_override', 'transaction', $transactionId,
+            'Report cost of entry #' . $transactionId . ' (' . $this->productName((int) $existing['product_id']) . ') set to ' . number_format($newCost, 2),
+            ['before' => (float) $existing['transaction_unit_cost'], 'after' => $newCost]
+        );
+
         return $this->respondSuccess([
             'transaction_id' => $transactionId,
             'new_cost'       => $newCost,
         ], 'Unit cost updated');
+    }
+
+    /**
+     * Which batches a stock-out would take from (shown in the stock form before saving).
+     * GET /api/stock/batch-plan?product_id=&copy_id=&quantity=&type=issue|borrow|adjust_out&reason_id=
+     */
+    public function batchPlan(): ResponseInterface
+    {
+        $productId = (int) ($this->request->getGet('product_id') ?? 0);
+        $copyId    = (int) ($this->request->getGet('copy_id') ?? 0);
+        $quantity  = max(0.0, (float) ($this->request->getGet('quantity') ?? 0));
+        $type      = (string) ($this->request->getGet('type') ?? 'issue');
+        $reasonId  = (int) ($this->request->getGet('reason_id') ?? 0);
+
+        if ($productId <= 0) {
+            return $this->respondError('Choose a product.', [], 422);
+        }
+
+        $mode = InventoryService::MODE_ISSUE;
+        if ($type === 'adjust_out') {
+            $reason = db_connect()->table('adjustment_reason')->where('adjustment_reason_id', $reasonId)->get(1)->getRowArray();
+            $mode   = strcasecmp((string) ($reason['adjustment_reason'] ?? ''), 'Expired') === 0
+                ? InventoryService::MODE_EXPIRED
+                : InventoryService::MODE_ADJUST;
+        }
+
+        $plan = (new InventoryService(db_connect()))->planDepletion($productId, $quantity, $this->currentOfficeId(), $copyId, $mode);
+
+        return $this->respondSuccess($plan + ['mode' => $mode], 'Batch plan');
+    }
+
+    /**
+     * Borrow records of this unit.
+     * GET /api/stock/borrows?product_id=&status=open|outstanding|partial|returned
+     */
+    public function borrows(): ResponseInterface
+    {
+        $rows = (new InventoryService(db_connect()))->borrows(
+            $this->currentOfficeId(),
+            (int) ($this->request->getGet('product_id') ?? 0),
+            (string) ($this->request->getGet('status') ?? '')
+        );
+
+        return $this->respondSuccess(['borrows' => $rows], 'Borrows retrieved');
+    }
+
+    /**
+     * Physical count: align system stock with counted quantities.
+     * POST /api/stock/count   { counts: [{ product_id, counted_qty }], note? }
+     */
+    public function count(): ResponseInterface
+    {
+        $input  = $this->input();
+        $counts = is_array($input['counts'] ?? null) ? $input['counts'] : [];
+        $note   = mb_substr(trim((string) ($input['note'] ?? '')), 0, 300);
+
+        if ($counts === []) {
+            return $this->respondError('Enter at least one counted quantity.', [], 422);
+        }
+        if (count($counts) > self::MAX_COUNT_LINES) {
+            return $this->respondError('Save at most ' . self::MAX_COUNT_LINES . ' counted items at a time.', [], 422);
+        }
+
+        try {
+            $result = (new InventoryService(db_connect()))->reconcileCount($counts, $this->currentOfficeId(), $this->currentUserId(), $note);
+        } catch (DomainException $e) {
+            return $this->respondError($e->getMessage(), [], 422);
+        } catch (Throwable $e) {
+            log_message('error', 'Physical count failed: ' . $e->getMessage());
+
+            return $this->respondError('The count could not be saved; nothing was changed. The details were written to the server log.', [], 500);
+        }
+
+        $lines = $result['lines'];
+        AuditLog::record('count.reconciled', 'physical_count', null,
+            'Physical count ' . $result['reference'] . ': ' . count($counts) . ' item(s) counted, ' . count($lines) . ' adjusted'
+            . ($note !== '' ? " — {$note}" : ''),
+            [
+                'reference'   => $result['reference'],
+                'note'        => $note,
+                'counted'     => count($counts),
+                'adjustments' => array_map(static fn ($l) => [
+                    'product'  => $l['product'],
+                    'system'   => $l['system_qty'],
+                    'counted'  => $l['counted'],
+                    'variance' => $l['variance'],
+                    'batches'  => array_column($l['batches'], 'batch_no'),
+                ], $lines),
+            ]
+        );
+
+        return $this->respondSuccess($result, count($lines)
+            ? count($lines) . ' item(s) adjusted to match the count (reference ' . $result['reference'] . ').'
+            : 'Every counted quantity already matched the system. Nothing was adjusted.');
+    }
+
+    /**
+     * One audit entry per stock movement, e.g. "Issued 5 kg of Flour from B-FPC-20261009-0128-01".
+     */
+    private function auditMovement(array $result, float $stockAfter): void
+    {
+        $product = db_connect()->table('product_table p')
+            ->select('p.product, COALESCE(ut.unit, "") AS unit', false)
+            ->join('unit_table ut', 'ut.unit_id = p.unit_id', 'left')
+            ->where('p.product_id', $result['product_id'])
+            ->get(1)->getRowArray() ?? ['product' => 'product', 'unit' => ''];
+
+        $qty     = rtrim(rtrim(number_format((float) $result['quantity'], 2, '.', ''), '0'), '.');
+        $what    = trim("{$qty} {$product['unit']}") . ' of ' . $product['product'];
+        $batches = implode(', ', array_column($result['batches'], 'batch_no'));
+        $reason  = ($result['reason'] ?? '') !== '' ? " ({$result['reason']})" : '';
+
+        $summary = match ($result['type']) {
+            'receipt'    => "Stock in: {$what} as batch {$batches}",
+            'issue'      => "Issued {$what} from {$batches}",
+            'borrow'     => "Lent {$what} to " . ($result['borrower'] ?? 'borrower') . " from {$batches}",
+            'return'     => "Returned {$what}" . (isset($result['borrower']) ? " from {$result['borrower']}" : '') . (! empty($result['settled']) ? ' (borrow settled)' : ''),
+            'adjust_out' => "Adjust out{$reason}: {$what} from {$batches}",
+            'adjust_in'  => "Adjust in{$reason}: {$what} into {$batches}",
+            default      => ucfirst($result['type']) . ": {$what}",
+        };
+
+        AuditLog::record('stock.' . $result['type'], 'product', (int) $result['product_id'], $summary, [
+            'batches'     => $result['batches'],
+            'borrow_id'   => $result['borrow_id'] ?? null,
+            'stock_after' => $stockAfter,
+        ]);
+    }
+
+    private function productName(int $productId): string
+    {
+        $row = db_connect()->table('product_table')->select('product')->where('product_id', $productId)->get(1)->getRowArray();
+
+        return $row['product'] ?? "product #{$productId}";
+    }
+
+    /** The ledger fields worth keeping in the audit trail. */
+    private function auditFields(array $txn): array
+    {
+        return array_intersect_key($txn, array_flip([
+            'transaction_type_id', 'transaction_qty', 'transaction_unit_cost', 'transaction_date',
+            'batch_id', 'copy_id', 'office_id', 'reference_id', 'user_id', 'adjustment_reason_id',
+        ]));
     }
 
     /**

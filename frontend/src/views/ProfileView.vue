@@ -51,6 +51,12 @@ const showCurrentPassword = ref(false)
 const showNewPassword = ref(false)
 const showConfirmPassword = ref(false)
 
+// Changing the email (where reset codes go) needs the current password
+const emailPassword = ref('')
+const emailChanged = computed(
+  () => profileForm.value.email.trim().toLowerCase() !== String(authStore.user?.email || '').toLowerCase()
+)
+
 const loadingProfile = ref(false)
 const loadingPassword = ref(false)
 const profileError = ref('')
@@ -84,7 +90,7 @@ function hasSequentialNumbers(str) {
   return false
 }
 
-const ruleLen = computed(() => passwordForm.value.password.length >= 6)
+const ruleLen = computed(() => passwordForm.value.password.length >= 8)
 const ruleUpper = computed(() => /[A-Z]/.test(passwordForm.value.password))
 const ruleLower = computed(() => /[a-z]/.test(passwordForm.value.password))
 const ruleNum = computed(() => /[0-9]/.test(passwordForm.value.password))
@@ -125,7 +131,9 @@ async function handleSaveProfile() {
       name: profileForm.value.name.trim(),
       username: profileForm.value.username.trim(),
       email: profileForm.value.email.trim(),
+      ...(emailChanged.value ? { current_password: emailPassword.value } : {}),
     })
+    emailPassword.value = ''
 
     if (res.data?.user) {
       authStore.setSession(res.data.user)
@@ -313,6 +321,20 @@ onMounted(async () => {
                 @blur="emailFocused = false"
               />
               <small class="form-hint">Used for official system communications and account recovery.</small>
+            </div>
+
+            <!-- Reset codes go to this address, so the server asks for the password to change it -->
+            <div v-if="emailChanged" class="form-group">
+              <label class="form-label" for="profile_email_password">Current Password</label>
+              <input
+                id="profile_email_password"
+                v-model="emailPassword"
+                type="password"
+                class="form-input"
+                autocomplete="current-password"
+                required
+              />
+              <small class="form-hint">Enter your current password to change your email address.</small>
             </div>
 
             <div class="form-actions-bar">
@@ -505,7 +527,7 @@ onMounted(async () => {
             <ul class="password-rules-list">
               <li :class="{ 'is-met': ruleLen }">
                 <component :is="ruleLen ? CheckCircle2 : XCircle" :size="15" class="rule-icon" />
-                <span>At least 6 characters long</span>
+                <span>At least 8 characters long</span>
               </li>
               <li :class="{ 'is-met': ruleUpper }">
                 <component :is="ruleUpper ? CheckCircle2 : XCircle" :size="15" class="rule-icon" />

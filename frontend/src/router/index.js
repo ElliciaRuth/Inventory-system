@@ -12,6 +12,7 @@ import NotificationsView from '../views/NotificationsView.vue'
 import StockoutView from '../views/StockoutView.vue'
 import StockoutListView from '../views/StockoutListView.vue'
 import StockoutPendingView from '../views/StockoutPendingView.vue'
+import StockoutHistoryView from '../views/StockoutHistoryView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import BatchesView from '../views/BatchesView.vue'
 import SummaryReportView from '../views/SummaryReportView.vue'
@@ -19,6 +20,9 @@ import ExportSummaryView from '../views/ExportSummaryView.vue'
 import FinishedBarcodesView from '../views/FinishedBarcodesView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import AuditLogView from '../views/AuditLogView.vue'
+import PhysicalCountView from '../views/PhysicalCountView.vue'
+import BorrowsView from '../views/BorrowsView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 import { toast } from '../composables/useToast'
@@ -109,7 +113,8 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: SettingsView,
-    meta: { title: 'Settings - BSU Inventory', minLevel: 2, maxLevel: 3 },
+    // Others Management: managers only
+    meta: { title: 'Others Management - BSU Inventory', minLevel: 3, maxLevel: 3 },
   },
   {
     path: '/profile',
@@ -128,6 +133,13 @@ const routes = [
   // Old CodeIgniter page URLs
   { path: '/batches', redirect: '/reports/batches' },
   { path: '/batchlist', redirect: '/reports/summary' },
+  {
+    // Staff: their own requests; custodians/managers: their office's
+    path: '/stockout/history',
+    name: 'stockout-history',
+    component: StockoutHistoryView,
+    meta: { title: 'Request History - BSU Inventory', maxLevel: 3 },
+  },
   { path: '/stockout/temp', redirect: '/stockout/list' },
   { path: '/stock/add', redirect: '/stockcard' },
   {
@@ -135,6 +147,25 @@ const routes = [
     name: 'transactions',
     component: TransactionsView,
     meta: { title: 'Transaction Log - BSU Inventory', maxLevel: 3 },
+  },
+  {
+    path: '/stock/count',
+    name: 'physical-count',
+    component: PhysicalCountView,
+    meta: { title: 'Physical Count - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    path: '/stock/borrows',
+    name: 'borrows',
+    component: BorrowsView,
+    meta: { title: 'Borrowed Items - BSU Inventory', minLevel: 2, maxLevel: 3 },
+  },
+  {
+    // Managers: their office; technical staff: every office
+    path: '/audit-log',
+    name: 'audit-log',
+    component: AuditLogView,
+    meta: { title: 'Audit Log - BSU Inventory', minLevel: 3 },
   },
   {
     path: '/notifications',

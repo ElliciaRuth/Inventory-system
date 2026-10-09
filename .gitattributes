@@ -1,6 +1,8 @@
 # Files used inside Linux containers must keep LF line endings, even on a
 # Windows checkout (a CRLF setup.sh fails; a CRLF .env breaks the DB password).
 *.sh                text eol=lf
+# Windows batch files need CRLF, or cmd.exe misreads labels and blocks
+*.bat               text eol=crlf
 docker/**           text eol=lf
 docker-compose.yml  text eol=lf
 spark               text eol=lf

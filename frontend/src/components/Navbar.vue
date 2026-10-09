@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useNotificationStore } from '../stores/notificationStore'
-import { triggerAutoReload, isReloading } from '../composables/useAutoReload'
+import { useAutoReload } from '../composables/useAutoReload'
 import { backupsApi } from '../api/backups'
 import { maskEmail } from '../utils/maskEmail'
 import bsuLogo from '../assets/images/bsu-logo.png'
@@ -43,6 +43,12 @@ import {
   Building2,
   Shield,
   User,
+  History,
+  CheckCircle2,
+  XCircle,
+  ClipboardCheck,
+  Handshake,
+  CheckCheck,
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -90,11 +96,83 @@ function closeMegaMenu() {
 const isNotifDropdownOpen = ref(false)
 const dropdownRef = ref(null)
 
+// The bell has three tabs: stock-out requests (and applicants), expiring/expired batches, other stock alerts
+const REQUEST_TYPES = ['stockout_request', 'stockout_decision', 'user_registration']
+const EXPIRY_TYPES = ['expiring']
+const bellTab = ref('requests')
+const requestNotifs = computed(() => notificationStore.activeNotifications.filter((n) => REQUEST_TYPES.includes(n.type)))
+// Most urgent first: already expired, then the 3-day reminders, then the rest (soonest first from the server)
+const expiryRank = (n) => (n.details?.expired ? 0 : n.details?.reminder ? 1 : 2)
+const expiryNotifs = computed(() =>
+  notificationStore.activeNotifications
+    .filter((n) => EXPIRY_TYPES.includes(n.type))
+    .sort((a, b) => expiryRank(a) - expiryRank(b))
+)
+const alertNotifs = computed(() =>
+  notificationStore.activeNotifications.filter((n) => !REQUEST_TYPES.includes(n.type) && !EXPIRY_TYPES.includes(n.type))
+)
+const unreadIn = (list) => list.filter((n) => !n.isRead).length
+
+const BELL_TABS = computed(() => [
+  { key: 'requests', label: 'Requests', color: '#f97316', list: requestNotifs.value, empty: 'No requests or decisions right now.' },
+  { key: 'expiry', label: 'Expiry', color: '#d97706', list: expiryNotifs.value, empty: 'Nothing expiring or expired right now.' },
+  { key: 'alerts', label: 'Stock Alerts', color: '#ef4444', list: alertNotifs.value, empty: 'No stock alerts right now.' },
+])
+const activeBellTab = computed(() => BELL_TABS.value.find((t) => t.key === bellTab.value) || BELL_TABS.value[0])
+const BELL_LIMIT = 8
+const bellList = computed(() => activeBellTab.value.list.slice(0, BELL_LIMIT))
+const bellMore = computed(() => Math.max(0, activeBellTab.value.list.length - BELL_LIMIT))
+
+// Stock alerts describe the stock right now: product name + one figure, no time or stock phrase.
+// Requests and decisions are events: title, one line of message and when it happened.
+const STATE_TYPES = ['out_of_stock', 'low_stock', 'expiring', 'borrow']
+const isStateAlert = (n) => STATE_TYPES.includes(n.type)
+const rowTitle = (n) => (isStateAlert(n) ? n.item || n.title : n.title)
+const rowDetail = (n) => {
+  if (!isStateAlert(n)) return n.message
+  // Expiry alerts carry the batch and date in the message; the others say nothing new
+  return n.type === 'expiring' ? n.message : ''
+}
+
 function toggleNotifDropdown() {
   isNotifDropdownOpen.value = !isNotifDropdownOpen.value
   if (isNotifDropdownOpen.value) {
     isMegaMenuOpen.value = false
+    // Open on the first tab with something new (requests, then expiry, then alerts),
+    // otherwise on the first tab that has anything
+    const tabs = BELL_TABS.value
+    const pick = tabs.find((t) => unreadIn(t.list) > 0) || tabs.find((t) => t.list.length) || tabs[0]
+    bellTab.value = pick.key
   }
+}
+
+// What each notification is, as a coloured tag
+function notifKind(n) {
+  switch (n.type) {
+    case 'stockout_request': return { label: 'New request', tone: 'request' }
+    case 'stockout_decision': return n.severity === 'danger' ? { label: 'Rejected', tone: 'rejected' } : { label: 'Accepted', tone: 'accepted' }
+    case 'user_registration': return { label: 'New applicant', tone: 'applicant' }
+    case 'out_of_stock': return { label: 'Out of stock', tone: 'danger' }
+    case 'low_stock': return { label: 'Low stock', tone: 'warning' }
+    case 'expiring':
+      if (n.details?.expired) return { label: 'Expired', tone: 'danger' }
+      return n.details?.reminder ? { label: 'Expiry reminder', tone: 'danger' } : { label: 'Expiring', tone: 'caution' }
+    case 'borrow': return { label: 'Borrowed', tone: 'info' }
+    default: return { label: 'Alert', tone: 'info' }
+  }
+}
+
+function timeAgo(datetime) {
+  if (!datetime) return 'Now'
+  const t = new Date(String(datetime).replace(' ', 'T')).getTime()
+  if (!t) return String(datetime).slice(0, 16)
+  const mins = Math.round((Date.now() - t) / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`
+  const days = Math.round(hours / 24)
+  return days < 7 ? `${days} day${days === 1 ? '' : 's'} ago` : String(datetime).slice(0, 10)
 }
 
 function closeDropdown() {
@@ -109,10 +187,12 @@ function handleNotifClick(n) {
   }
 }
 
-function getNotifIcon(type) {
+function getNotifIcon(type, severity = '', details = null) {
+  // Outcome of the user's own stock-out request
+  if (type === 'stockout_decision') return severity === 'danger' ? XCircle : CheckCircle2
   if (type === 'out_of_stock') return AlertCircle
   if (type === 'low_stock') return AlertTriangle
-  if (type === 'expiring') return Clock
+  if (type === 'expiring') return details?.expired ? AlertCircle : Clock
   if (type === 'borrow') return RefreshCw
   if (type === 'user_registration') return UserCheck
   if (type === 'stockout_request') return ClipboardList
@@ -182,100 +262,139 @@ const brandSubtitle = computed(() => {
   return authStore.officeName || 'BSU Inventory'
 })
 
-// Mega Menu multi-column layout inspired by Velt design
+// Mega Menu: each column is a stack of titled groups, kept roughly the same height.
+// Every group has one colour, shared by all of its icons
 const menuColumns = computed(() => {
   const level = authStore.levelId
 
   // Admin access
   if (isAdminAccount.value) {
     return [
-      {
-        title: 'OVERVIEW',
-        items: [
-          { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
-        ],
-      },
-      {
-        title: 'USER MANAGEMENT',
-        items: [
-          { label: 'User Management', to: '/admin', icon: Users, color: '#8b5cf6' },
-        ],
-      },
-      {
-        title: 'SYSTEM SETTINGS',
-        items: [
-          { label: 'Settings', to: '/settings', icon: Settings, color: '#94a3b8', badge: notificationStore.counts.pendingUsers || 0 },
-        ],
-      },
+      [{ title: 'OVERVIEW', color: '#3b82f6', items: [{ label: 'Dashboard', to: '/', icon: LayoutDashboard }] }],
+      [{ title: 'USER MANAGEMENT', color: '#8b5cf6', items: [{ label: 'User Management', to: '/admin', icon: Users }] }],
+      [{ title: 'SYSTEM SETTINGS', color: '#64748b', items: [{ label: 'Settings', to: '/settings', icon: Settings, badge: notificationStore.counts.pendingUsers || 0 }] }],
     ]
   }
 
   // Level 1: Staff
   if (level === 1) {
     return [
+      [
+        {
+          title: 'OVERVIEW',
+          color: '#3b82f6',
+          items: [
+            { label: 'Dashboard', to: '/', icon: LayoutDashboard },
+            { label: 'Transactions', to: '/transactions', icon: Receipt },
+          ],
+        },
+      ],
+      [
+        {
+          title: 'STOCK OUT REQUESTS',
+          color: '#f97316',
+          items: [
+            { label: 'Request Stock Out', to: '/stockout', icon: Inbox },
+            { label: 'My Requests List', to: '/stockout/list', icon: ClipboardList },
+            { label: 'Request History', to: '/stockout/history', icon: History },
+          ],
+        },
+      ],
+      [
+        {
+          title: 'ITEMS',
+          color: '#f59e0b',
+          items: [
+            { label: 'Item Catalog', to: '/products', icon: Package },
+          ],
+        },
+      ],
+    ]
+  }
+
+  // Levels 2 & 3: Custodian & Manager share the same menu, so managers can
+  // accept/reject stock-out requests exactly like custodians.
+  return [
+    [
       {
         title: 'OVERVIEW',
+        color: '#3b82f6',
         items: [
-          { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
-          { label: 'Transactions', to: '/transactions', icon: Receipt, color: '#06b6d4' },
+          { label: 'Dashboard', to: '/', icon: LayoutDashboard },
+          { label: 'Transactions', to: '/transactions', icon: Receipt },
         ],
       },
       {
         title: 'STOCK OUT REQUESTS',
+        color: '#f97316',
         items: [
-          { label: 'Request Stock Out', to: '/stockout', icon: Inbox, color: '#fb923c' },
-          { label: 'My Requests List', to: '/stockout/list', icon: ClipboardList, color: '#f59e0b' },
+          {
+            label: 'Pending Requests',
+            to: '/stockout/pending',
+            icon: Inbox,
+            badge: notificationStore.counts.stockoutRequests || 0,
+          },
+          { label: 'Request History', to: '/stockout/history', icon: History },
+        ],
+      },
+    ],
+    [
+      {
+        title: 'INVENTORY & STOCK',
+        color: '#14b8a6',
+        items: [
+          { label: 'Stockcard Ledger', to: '/stockcard', icon: Boxes },
+          { label: 'Export Stockcard', to: '/export/stockcard', icon: FileSpreadsheet },
+          { label: 'Physical Count', to: '/stock/count', icon: ClipboardCheck },
+          { label: 'Borrowed Items', to: '/stock/borrows', icon: Handshake },
         ],
       },
       {
-        title: 'ITEMS',
+        title: 'REPORTS',
+        color: '#8b5cf6',
         items: [
-          { label: 'Item Catalog', to: '/products', icon: Package, color: '#34d399' },
+          { label: 'Summary Report', to: '/reports/summary', icon: BarChart3 },
+          { label: 'Export Summary', to: '/export/summary', icon: FileSpreadsheet },
         ],
       },
-    ]
-  }
-
-  // Levels 2 & 3: Custodian & Manager
-  return [
-    {
-      title: 'OVERVIEW',
-      items: [
-        { label: 'Dashboard', to: '/', icon: LayoutDashboard, color: '#38bdf8' },
-        { label: 'Transactions', to: '/transactions', icon: Receipt, color: '#06b6d4' },
-        {
-          label: 'Requests',
-          to: '/stockout/pending',
-          icon: Inbox,
-          color: '#fb923c',
-          badge: notificationStore.counts.stockoutRequests || 0,
-        },
-      ],
-    },
-    {
-      title: 'INVENTORY & STOCK',
-      items: [
-        { label: 'Stockcard Ledger', to: '/stockcard', icon: Boxes, color: '#2dd4bf' },
-        { label: 'Export Stockcard', to: '/export/stockcard', icon: FileSpreadsheet, color: '#34d399' },
-      ],
-    },
-    {
-      title: 'PRODUCTS & CATALOG',
-      items: [
-        { label: 'Product List', to: '/products', icon: Package, color: '#f59e0b' },
-        { label: 'Finished Products', to: '/products/barcodes', icon: ShoppingBag, color: '#f43f5e' },
-        { label: 'Batch Barcodes', to: '/reports/batches', icon: Barcode, color: '#a855f7' },
-        { label: 'Summary Report', to: '/reports/summary', icon: BarChart3, color: '#6366f1' },
-        { label: 'Export Summary', to: '/export/summary', icon: FileSpreadsheet, color: '#10b981' },
-      ],
-    },
+    ],
+    [
+      {
+        title: 'PRODUCTS & CATALOG',
+        color: '#f59e0b',
+        items: [
+          { label: 'Product List', to: '/products', icon: Package },
+          { label: 'Finished Products', to: '/products/barcodes', icon: ShoppingBag },
+          { label: 'Batch Barcodes', to: '/reports/batches', icon: Barcode },
+        ],
+      },
+      // Managers only: backups, users, entities, units, references, product types, offices
+      ...(level === 3
+        ? [
+            {
+              title: 'MANAGEMENT',
+              color: '#64748b',
+              items: [
+                {
+                  label: 'Others Management',
+                  to: '/settings',
+                  icon: Settings,
+                  badge: notificationStore.counts.pendingUsers || 0,
+                },
+                { label: 'Audit Log', to: '/audit-log', icon: ShieldCheck },
+              ],
+            },
+          ]
+        : []),
+    ],
   ]
 })
 
 const totalMenuBadges = computed(() => {
   if (isAdminAccount.value) return 0
+  // Pending applicants are handled in Others Management, which only managers have
   return (notificationStore.counts.stockoutRequests || 0) +
-         (notificationStore.counts.pendingUsers || 0)
+         (authStore.levelId === 3 ? notificationStore.counts.pendingUsers || 0 : 0)
 })
 
 const themeIconComponent = computed(() => {
@@ -313,8 +432,19 @@ function handleKeyDown(e) {
   }
 }
 
+// Keep the bell and menu badges in sync: every 15s, on tab focus, on page change, when the
+// bell is opened, and whenever a view calls triggerAutoReload (accept/reject, stock movement…)
+function refreshNotifications() {
+  if (isAdminAccount.value) return
+  return notificationStore.fetchNotifications()
+}
+
+useAutoReload(refreshNotifications, { intervalMs: 15000 })
+watch(() => route.path, refreshNotifications)
+watch(isNotifDropdownOpen, (open) => open && refreshNotifications())
+
 onMounted(() => {
-  if (!isAdminAccount.value) notificationStore.fetchNotifications()
+  refreshNotifications()
   runAutoBackupOnce()
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeyDown)
@@ -399,51 +529,79 @@ onUnmounted(() => {
           <div v-if="isNotifDropdownOpen" class="notif-flyout" @click.stop>
             <div class="flyout-header">
               <div class="flyout-title-wrap">
-                <Bell :size="15" />
-                <strong>Notifications</strong>
-                <span v-if="notificationStore.unreadCount > 0" class="flyout-count-badge">
-                  {{ notificationStore.unreadCount }} new
+                <span class="flyout-title-icon"><Bell :size="16" /></span>
+                <span class="flyout-title-text">
+                  <strong>Notifications</strong>
+                  <span class="flyout-count" :class="{ 'is-clear': notificationStore.unreadCount === 0 }">
+                    {{ notificationStore.unreadCount > 0 ? `${notificationStore.unreadCount} unread` : 'All caught up' }}
+                  </span>
                 </span>
               </div>
               <button
                 v-if="notificationStore.unreadCount > 0"
                 type="button"
                 class="flyout-mark-read"
+                title="Mark all as read"
                 @click="notificationStore.markAllAsRead()"
               >
-                Mark all read
+                <CheckCheck :size="14" />
+                <span>Mark all read</span>
+              </button>
+            </div>
+
+            <!-- Requests | Expiry | Stock alerts -->
+            <div class="flyout-tabs" role="tablist">
+              <button
+                v-for="tab in BELL_TABS"
+                :key="tab.key"
+                type="button"
+                role="tab"
+                class="flyout-tab"
+                :class="{ 'is-active': bellTab === tab.key }"
+                :style="{ '--tab-color': tab.color }"
+                :aria-selected="bellTab === tab.key"
+                @click="bellTab = tab.key"
+              >
+                <span>{{ tab.label }}</span>
+                <span v-if="unreadIn(tab.list)" class="flyout-tab-count">{{ unreadIn(tab.list) }}</span>
               </button>
             </div>
 
             <div class="flyout-body">
-              <div
-                v-if="notificationStore.activeNotifications.length === 0"
-                class="flyout-empty"
-              >
+              <div v-if="bellList.length === 0" class="flyout-empty">
                 <Inbox :size="32" class="empty-icon" />
-                <p>No active alerts right now.</p>
+                <p>{{ activeBellTab.empty }}</p>
               </div>
 
-              <div
-                v-for="n in notificationStore.activeNotifications.slice(0, 5)"
+              <button
+                v-for="n in bellList"
                 :key="n.id"
+                type="button"
                 class="flyout-item"
-                :class="{ 'is-unread': !n.isRead }"
+                :class="[`tone-${notifKind(n).tone}`, { 'is-unread': !n.isRead }]"
                 @click="handleNotifClick(n)"
               >
-                <div class="flyout-item-icon">
-                  <component :is="getNotifIcon(n.type)" :size="16" />
-                </div>
+                <span class="flyout-item-icon">
+                  <component :is="getNotifIcon(n.type, n.severity, n.details)" :size="15" />
+                </span>
 
-                <div class="flyout-item-content">
-                  <div class="flyout-item-top">
-                    <span class="flyout-item-title">{{ n.title }}</span>
-                    <span v-if="!n.isRead" class="flyout-dot"></span>
-                  </div>
-                  <p class="flyout-item-msg">{{ n.message }}</p>
-                  <span class="flyout-item-time">{{ n.created_at ? n.created_at.slice(0, 16) : 'Now' }}</span>
-                </div>
-              </div>
+                <span class="flyout-item-content">
+                  <span class="flyout-item-line">
+                    <span class="flyout-item-title">{{ rowTitle(n) }}</span>
+                    <span v-if="isStateAlert(n) && n.badge" class="flyout-item-figure">{{ n.badge }}</span>
+                    <span v-else-if="!isStateAlert(n)" class="flyout-item-time">{{ timeAgo(n.created_at) }}</span>
+                  </span>
+                  <span class="flyout-item-sub">
+                    <span class="flyout-kind">{{ notifKind(n).label }}</span>
+                    <template v-if="rowDetail(n)">
+                      <span class="flyout-sep">·</span>
+                      <span class="flyout-item-msg">{{ rowDetail(n) }}</span>
+                    </template>
+                  </span>
+                </span>
+
+                <span v-if="!n.isRead" class="flyout-dot" title="Unread" aria-label="Unread"></span>
+              </button>
             </div>
 
             <div class="flyout-footer">
@@ -452,7 +610,7 @@ onUnmounted(() => {
                 class="flyout-view-all"
                 @click="closeDropdown"
               >
-                <span>View all notifications</span>
+                <span>{{ bellMore ? `View all ${activeBellTab.list.length} ${activeBellTab.label.toLowerCase()}` : 'View all notifications' }}</span>
                 <ArrowRight :size="13" />
               </router-link>
             </div>
@@ -530,31 +688,33 @@ onUnmounted(() => {
           <!-- Left/Center Categorized Columns (ASYNC / REALTIME / PLATFORM style); admin only gets the account card -->
           <div v-if="!isAdminAccount" class="mega-columns-wrap">
             <div
-              v-for="col in menuColumns"
-              :key="col.title"
+              v-for="(col, c) in menuColumns"
+              :key="c"
               class="mega-col"
             >
-              <span class="mega-col-title">{{ col.title }}</span>
-              <ul class="mega-item-list">
-                <li v-for="item in col.items" :key="item.to" class="mega-item">
-                  <router-link
-                    :to="item.to"
-                    class="mega-link"
-                    @click="closeMegaMenu"
-                  >
-                    <span
-                      class="mega-item-icon-box"
-                      :style="{ color: item.color }"
+              <div v-for="group in col" :key="group.title" class="mega-group">
+                <span class="mega-col-title" :style="{ '--group-color': group.color }">{{ group.title }}</span>
+                <ul class="mega-item-list">
+                  <li v-for="item in group.items" :key="item.to" class="mega-item">
+                    <router-link
+                      :to="item.to"
+                      class="mega-link"
+                      @click="closeMegaMenu"
                     >
-                      <component :is="item.icon" :size="18" stroke-width="2" />
-                    </span>
-                    <span class="mega-link-label">{{ item.label }}</span>
-                    <span v-if="item.badge" class="mega-badge-pill">
-                      {{ item.badge }}
-                    </span>
-                  </router-link>
-                </li>
-              </ul>
+                      <span
+                        class="mega-item-icon-box"
+                        :style="{ color: group.color }"
+                      >
+                        <component :is="item.icon" :size="18" stroke-width="2" />
+                      </span>
+                      <span class="mega-link-label">{{ item.label }}</span>
+                      <span v-if="item.badge" class="mega-badge-pill">
+                        {{ item.badge }}
+                      </span>
+                    </router-link>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
 
@@ -599,7 +759,7 @@ onUnmounted(() => {
                   <User :size="13" class="meta-icon" />
                   <span>Email:</span>
                 </span>
-                <span class="meta-value">{{ maskEmail(authStore.user.email) }}</span>
+                <span class="meta-value" :title="maskEmail(authStore.user.email)">{{ maskEmail(authStore.user.email) }}</span>
               </div>
             </div>
 
@@ -919,39 +1079,81 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 18px;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+  padding: 14px 16px 12px;
+  /* A light wash of the theme colour, fading out */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 9%, transparent), transparent);
 }
 
 .flyout-title-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 10px;
+  min-width: 0;
 }
 
-.flyout-count-badge {
+.flyout-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.flyout-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.flyout-title-text strong {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.flyout-count {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
   font-size: 11px;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+}
+
+.flyout-count.is-clear {
+  background: var(--color-success-bg, rgba(22, 163, 74, 0.12));
+  color: var(--color-success, #16a34a);
 }
 
 .flyout-mark-read {
-  background: none;
-  border: none;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  background: var(--bg-surface);
   color: var(--color-primary);
-  font-weight: 600;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  padding: 0;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .flyout-mark-read:hover {
-  text-decoration: underline;
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
 }
 
 .flyout-body {
@@ -976,50 +1178,223 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-.flyout-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 18px;
+/* Tabs: Requests | Expiry | Stock Alerts, each with its own accent */
+.flyout-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0 8px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.flyout-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 4px 11px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.flyout-tab:hover {
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--tab-color) 6%, transparent);
+}
+
+.flyout-tab.is-active {
+  color: var(--tab-color);
+  font-weight: 700;
+}
+
+.flyout-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--tab-color);
+}
+
+.flyout-tab:focus-visible {
+  outline: 2px solid var(--tab-color);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+/* Unread count in the tab's own colour, soft until the tab is open */
+.flyout-tab-count {
+  min-width: 19px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--tab-color) 14%, transparent);
+  color: var(--tab-color);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.flyout-tab.is-active .flyout-tab-count {
+  background: var(--tab-color);
+  color: #fff;
+}
+
+@media (max-width: 380px) {
+  .flyout-tabs {
+    padding: 0 4px;
+  }
+
+  .flyout-tab {
+    font-size: 12px;
+    gap: 4px;
+  }
+}
+
+.flyout-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 14px 9px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background var(--transition-fast);
 }
+
+/* One colour per kind (word, icon tile, unread dot) */
+.flyout-item.tone-request   { --kind-color: #f97316; --kind-bg: rgba(249, 115, 22, 0.12); }
+.flyout-item.tone-accepted  { --kind-color: #16a34a; --kind-bg: rgba(22, 163, 74, 0.12); }
+.flyout-item.tone-rejected  { --kind-color: #dc2626; --kind-bg: rgba(220, 38, 38, 0.12); }
+.flyout-item.tone-applicant { --kind-color: #8b5cf6; --kind-bg: rgba(139, 92, 246, 0.12); }
+.flyout-item.tone-danger    { --kind-color: #ef4444; --kind-bg: rgba(239, 68, 68, 0.12); }
+.flyout-item.tone-warning   { --kind-color: #d97706; --kind-bg: rgba(217, 119, 6, 0.12); }
+.flyout-item.tone-caution   { --kind-color: #ea580c; --kind-bg: rgba(234, 88, 12, 0.12); }
+.flyout-item.tone-info      { --kind-color: #0284c7; --kind-bg: rgba(2, 132, 199, 0.12); }
 
 .flyout-item:last-child {
   border-bottom: none;
 }
 
-.flyout-item:hover {
+.flyout-item:hover,
+.flyout-item:focus-visible {
   background: var(--bg-subtle);
+  outline: none;
 }
 
-.flyout-item.is-unread {
-  background: rgba(239, 68, 68, 0.04);
+/* Unread: a thin coloured edge instead of shading the whole row */
+.flyout-item.is-unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--kind-color, var(--color-primary));
 }
 
 .flyout-item-icon {
-  padding-top: 3px;
-  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--kind-bg, var(--bg-subtle));
+  color: var(--kind-color, var(--color-primary));
   flex-shrink: 0;
 }
 
 .flyout-item-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.flyout-item-top {
+.flyout-item-line {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .flyout-item-title {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 700;
   color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flyout-item:not(.is-unread) .flyout-item-title {
+  font-weight: 600;
+}
+
+/* The one number that matters for a stock alert: 0 Units, 5 / 10 left, 2d left… */
+.flyout-item-figure {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--kind-bg, var(--bg-subtle));
+  color: var(--kind-color, var(--text-muted));
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.flyout-item-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.flyout-item-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.flyout-kind {
+  flex-shrink: 0;
+  color: var(--kind-color, var(--color-primary));
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.flyout-sep {
+  color: var(--text-subtle);
+}
+
+.flyout-item-msg {
+  min-width: 0;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1029,28 +1404,15 @@ onUnmounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #ef4444;
+  background: var(--kind-color, #ef4444);
   flex-shrink: 0;
 }
 
-.flyout-item-msg {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.4;
-  margin: 3px 0 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.flyout-item-time {
-  font-size: 11px;
-  color: var(--text-subtle);
-}
-
 .flyout-footer {
-  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
   background: var(--bg-subtle);
   border-top: 1px solid var(--border-subtle);
   text-align: center;
@@ -1134,31 +1496,60 @@ onUnmounted(() => {
 
 /* Left / Center Columns */
 .mega-columns-wrap {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.mega-columns-wrap {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
 }
 
 .mega-col {
   display: flex;
   flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+  padding: 0 14px;
+}
+
+/* Thin dividers between the three columns on wide screens */
+@media (min-width: 1025px) {
+  .mega-col:first-child {
+    padding-left: 0;
+  }
+
+  .mega-col:last-child {
+    padding-right: 0;
+  }
+
+  .mega-col + .mega-col {
+    border-left: 1px solid var(--border-subtle);
+  }
+}
+
+.mega-group {
+  display: flex;
+  flex-direction: column;
 }
 
 .mega-col-title {
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   padding-left: 10px;
+}
+
+/* A dot in the section's colour, matching its icons */
+.mega-col-title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--group-color, var(--color-primary));
 }
 
 .mega-item-list {
@@ -1167,7 +1558,7 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .mega-item {
@@ -1178,18 +1569,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 7px 10px;
   border-radius: 12px;
   color: var(--text-main);
   text-decoration: none;
   font-weight: 600;
-  font-size: 0.915rem;
-  transition: all var(--transition-fast, 0.2s);
+  font-size: 0.9rem;
+  transition: background var(--transition-fast, 0.2s), color var(--transition-fast, 0.2s);
 }
 
 .mega-link:hover {
   background: var(--bg-subtle);
-  transform: translateX(3px);
   color: var(--color-primary);
 }
 
@@ -1199,24 +1589,35 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
+/* Soft tinted tile in the item's own colour */
 .mega-item-icon-box {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   flex-shrink: 0;
-  transition: transform 0.2s;
+  overflow: hidden;
 }
 
-.mega-link:hover .mega-item-icon-box {
-  transform: scale(1.1);
+.mega-item-icon-box::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.12;
+}
+
+.mega-item-icon-box :deep(svg) {
+  position: relative;
 }
 
 .mega-link-label {
   flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  line-height: 1.25;
 }
 
 .mega-badge-pill {
@@ -1228,34 +1629,6 @@ onUnmounted(() => {
   padding: 1px 7px;
   margin-left: auto;
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35);
-}
-
-/* Footer Link across columns */
-.mega-columns-footer {
-  grid-column: 1 / -1;
-  padding-top: 14px;
-  margin-top: 8px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.mega-footer-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.74rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-primary);
-  text-decoration: none;
-  padding: 4px 10px;
-  border-radius: 6px;
-  transition: all var(--transition-fast, 0.2s);
-}
-
-.mega-footer-link:hover {
-  background: var(--color-primary-light);
-  gap: 9px;
 }
 
 /* =========================================================
@@ -1408,7 +1781,8 @@ html[data-theme='bsu'] .account-avatar {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+  flex: 1;
+  min-width: 0;
   text-align: right;
 }
 
@@ -1505,7 +1879,12 @@ html[data-theme='bsu'] .feature-btn-primary {
   }
 
   .mega-columns-wrap {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px 20px;
+  }
+
+  .mega-col {
+    padding: 0;
   }
 
   .desktop-only {
@@ -1646,7 +2025,11 @@ html[data-theme='bsu'] .feature-btn-primary {
 
   .mega-columns-wrap {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 18px;
+  }
+
+  .mega-col {
+    gap: 18px;
   }
 
   /* Flyout dropdown stays aligned on mobile */

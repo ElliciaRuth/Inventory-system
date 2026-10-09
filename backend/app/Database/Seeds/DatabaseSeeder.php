@@ -81,7 +81,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => null,
                 'lvl_of_access_id'     => 4,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'tech',
@@ -93,7 +93,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => null,
                 'lvl_of_access_id'     => 4,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
 
             // ── Staff (Level 1) ──
@@ -107,7 +107,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 1, // BAKERY
                 'lvl_of_access_id'     => 1,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'staff_bakery',
@@ -119,7 +119,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 1, // BAKERY
                 'lvl_of_access_id'     => 1,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'staff_fpc',
@@ -131,7 +131,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 2, // FPC
                 'lvl_of_access_id'     => 1,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
 
             // ── Custodian (Level 2) ──
@@ -145,7 +145,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 2, // FPC
                 'lvl_of_access_id'     => 2,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'custodian_bakery',
@@ -157,7 +157,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 1, // BAKERY
                 'lvl_of_access_id'     => 2,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'custodian_fpc',
@@ -169,7 +169,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 2, // FPC
                 'lvl_of_access_id'     => 2,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
 
             // ── Manager (Level 3) ──
@@ -183,7 +183,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 1, // BAKERY
                 'lvl_of_access_id'     => 3,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'manager_bakery',
@@ -195,7 +195,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 1, // BAKERY
                 'lvl_of_access_id'     => 3,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
             [
                 'username'             => 'manager_fpc',
@@ -207,7 +207,7 @@ class DatabaseSeeder extends Seeder
                 'user_office_id'       => 2, // FPC
                 'lvl_of_access_id'     => 3,
                 'user_activity_id'     => 1,
-                'must_change_password' => 0,
+                'must_change_password' => 1, // the password above is public
             ],
         ];
 

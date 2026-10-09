@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Controllers\BaseController;
+use App\Models\UserModel;
 use CodeIgniter\API\ResponseTrait;
 use CodeIgniter\HTTP\ResponseInterface;
 
@@ -87,6 +88,71 @@ abstract class BaseApiController extends BaseController
     protected function currentUser(): ?array
     {
         return session('user') ?? null;
+    }
+
+    /** Hashed passwords are verified; legacy plain-text ones compared in constant time. */
+    protected function passwordMatches(string $input, string $stored): bool
+    {
+        if (password_get_info($stored)['algo']) {
+            return password_verify($input, $stored);
+        }
+        return hash_equals($stored, $input);
+    }
+
+    /** Re-checks the signed-in user's password before a destructive action. */
+    protected function currentPasswordMatches(string $input): bool
+    {
+        if ($input === '' || $this->currentUserId() <= 0) {
+            return false;
+        }
+        $stored = (string) ((new UserModel())->find($this->currentUserId())['password'] ?? '');
+
+        return $stored !== '' && $this->passwordMatches($input, $stored);
+    }
+
+    /** Shortest password accepted anywhere a password is set. */
+    protected const PASSWORD_MIN_LENGTH = 8;
+
+    /** Why a new password is too weak, or null when it is acceptable. */
+    protected function passwordStrengthError(string $password): ?string
+    {
+        if (mb_strlen($password) < self::PASSWORD_MIN_LENGTH) {
+            return 'Password must be at least ' . self::PASSWORD_MIN_LENGTH . ' characters long.';
+        }
+        if (strlen($password) > 72) {
+            // bcrypt ignores everything after 72 bytes
+            return 'Password must be at most 72 characters long.';
+        }
+        if (! preg_match('/[A-Z]/', $password)) {
+            return 'Password must contain at least one uppercase letter.';
+        }
+        if (! preg_match('/[a-z]/', $password)) {
+            return 'Password must contain at least one lowercase letter.';
+        }
+        if (! preg_match('/[0-9]/', $password)) {
+            return 'Password must contain at least one number.';
+        }
+        // No sequential numbers (e.g. 123, 234, 345…)
+        if (preg_match('/(?:0(?=1)|1(?=2)|2(?=3)|3(?=4)|4(?=5)|5(?=6)|6(?=7)|7(?=8)|8(?=9)){2}/', $password)) {
+            return 'Password must not contain sequential numbers (e.g. 123, 456).';
+        }
+
+        return null;
+    }
+
+    /** The access level (1–4) a level_of_access row stands for, or 0 when there is no such row. */
+    protected function accessLevelOf(int $lvlOfAccessId): int
+    {
+        $row = db_connect()->table('level_of_access')->select('lvl_of_access')
+            ->where('lvl_of_access_id', $lvlOfAccessId)->get(1)->getRowArray();
+
+        return (int) ($row['lvl_of_access'] ?? 0);
+    }
+
+    protected function userOfficeExists(int $userOfficeId): bool
+    {
+        return $userOfficeId > 0
+            && db_connect()->table('user_office_table')->where('user_office_id', $userOfficeId)->countAllResults() > 0;
     }
 
     // ── Person names ─────────────────────────────────────────────────────

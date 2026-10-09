@@ -4,15 +4,46 @@ namespace App\Controllers\Api;
 
 use App\Models\ProductModel;
 use App\Models\ReportModel;
+use App\Models\TransactionModel;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class ExportController extends BaseApiController
 {
+    /** 2.50 → "2.5", 3.00 → "3" */
+    private function qty(float|int|string|null $value): string
+    {
+        return rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.') ?: '0';
+    }
+
     private function userOfficeId(): int
     {
         return $this->currentOfficeId();
+    }
+
+    private function isMonth(string $value): bool
+    {
+        return preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $value) === 1;
+    }
+
+    /**
+     * Text that Excel would run as a formula (=, +, -, @, tab, CR at the start, e.g. a product
+     * named "=HYPERLINK(…)") gets a leading apostrophe so it shows as plain text. Numbers stay as they are.
+     */
+    private function csvCell(mixed $value): mixed
+    {
+        if (! is_string($value) || $value === '' || is_numeric($value)) {
+            return $value;
+        }
+
+        return str_contains("=+-@\t\r", $value[0]) ? "'" . $value : $value;
+    }
+
+    /** fputcsv with every text cell made formula-safe */
+    private function putCsv($handle, array $cells): void
+    {
+        fputcsv($handle, array_map(fn ($c) => $this->csvCell($c), $cells));
     }
 
     /**
@@ -59,6 +90,10 @@ class ExportController extends BaseApiController
         if ($monthFrom === '' || $monthTo === '') {
             return $this->respondError('Please select a date range.');
         }
+        // YYYY-MM only: the months also become part of the download's file name
+        if (! $this->isMonth($monthFrom) || ! $this->isMonth($monthTo)) {
+            return $this->respondError('Please select a valid date range.');
+        }
 
         $dateFrom = $monthFrom . '-01';
         $dateTo   = date('Y-m-d', strtotime($monthTo . '-01 +1 month'));
@@ -95,6 +130,7 @@ class ExportController extends BaseApiController
                 't.transaction_id',
                 't.transaction_date',
                 't.transaction_type_id',
+                'tt.transaction_type',
                 't.transaction_qty',
                 'b.product_id',
                 'p.product',
@@ -108,6 +144,7 @@ class ExportController extends BaseApiController
                 'COALESCE(e.fund_cluster, "") AS fund_cluster',
             ])
             ->join('batch_table b',         't.batch_id = b.batch_id')
+            ->join('transaction_type_table tt', 'tt.transaction_type_id = t.transaction_type_id')
             ->join('product_table p',        'b.product_id = p.product_id')
             ->join('unit_table ut',          'p.unit_id = ut.unit_id',           'left')
             ->join('reference_table r',      't.reference_id = r.reference_id',  'left')
@@ -116,7 +153,7 @@ class ExportController extends BaseApiController
             ->join('entity_table e',         'p.entity_id = e.entity_id',         'left')
             ->where('t.transaction_date >=', $dateFrom)
             ->where('t.transaction_date <',  $dateTo)
-            ->whereIn('t.transaction_type_id', [1, 2, 3]);
+            ->whereIn('tt.transaction_type', array_merge(TransactionModel::STOCK_IN_TYPES, TransactionModel::STOCK_OUT_TYPES));
 
         if ($userOfficeId > 0) { $builder->where('t.user_office_id', $userOfficeId); }
         if ($productId    > 0) { $builder->where('b.product_id',     $productId); }
@@ -133,18 +170,21 @@ class ExportController extends BaseApiController
 
         if (! empty($productIds)) {
             $ph  = implode(',', array_fill(0, count($productIds), '?'));
+            $in  = "'" . implode("','", TransactionModel::STOCK_IN_TYPES) . "'";
+            $out = "'" . implode("','", TransactionModel::STOCK_OUT_TYPES) . "'";
             $sql = 'SELECT b.product_id,
-                           SUM(CASE WHEN t.transaction_type_id = 1     THEN t.transaction_qty ELSE 0 END) AS receipts,
-                           SUM(CASE WHEN t.transaction_type_id IN (2,3) THEN t.transaction_qty ELSE 0 END) AS issues
+                           SUM(CASE WHEN tt.transaction_type IN (' . $in . ')  THEN t.transaction_qty ELSE 0 END) AS receipts,
+                           SUM(CASE WHEN tt.transaction_type IN (' . $out . ') THEN t.transaction_qty ELSE 0 END) AS issues
                     FROM transaction_table t
                     INNER JOIN batch_table b ON t.batch_id = b.batch_id
+                    INNER JOIN transaction_type_table tt ON tt.transaction_type_id = t.transaction_type_id
                     WHERE t.transaction_date < ?
                       AND b.product_id IN (' . $ph . ')'
                 . ($userOfficeId > 0 ? ' AND t.user_office_id = ' . (int) $userOfficeId : '')
                 . ' GROUP BY b.product_id';
 
             foreach ($db->query($sql, array_merge([$dateFrom], $productIds))->getResultArray() as $row) {
-                $openingBalances[(int) $row['product_id']] = (int) $row['receipts'] - (int) $row['issues'];
+                $openingBalances[(int) $row['product_id']] = (float) $row['receipts'] - (float) $row['issues'];
             }
         }
 
@@ -166,10 +206,9 @@ class ExportController extends BaseApiController
                 ];
             }
 
-            $qty    = (int) $txn['transaction_qty'];
-            $typeId = (int) $txn['transaction_type_id'];
+            $qty    = (float) $txn['transaction_qty'];
 
-            if ($typeId === 1) {
+            if (in_array($txn['transaction_type'], TransactionModel::STOCK_IN_TYPES, true)) {
                 $productMap[$pid]['balance'] += $qty;
                 $receiptQty = $qty;
                 $issueQty   = null;
@@ -203,15 +242,15 @@ class ExportController extends BaseApiController
         fwrite($fp, "\xEF\xBB\xBF");
 
         foreach ($products as $p) {
-            fputcsv($fp, ['STOCK CARD']);
-            fputcsv($fp, ['Entity Name:', $p['entity_name'], 'Fund Cluster:', $p['fund_cluster']]);
-            fputcsv($fp, ['Item:', $p['product'], 'Stock No.:', $p['stock_no']]);
-            fputcsv($fp, ['Description:', $p['description'], 'Re-order Point:', $p['reorder_point']]);
-            fputcsv($fp, ['Unit of Measurement:', $p['unit']]);
-            fputcsv($fp, []);
-            fputcsv($fp, ['Date', 'Reference', 'Receipt Qty', 'Issue Qty', 'Office', 'Balance Qty', 'No. of Days to Consume']);
+            $this->putCsv($fp, ['STOCK CARD']);
+            $this->putCsv($fp, ['Entity Name:', $p['entity_name'], 'Fund Cluster:', $p['fund_cluster']]);
+            $this->putCsv($fp, ['Item:', $p['product'], 'Stock No.:', $p['stock_no']]);
+            $this->putCsv($fp, ['Description:', $p['description'], 'Re-order Point:', $p['reorder_point']]);
+            $this->putCsv($fp, ['Unit of Measurement:', $p['unit']]);
+            $this->putCsv($fp, []);
+            $this->putCsv($fp, ['Date', 'Reference', 'Receipt Qty', 'Issue Qty', 'Office', 'Balance Qty', 'No. of Days to Consume']);
             foreach ($p['rows'] as $row) {
-                fputcsv($fp, [
+                $this->putCsv($fp, [
                     $row['date'],
                     $row['reference'],
                     $row['receipt'] ?? '',
@@ -221,7 +260,7 @@ class ExportController extends BaseApiController
                     '',
                 ]);
             }
-            fputcsv($fp, []);
+            $this->putCsv($fp, []);
         }
 
         fclose($fp);
@@ -292,10 +331,10 @@ class ExportController extends BaseApiController
             foreach ($p['rows'] as $row) {
                 $date    = $row['date']    ? date('m/d/Y', strtotime($row['date'])) : '';
                 $ref     = htmlspecialchars((string) ($row['reference'] ?? ''));
-                $receipt = $row['receipt'] !== null ? (int) $row['receipt'] : '';
-                $issue   = $row['issue']   !== null ? (int) $row['issue']   : '';
+                $receipt = $row['receipt'] !== null ? $this->qty($row['receipt']) : '';
+                $issue   = $row['issue']   !== null ? $this->qty($row['issue'])   : '';
                 $office  = htmlspecialchars((string) ($row['office'] ?? ''));
-                $balance = (int) $row['balance'];
+                $balance = $this->qty($row['balance']);
 
                 $rows .= '<tr>'
                     . "<td class=\"c-date\">{$date}</td>"
@@ -518,6 +557,10 @@ HTML;
         if ($monthFrom === '' || $monthTo === '') {
             return $this->respondError('Please select a date range.');
         }
+        // YYYY-MM only: the months also become part of the download's file name
+        if (! $this->isMonth($monthFrom) || ! $this->isMonth($monthTo)) {
+            return $this->respondError('Please select a valid date range.');
+        }
 
         $dateFrom = $monthFrom . '-01';
         $dateTo   = date('Y-m-d', strtotime($monthTo . '-01 +1 month'));
@@ -576,8 +619,8 @@ HTML;
         $fp = fopen('php://output', 'w');
         fwrite($fp, "\xEF\xBB\xBF"); // UTF-8 BOM
 
-        fputcsv($fp, [strtoupper($title)]);
-        fputcsv($fp, []);
+        $this->putCsv($fp, [strtoupper($title)]);
+        $this->putCsv($fp, []);
 
         $csvHeader = [
             'No.', 'Items/Products',
@@ -596,11 +639,11 @@ HTML;
 
         foreach ($byMonth as $monthLabel => $monthRows) {
             // Month header
-            fputcsv($fp, [strtoupper($monthLabel)]);
-            fputcsv($fp, $csvHeader);
+            $this->putCsv($fp, [strtoupper($monthLabel)]);
+            $this->putCsv($fp, $csvHeader);
 
             foreach ($monthRows as $row) {
-                fputcsv($fp, [
+                $this->putCsv($fp, [
                     $row['counter'],
                     $row['item'],
                     $row['begin_qty'],
@@ -632,7 +675,7 @@ HTML;
                 return $carry;
             }, ['begin_amt' => 0, 'purch_total' => 0, 'used_total' => 0, 'spoil_total' => 0, 'end_amt' => 0]);
 
-            fputcsv($fp, [
+            $this->putCsv($fp, [
                 '', 'TOTAL', '', '', '', number_format($totals['begin_amt'],   2, '.', ''),
                 '', '', number_format($totals['purch_total'], 2, '.', ''),
                 '', '', number_format($totals['used_total'],  2, '.', ''),
@@ -640,7 +683,7 @@ HTML;
                 '', '', number_format($totals['end_amt'],     2, '.', ''),
             ]);
 
-            fputcsv($fp, []); // blank line between months
+            $this->putCsv($fp, []); // blank line between months
         }
 
         fclose($fp);

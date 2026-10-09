@@ -1,11 +1,12 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { dashboardApi } from '../api/dashboard'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import AdminDashboardView from './AdminDashboardView.vue'
 import AppPagination from '../components/AppPagination.vue'
+import { typeLabel, typeBadge, isStockIn, signedQty } from '../utils/transactionTypes'
 
 const emit = defineEmits(['update-alerts'])
 
@@ -34,6 +35,17 @@ const dashboard = ref({
 })
 
 const activeTab = ref(null) // 'low-stock' | 'out-of-stock' | 'expiring' | 'borrowed' | null
+
+// A recent activity row opens that product's stockcard; staff (no stockcard access)
+// get the transaction log filtered to the product instead
+function openActivity(tx) {
+  const productId = Number(tx.product_id) || 0
+  if (authStore.levelId >= 2 && productId > 0) {
+    router.push({ path: '/stockcard', query: { item_id: productId } })
+  } else {
+    router.push({ path: '/transactions', query: { search: tx.item } })
+  }
+}
 
 const borrowedOutTotal = computed(() => {
   return (dashboard.value.activeBorrows || []).reduce((sum, b) => {
@@ -79,9 +91,44 @@ async function fetchDashboard() {
 // Auto-reload on background interval, window focus, and when mutations occur
 useAutoReload(fetchDashboard)
 
+// Alert rows open the stockcard of that product (plain stockcard if the id is missing)
+function productStockcard(item) {
+  const productId = Number(item?.product_id) || 0
+  return productId > 0 ? { path: '/stockcard', query: { item_id: productId } } : '/stockcard'
+}
+
 function toggleTab(tab) {
   activeTab.value = activeTab.value === tab ? null : tab
 }
+
+// ── Phones: the details open as a sheet over the page instead of below all the cards ──
+const PHONE_QUERY = '(max-width: 640px)'
+const isPhone = ref(false)
+let phoneQuery = null
+const syncPhone = () => { isPhone.value = !!phoneQuery?.matches }
+const sheetOpen = computed(() => isPhone.value && !!activeTab.value)
+
+function closeOnEscape(event) {
+  if (event.key === 'Escape' && sheetOpen.value) activeTab.value = null
+}
+
+onMounted(() => {
+  phoneQuery = window.matchMedia?.(PHONE_QUERY) || null
+  syncPhone()
+  phoneQuery?.addEventListener?.('change', syncPhone)
+  document.addEventListener('keydown', closeOnEscape)
+})
+
+onUnmounted(() => {
+  phoneQuery?.removeEventListener?.('change', syncPhone)
+  document.removeEventListener('keydown', closeOnEscape)
+  document.body.style.overflow = ''
+})
+
+// The page behind an open sheet doesn't scroll
+watch(sheetOpen, (open) => {
+  document.body.style.overflow = open ? 'hidden' : ''
+})
 
 // ── Customizable Pagination Logic (Avoids Long Scrolling) ──
 const pageSizeOptions = [5, 10, 25, 50]
@@ -170,7 +217,6 @@ onMounted(() => {
         >
           <div class="summary-card-header">
             <span class="card-label">TOTAL PRODUCTS</span>
-            <span class="card-redirect-badge">View Catalog →</span>
           </div>
           <strong class="card-value">{{ dashboard.summary.totalItems }}</strong>
           <small class="card-hint">Click to view products →</small>
@@ -186,7 +232,7 @@ onMounted(() => {
         >
           <div class="summary-card-header">
             <span class="card-label">LOW STOCK ALERTS</span>
-            <span v-if="activeTab === 'low-stock'" class="card-active-pill">● Active</span>
+            <span v-if="activeTab === 'low-stock'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
           </div>
           <strong class="card-value">{{ dashboard.summary.lowStockCount }}</strong>
           <small class="card-hint">
@@ -206,7 +252,7 @@ onMounted(() => {
         >
           <div class="summary-card-header">
             <span class="card-label">OUT OF STOCK</span>
-            <span v-if="activeTab === 'out-of-stock'" class="card-active-pill">● Active</span>
+            <span v-if="activeTab === 'out-of-stock'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
           </div>
           <strong class="card-value">{{ dashboard.summary.outOfStockCount || dashboard.outOfStock.length }}</strong>
           <small class="card-hint">
@@ -226,7 +272,7 @@ onMounted(() => {
         >
           <div class="summary-card-header">
             <span class="card-label">EXPIRING SOON</span>
-            <span v-if="activeTab === 'expiring'" class="card-active-pill">● Active</span>
+            <span v-if="activeTab === 'expiring'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
           </div>
           <strong class="card-value">{{ dashboard.summary.expiringCount }}</strong>
           <small class="card-hint">
@@ -236,7 +282,7 @@ onMounted(() => {
           </small>
         </button>
 
-        <!-- 5. Items Out Borrowed (Clickable button card with active highlight on 2nd row) -->
+        <!-- 5. Items Out Borrowed (Clickable button card with active highlight) -->
         <button
           type="button"
           class="summary-card summary-card-action"
@@ -246,7 +292,7 @@ onMounted(() => {
         >
           <div class="summary-card-header">
             <span class="card-label">ITEMS OUT (BORROWED)</span>
-            <span v-if="activeTab === 'borrowed'" class="card-active-pill">● Active</span>
+            <span v-if="activeTab === 'borrowed'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
           </div>
           <strong class="card-value">{{ dashboard.summary.activeBorrowCount || borrowedOutTotal }}</strong>
           <small class="card-hint">
@@ -257,8 +303,18 @@ onMounted(() => {
         </button>
       </section>
 
-      <!-- Active Content Drawer with Customizable Pagination (Avoids Long Scrolling) -->
-      <section v-if="activeTab" class="panel" style="animation: slideUp 0.25s ease; margin-bottom: 24px;">
+      <!-- Active Content Drawer with Customizable Pagination (Avoids Long Scrolling).
+           On phones it is moved to <body> and shown as a bottom sheet over the page. -->
+      <Teleport to="body" :disabled="!isPhone">
+      <div v-if="sheetOpen" class="dash-sheet-backdrop" aria-hidden="true" @click="activeTab = null"></div>
+      <section
+        v-if="activeTab"
+        class="panel dash-details"
+        :class="{ 'is-sheet': sheetOpen }"
+        :role="sheetOpen ? 'dialog' : undefined"
+        :aria-modal="sheetOpen ? 'true' : undefined"
+      >
+        <div v-if="sheetOpen" class="dash-sheet-handle" aria-hidden="true"></div>
         <!-- Low Stock Tab Table -->
         <div v-if="activeTab === 'low-stock'">
           <div class="panel-header">
@@ -290,7 +346,7 @@ onMounted(() => {
                     </span>
                   </td>
                   <td>
-                    <router-link v-if="authStore.canManageStock" to="/stockcard" class="btn btn-sm btn-secondary">Open Stockcard</router-link>
+                    <router-link v-if="authStore.canManageStock" :to="productStockcard(item)" class="btn btn-sm btn-secondary">Open Stockcard</router-link>
                   </td>
                 </tr>
                 <tr v-if="!pLowStock.items.length">
@@ -338,7 +394,7 @@ onMounted(() => {
                   <td><span class="badge badge-danger">Unavailable</span></td>
                   <td><span style="color: var(--color-danger); font-weight: 600;">Restock immediately</span></td>
                   <td>
-                    <router-link v-if="authStore.canManageStock" to="/stockcard" class="btn btn-sm btn-primary">Stock In</router-link>
+                    <router-link v-if="authStore.canManageStock" :to="productStockcard(item)" class="btn btn-sm btn-primary">Stock In</router-link>
                   </td>
                 </tr>
                 <tr v-if="!pOutOfStock.items.length">
@@ -463,6 +519,7 @@ onMounted(() => {
           />
         </div>
       </section>
+      </Teleport>
 
       <!-- Recent Transactions Feed with Customizable Pagination (Avoids Long Scrolling) -->
       <section class="panel">
@@ -487,7 +544,16 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(tx, idx) in pRecentTx.items" :key="idx">
+              <tr
+                v-for="(tx, idx) in pRecentTx.items"
+                :key="idx"
+                class="activity-row"
+                tabindex="0"
+                role="link"
+                :title="`Open ${tx.item}`"
+                @click="openActivity(tx)"
+                @keydown.enter="openActivity(tx)"
+              >
                 <td style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">
                   {{ tx.date }}
                 </td>
@@ -497,15 +563,15 @@ onMounted(() => {
                 <td>
                   <span
                     class="badge"
-                    :class="tx.transaction_type === 'receipt' ? 'badge-success' : tx.transaction_type === 'issue' ? 'badge-info' : 'badge-neutral'"
+                    :class="typeBadge(tx.transaction_type)"
                     style="text-transform: uppercase;"
                   >
-                    {{ tx.transaction_type }}
+                    {{ typeLabel(tx.transaction_type) }}
                   </span>
                 </td>
                 <td style="font-weight: 700;">
-                  <span :style="{ color: tx.transaction_type === 'receipt' ? 'var(--color-success)' : 'var(--text-main)' }">
-                    {{ tx.transaction_type === 'receipt' ? '+' : '-' }}{{ tx.transaction_qty }}
+                  <span :style="{ color: isStockIn(tx.transaction_type) ? 'var(--color-success)' : 'var(--text-main)' }">
+                    {{ signedQty(tx.transaction_type, tx.transaction_qty) }}
                   </span>
                 </td>
               </tr>
@@ -533,3 +599,171 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.dash-details {
+  animation: slideUp 0.25s ease;
+  margin-bottom: 24px;
+}
+
+.dash-sheet-backdrop,
+.dash-sheet-handle {
+  display: none;
+}
+
+/* ── Phones ── */
+@media (max-width: 640px) {
+  /* Compact two-column cards; Total Products across the top */
+  .dashboard-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .dashboard-summary-grid > .summary-card:first-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  .dashboard-summary-grid .summary-card {
+    padding: 14px 14px 12px;
+    border-radius: 16px;
+  }
+
+  .dashboard-summary-grid .summary-card .card-label {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+  }
+
+  .dashboard-summary-grid .summary-card strong.card-value {
+    margin: 8px 0 4px;
+    font-size: 1.75rem;
+  }
+
+  .dashboard-summary-grid .summary-card .card-hint {
+    font-size: 0.72rem;
+    line-height: 1.3;
+  }
+
+  /* The sheet opening is the "active" signal on phones */
+  .dashboard-summary-grid .card-active-pill {
+    display: none;
+  }
+
+  /* Details as a bottom sheet */
+  .dash-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1190;
+    background: rgba(10, 20, 10, 0.5);
+    backdrop-filter: blur(2px);
+    animation: sheet-fade 0.2s ease;
+  }
+
+  .dash-details.is-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1200;
+    max-height: 85dvh;
+    margin: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.25);
+    animation: sheet-up 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dash-sheet-handle {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 18px;
+    background: var(--bg-surface);
+  }
+
+  .dash-sheet-handle::after {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 40px;
+    height: 4px;
+    margin-left: -20px;
+    border-radius: 4px;
+    background: var(--border-hover, var(--border-subtle));
+  }
+
+  /* Title and Close stay visible while the table scrolls */
+  .dash-details.is-sheet :deep(.panel-header) {
+    position: sticky;
+    top: 18px;
+    z-index: 1;
+    background: var(--bg-surface);
+    padding-top: 6px;
+  }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.summary-card-header {
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The label gives way (…) so the Active pill always fits on one line */
+.summary-card-header .card-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-active-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+  gap: 5px !important;
+  line-height: 1.5;
+}
+
+.pill-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pill-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pill-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.activity-row {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.activity-row:hover,
+.activity-row:focus-visible {
+  background: var(--bg-subtle);
+  outline: none;
+}
+
+.activity-row:hover strong,
+.activity-row:focus-visible strong {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+</style>

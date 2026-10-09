@@ -161,7 +161,7 @@ class SettingsModel extends Model
             ->getRowArray() ?? [];
 
         if ($type === 'users') {
-            unset($row['password']);
+            unset($row['password'], $row['password_reset_token'], $row['password_reset_expires']);
         }
 
         return $row;
@@ -209,7 +209,11 @@ class SettingsModel extends Model
     public function pendingUsers(int $userOfficeId = 0, int $levelId = 3): array
     {
         $builder = $this->db->table('user_table')
-            ->select('user_table.*, user_table.name,
+            // Named columns: the password and reset-code hashes never leave the server
+            ->select('user_table.user_id, user_table.name, user_table.first_name, user_table.last_name,
+                      user_table.middle_name, user_table.suffix, user_table.username, user_table.email,
+                      user_table.user_office_id, user_table.lvl_of_access_id, user_table.user_activity_id,
+                      COALESCE(loa.lvl_of_access, 0) AS level_id,
                       COALESCE(uot.user_office_name, "Global") AS user_office_name,
                       COALESCE(loa.role, "Unknown") AS role')
             ->join('user_office_table uot', 'user_table.user_office_id = uot.user_office_id', 'left')
@@ -310,7 +314,7 @@ class SettingsModel extends Model
         $count = (int) $db->table('product_table')->where('entity_id', $id)->countAllResults();
         if ($count > 0) {
             throw new \DomainException(
-                "Cannot delete: this entity is used by {$count} product(s). Remove or reassign them first."
+                "Cannot delete: this entity is used by {$count} product(s). To change its name, use Edit instead; the products follow."
             );
         }
     }
@@ -320,7 +324,7 @@ class SettingsModel extends Model
         $count = (int) $db->table('product_table')->where('unit_id', $id)->countAllResults();
         if ($count > 0) {
             throw new \DomainException(
-                "Cannot delete: this unit is used by {$count} product(s). Remove or reassign them first."
+                "Cannot delete: this unit is used by {$count} product(s). To change its name, use Edit instead; the products follow."
             );
         }
     }
@@ -330,7 +334,7 @@ class SettingsModel extends Model
         $count = (int) $db->table('product_table')->where('type_id', $id)->countAllResults();
         if ($count > 0) {
             throw new \DomainException(
-                "Cannot delete: this product type is used by {$count} product(s). Remove or reassign them first."
+                "Cannot delete: this product type is used by {$count} product(s). To change its name, use Edit instead; the products follow."
             );
         }
     }

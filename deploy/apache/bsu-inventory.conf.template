@@ -1,0 +1,118 @@
+# BSU Inventory System on XAMPP's Apache, over HTTPS, fully offline.
+#
+# setup.bat (deploy\setup-server.ps1) turns this template into
+#   C:\xampp\apache\conf\bsu-inventory\bsu-inventory.conf
+# and adds one "Include conf/bsu-inventory/bsu-inventory.conf" line to httpd.conf.
+# Edit this template, not the generated copy: the next setup run overwrites it.
+#
+# Placeholders filled in by the setup:
+#   {{APP_ROOT}}   the project folder, e.g. C:/xampp/htdocs/BSU_Inventory_System
+#   {{CERT_DIR}}   C:/xampp/apache/conf/bsu-inventory (certificates and keys; not web-served)
+#   {{HTDOCS}}     XAMPP's htdocs folder
+#   {{HTTP_PORT}} / {{HTTPS_PORT}}  normally 80 / 443
+
+Define BSU_ROOT "{{APP_ROOT}}"
+Define BSU_CERTS "{{CERT_DIR}}"
+
+# Ports XAMPP's own configuration doesn't listen on yet (usually nothing)
+{{EXTRA_LISTEN}}
+
+# ── Plain HTTP ───────────────────────────────────────────────────────────────
+# Other devices are sent to HTTPS. The only thing served to them over plain HTTP is the
+# certificate authority they must install first (it is public; the key never leaves this PC).
+# Requests from this PC itself keep XAMPP's own pages (dashboard, phpMyAdmin).
+<VirtualHost *:{{HTTP_PORT}}>
+    ServerName bsu-inventory-http
+    DocumentRoot "{{HTDOCS}}"
+
+    Alias /bsu-inventory-ca.crt "${BSU_CERTS}/bsu-inventory-ca.crt"
+    <Directory "${BSU_CERTS}">
+        Require all denied
+        <Files "bsu-inventory-ca.crt">
+            Require all granted
+            # Phones offer to install a file served with this type
+            ForceType application/x-x509-ca-cert
+            Header always set Content-Disposition "attachment; filename=bsu-inventory-ca.crt"
+        </Files>
+    </Directory>
+
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !=/bsu-inventory-ca.crt
+    RewriteCond expr "! -R '127.0.0.0/8' && ! -R '::1/128'"
+    RewriteRule ^ https://%{SERVER_NAME}{{HTTPS_PORT_SUFFIX}}%{REQUEST_URI} [R=301,L]
+    # SERVER_NAME is the host the browser asked for (UseCanonicalName Off)
+    UseCanonicalName Off
+</VirtualHost>
+
+# ── HTTPS: the web app at /, the API at /api ─────────────────────────────────
+<VirtualHost *:{{HTTPS_PORT}}>
+    ServerName bsu-inventory
+    UseCanonicalName Off
+    DocumentRoot "${BSU_ROOT}/frontend/dist"
+
+    SSLEngine on
+    SSLCertificateFile "${BSU_CERTS}/server.crt"
+    SSLCertificateKeyFile "${BSU_CERTS}/server.key"
+    SSLProtocol -all +TLSv1.2 +TLSv1.3
+    SSLCipherSuite HIGH:!aNULL:!MD5:!3DES:!RC4:!kRSA
+    SSLHonorCipherOrder off
+
+    # Browsers remember to use HTTPS only; plus the same headers as the Docker/nginx setup
+    Header always set Strict-Transport-Security "max-age=31536000"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+
+    # Speed: HTTP/2 loads the app's many files over one connection; text is sent compressed
+    <IfModule http2_module>
+        Protocols h2 http/1.1
+    </IfModule>
+    <IfModule deflate_module>
+        AddOutputFilterByType DEFLATE text/html text/css text/plain text/javascript application/javascript application/json image/svg+xml
+    </IfModule>
+
+    # The built Vue app (frontend/dist). Unknown paths are app routes: serve index.html.
+    <Directory "${BSU_ROOT}/frontend/dist">
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+        FallbackResource /index.html
+        <Files "index.html">
+            Header set Cache-Control "no-store"
+        </Files>
+    </Directory>
+    # Built files carry a content hash in their names (a new build gets new names), so
+    # browsers may keep them for a year instead of asking again on every page load
+    <Directory "${BSU_ROOT}/frontend/dist/assets">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </Directory>
+
+    # Barcode images written by the backend. Even a tampered SVG can't run scripts.
+    Alias /barcodes "${BSU_ROOT}/backend/public/barcodes"
+    <Directory "${BSU_ROOT}/backend/public/barcodes">
+        Options -Indexes
+        AllowOverride None
+        Require all denied
+        <FilesMatch "\.svg$">
+            Require all granted
+        </FilesMatch>
+        Header always set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    </Directory>
+
+    # The API: every /api URL runs CodeIgniter's front controller, which routes on the
+    # full path (api/...). Nothing else in backend/ is reachable.
+    AliasMatch "^/api(?:/.*)?$" "${BSU_ROOT}/backend/public/index.php"
+    <Directory "${BSU_ROOT}/backend/public">
+        Options -Indexes
+        AllowOverride None
+        Require all denied
+        <Files "index.php">
+            Require all granted
+        </Files>
+    </Directory>
+
+    ErrorLog "logs/bsu-inventory-error.log"
+    CustomLog "logs/bsu-inventory-access.log" combined
+</VirtualHost>

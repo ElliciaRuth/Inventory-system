@@ -5,7 +5,7 @@ import { useNotificationStore } from '../stores/notificationStore'
 import { useAutoReload } from '../composables/useAutoReload'
 import AppPagination from '../components/AppPagination.vue'
 import {
-  Bell, AlertCircle, AlertTriangle, Clock, RefreshCw, UserCheck, ClipboardList,
+  Bell, AlertCircle, AlertTriangle, Clock, RefreshCw, UserCheck, ClipboardList, CheckCircle2, XCircle,
   Check, Search, Trash2, PartyPopper, ArrowRight, X,
 } from 'lucide-vue-next'
 
@@ -87,10 +87,11 @@ function handleAction(n) {
 }
 
 // Same icons as the navbar notification flyout
-function getIcon(type) {
+function getIcon(type, severity = '', details = null) {
+  if (type === 'stockout_decision') return severity === 'danger' ? XCircle : CheckCircle2
   if (type === 'out_of_stock') return AlertCircle
   if (type === 'low_stock') return AlertTriangle
-  if (type === 'expiring') return Clock
+  if (type === 'expiring') return details?.expired ? AlertCircle : Clock
   if (type === 'borrow') return RefreshCw
   if (type === 'user_registration') return UserCheck
   if (type === 'stockout_request') return ClipboardList
@@ -314,6 +315,17 @@ function getIcon(type) {
             <span><ClipboardList :size="14" /> Stock-Out Requests</span>
             <span class="pill-badge">{{ notificationStore.counts.stockoutRequests }}</span>
           </button>
+
+          <button
+            v-if="notificationStore.counts.stockoutDecisions > 0"
+            type="button"
+            class="notif-pill"
+            :class="{ 'is-selected': activeCategory === 'stockout_decision' }"
+            @click="setCategory('stockout_decision')"
+          >
+            <span><CheckCircle2 :size="14" /> My Requests</span>
+            <span class="pill-badge">{{ notificationStore.counts.stockoutDecisions }}</span>
+          </button>
         </div>
       </div>
 
@@ -355,7 +367,7 @@ function getIcon(type) {
             <div class="notif-card-inner">
               <!-- Icon -->
               <div class="notif-icon-badge">
-                <component :is="getIcon(n.type)" :size="20" />
+                <component :is="getIcon(n.type, n.severity, n.details)" :size="20" />
               </div>
 
               <!-- Content Area -->
@@ -369,6 +381,7 @@ function getIcon(type) {
                         'badge-danger': n.severity === 'danger',
                         'badge-warning': n.severity === 'warning',
                         'badge-info': n.severity === 'info' || n.severity === 'caution',
+                        'badge-success': n.severity === 'success',
                       }"
                     >
                       {{ n.badge }}
@@ -611,6 +624,15 @@ function getIcon(type) {
 
 .severity-info .notif-accent-bar {
   background: #0284c7;
+}
+
+.severity-success .notif-accent-bar {
+  background: var(--color-success);
+}
+
+.severity-success .notif-icon-badge {
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .notif-card-inner {

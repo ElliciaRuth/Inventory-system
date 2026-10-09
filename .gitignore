@@ -63,6 +63,16 @@ Vagrantfile
 /backend/writable/debugbar/*
 !/backend/writable/debugbar/index.html
 
+# Excel import previews waiting to be confirmed
+/backend/writable/imports/
+
+# Backups hold every record of an office, including e-mail addresses and password hashes:
+# never commit them (only the folder's access rules are kept)
+/backend/writable/backups/*
+!/backend/writable/backups/.htaccess
+*.sql
+*.bsubackup
+
 php_errors.log
 
 #-------------------------

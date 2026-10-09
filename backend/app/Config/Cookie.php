@@ -104,4 +104,16 @@ class Cookie extends BaseConfig
      * @see https://tools.ietf.org/html/rfc2616#section-2.2
      */
     public bool $raw = false;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        // Served over HTTPS (the XAMPP/Apache setup): cookies, the login session included,
+        // are then never sent over plain HTTP. The HTTP development servers keep working.
+        $https = $_SERVER['HTTPS'] ?? '';
+        if ($https !== '' && strtolower((string) $https) !== 'off') {
+            $this->secure = true;
+        }
+    }
 }

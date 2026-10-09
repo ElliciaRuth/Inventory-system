@@ -11,8 +11,8 @@
     },
     "require": {
         "php": "^8.2",
-        "codeigniter4/framework": "^4.7",
-        "dompdf/dompdf": "^3.1",
+        "codeigniter4/framework": "^4.7.4",
+        "dompdf/dompdf": "^3.1.6",
         "picqer/php-barcode-generator": "^3.2"
     },
     "require-dev": {

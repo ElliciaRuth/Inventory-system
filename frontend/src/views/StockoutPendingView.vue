@@ -63,15 +63,47 @@ function approve(item) {
   run(`approve-${itemId(item)}`, () => stockoutApi.approveItem(itemId(item)), 'Item approved.')
 }
 
-async function reject(item) {
-  const ok = await confirmDialog({
-    title: 'Reject item?',
-    message: `"${item.item_name}" will be rejected and will not be deducted from stock.`,
-    confirmText: 'Reject',
-    variant: 'danger',
-  })
-  if (!ok) return
-  run(`reject-${itemId(item)}`, () => stockoutApi.rejectItem(itemId(item)), 'Item rejected.')
+// ── Reject with a reason (shown to the staff member in their history and notifications) ──
+const REASON_SUGGESTIONS = [
+  'Not enough stock right now',
+  'Quantity is more than needed',
+  'Already issued to your office',
+  'Please request a different item',
+]
+const rejecting = ref(null) // { item, request }
+const rejectReason = ref('')
+const rejectError = ref('')
+
+function reject(item, request) {
+  rejecting.value = { item, request }
+  rejectReason.value = ''
+  rejectError.value = ''
+}
+
+function closeReject() {
+  if (busy.value) return
+  rejecting.value = null
+}
+
+async function confirmReject() {
+  const reason = rejectReason.value.trim()
+  if (reason.length < 3) {
+    rejectError.value = 'Please give a short reason; the requester will see it.'
+    return
+  }
+  const item = rejecting.value.item
+  busy.value = `reject-${itemId(item)}`
+  try {
+    const res = await stockoutApi.rejectItem(itemId(item), reason)
+    toast(res.message || 'Item rejected.')
+    rejecting.value = null
+    triggerAutoReload('stockout-approval')
+    await load()
+  } catch (err) {
+    rejectError.value = errorMessage(err, 'The item could not be rejected.')
+  } finally {
+    busy.value = ''
+  }
 }
 
 async function approveAll(request) {
@@ -118,6 +150,7 @@ onMounted(load)
         <h1 class="hero-title">Pending Stock-Out Requests</h1>
         <p class="hero-subtitle">Review staff requests. Adjust quantities if needed, then accept or reject each item.</p>
       </div>
+      <router-link to="/stockout/history" class="btn btn-secondary">Request History</router-link>
     </div>
 
     <section v-if="loading" class="panel" style="padding: 3rem; text-align: center; color: var(--text-muted);">
@@ -134,7 +167,7 @@ onMounted(load)
         <div class="panel-title-group">
           <h2 class="panel-title">Request #{{ request.temp_stockout_id }}</h2>
           <p class="panel-subtitle">
-            By <strong>{{ request.requester_name || 'Unknown' }}</strong> · {{ request.office_name }} · {{ request.created_at }}
+            By <strong>{{ request.requester_name || 'Unknown' }}</strong> · {{ request.office_name }} · {{ request.submitted_at || request.created_at }}
           </p>
         </div>
         <button type="button" class="btn btn-primary" :disabled="!!busy" @click="approveAll(request)">Accept All</button>
@@ -170,7 +203,7 @@ onMounted(load)
                 <strong v-else>{{ Number(item.quantity) }}</strong>
               </td>
               <td data-label="Stock Available"><span class="badge" :class="stockBadge(item).cls">{{ stockBadge(item).text }}</span></td>
-              <td data-label="Status"><span class="badge badge-neutral" style="text-transform: capitalize;">{{ item.status }}</span></td>
+              <td data-label="Status"><span class="badge" :class="item.status === 'pending' ? 'badge-warning' : 'badge-neutral'" style="text-transform: capitalize;">{{ item.status }}</span></td>
               <td class="cell-actions" style="text-align: right; white-space: nowrap;">
                 <template v-if="item.status === 'pending' && editingId !== itemId(item)">
                   <button type="button" class="btn btn-sm btn-secondary" @click="startEdit(item)">Edit</button>
@@ -182,7 +215,7 @@ onMounted(load)
                     :title="canApprove(item) ? '' : `Only ${Number(item.current_stock)} in stock`"
                     @click="approve(item)"
                   >Accept</button>
-                  <button type="button" class="btn btn-sm btn-secondary" style="color: var(--color-danger); margin-left: 0.4rem;" :disabled="!!busy" @click="reject(item)">Reject</button>
+                  <button type="button" class="btn btn-sm btn-secondary" style="color: var(--color-danger); margin-left: 0.4rem;" :disabled="!!busy" @click="reject(item, request)">Reject</button>
                 </template>
                 <span v-else-if="item.status !== 'pending'" style="color: var(--text-muted);">—</span>
               </td>
@@ -191,5 +224,111 @@ onMounted(load)
         </table>
       </div>
     </section>
+
+    <!-- Reject with a reason -->
+    <div v-if="rejecting" class="modal-backdrop" @click.self="closeReject">
+      <div class="modal-card" style="max-width: 520px;">
+        <div class="modal-header">
+          <div>
+            <h2 style="font-size: 1.15rem;">Reject this item?</h2>
+            <p class="panel-subtitle">
+              <strong>{{ rejecting.item.item_name }}</strong> · {{ Number(rejecting.item.quantity) }} {{ rejecting.item.unit }}
+              · requested by {{ rejecting.request.requester_name || 'staff' }}
+            </p>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" :disabled="!!busy" @click="closeReject">✕</button>
+        </div>
+
+        <form id="rejectForm" class="modal-body" @submit.prevent="confirmReject">
+          <label class="form-label" for="rejectReason">Reason for rejecting *</label>
+          <textarea
+            id="rejectReason"
+            v-model="rejectReason"
+            class="form-input reject-reason"
+            rows="3"
+            maxlength="500"
+            placeholder="e.g. Not enough stock right now; please request again next week."
+            autofocus
+          />
+          <div class="reject-hint">
+            <span>{{ rejectReason.trim().length }}/500</span>
+            <span>Shown to the requester in their notifications and request history.</span>
+          </div>
+
+          <div class="reject-suggestions">
+            <button v-for="s in REASON_SUGGESTIONS" :key="s" type="button" class="reject-chip" @click="rejectReason = s">{{ s }}</button>
+          </div>
+
+          <p v-if="rejectError" class="reject-error">{{ rejectError }}</p>
+          <p class="reject-note">The item will not be deducted from stock.</p>
+        </form>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" :disabled="!!busy" @click="closeReject">Cancel</button>
+          <button type="submit" form="rejectForm" class="btn btn-primary reject-confirm" :disabled="!!busy || rejectReason.trim().length < 3">
+            {{ busy ? 'Rejecting…' : 'Reject item' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.reject-reason {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  font: inherit;
+}
+
+.reject-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.reject-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.reject-chip {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.reject-chip:hover {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.reject-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.83rem;
+  color: var(--color-danger);
+}
+
+.reject-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.reject-confirm,
+.reject-confirm:hover:not(:disabled) {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+</style>

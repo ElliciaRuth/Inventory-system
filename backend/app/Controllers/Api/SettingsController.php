@@ -2,9 +2,8 @@
 
 namespace App\Controllers\Api;
 
-use App\Libraries\Mailer;
+use App\Libraries\AuditLog;
 use App\Models\SettingsModel;
-use App\Models\SmtpSettingsModel;
 use App\Models\UserModel;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -41,6 +40,9 @@ class SettingsController extends BaseApiController
         if ($this->definitionFor($type) === null) {
             return $this->unknownType();
         }
+        if ($error = $this->recordAccessError($type, $id)) {
+            return $error;
+        }
 
         $record = $this->settingsModel->fetchRecord($type, $id);
         if ($record === []) {
@@ -69,15 +71,19 @@ class SettingsController extends BaseApiController
             $payload[$field] = $input[$field] ?? null;
         }
 
+        if ($id > 0 && ($error = $this->recordAccessError($type, $id))) {
+            return $error;
+        }
+
         if ($type === 'users') {
-            if ($id === 0) {
+            if ($id <= 0) {
                 return $this->respondError('Users must create their own accounts via registration.', [], ResponseInterface::HTTP_FORBIDDEN);
             }
-            return $this->saveUser($id, $payload);
+            return $this->audited($type, $id, $payload, $this->saveUser($id, $payload));
         }
 
         if ($type === 'user_office_table') {
-            return $this->saveUserOffice($id, $payload);
+            return $this->audited($type, $id, $payload, $this->saveUserOffice($id, $payload));
         }
 
         $payload = $this->sanitizePayload($payload);
@@ -88,11 +94,42 @@ class SettingsController extends BaseApiController
 
         $this->settingsModel->saveRecord($type, $id, $payload, $this->currentOfficeId());
 
-        return $this->respondSuccess(
+        return $this->audited($type, $id, $payload, $this->respondSuccess(
             null,
             $id > 0 ? 'Record updated successfully.' : 'Record created successfully.',
             $id > 0 ? ResponseInterface::HTTP_OK : ResponseInterface::HTTP_CREATED
-        );
+        ));
+    }
+
+    /**
+     * Records a successful settings save in the audit trail (passwords never logged) and passes the response on.
+     */
+    private function audited(string $type, int $id, array $payload, ResponseInterface $response): ResponseInterface
+    {
+        if ($response->getStatusCode() < 300) {
+            unset($payload['password']);
+            $label = $this->typeLabel($type);
+            AuditLog::record(
+                $id > 0 ? 'settings.updated' : 'settings.created',
+                $type,
+                $id > 0 ? $id : null,
+                ($id > 0 ? 'Updated ' : 'Added ') . $label . ': ' . $this->recordName($payload),
+                ['values' => $payload]
+            );
+        }
+
+        return $response;
+    }
+
+    private function recordName(array $values): string
+    {
+        foreach (['username', 'name', 'reference', 'unit', 'entity', 'type', 'office_name', 'user_office_name'] as $key) {
+            if (! empty($values[$key])) {
+                return (string) $values[$key];
+            }
+        }
+
+        return 'record';
     }
 
     /**
@@ -102,6 +139,9 @@ class SettingsController extends BaseApiController
     {
         if ($this->definitionFor($type) === null) {
             return $this->unknownType();
+        }
+        if ($error = $this->recordAccessError($type, $id)) {
+            return $error;
         }
 
         if ($type === 'users' && $this->currentUserId() === $id) {
@@ -116,11 +156,25 @@ class SettingsController extends BaseApiController
             return $this->respondError('Use deactivate instead of delete for users.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $definition = $this->definitionFor($type);
+        $before     = db_connect()->table($definition['table'] ?? $type)->where($definition['pk'] ?? 'id', $id)->get(1)->getRowArray() ?? [];
+        unset($before['password'], $before['password_reset_token']);
+
         try {
             $this->settingsModel->deleteRecord($type, $id);
-        } catch (\Throwable $e) {
+        } catch (\DomainException $e) {
             return $this->respondError('Delete failed: ' . $e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            // Database errors stay in the log; they can describe the schema
+            log_message('error', "Settings delete of {$type} #{$id} failed: " . $e->getMessage());
+
+            return $this->respondError('Delete failed: the record is still used elsewhere in the system.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
+
+        AuditLog::record('settings.deleted', $type, $id,
+            'Deleted ' . $this->typeLabel($type) . ': ' . $this->recordName($before),
+            ['deleted' => $before]
+        );
 
         return $this->respondSuccess(null, 'Record deleted successfully.');
     }
@@ -130,7 +184,12 @@ class SettingsController extends BaseApiController
      */
     public function activate(int $id): ResponseInterface
     {
+        if ($error = $this->userAccessError($id)) {
+            return $error;
+        }
+
         $this->settingsModel->activateUser($id);
+        AuditLog::record('user.activated', 'users', $id, 'Activated account of ' . $this->usernameOf($id));
         return $this->respondSuccess(null, 'User activated successfully.');
     }
 
@@ -139,6 +198,10 @@ class SettingsController extends BaseApiController
      */
     public function deactivate(int $id): ResponseInterface
     {
+        if ($error = $this->userAccessError($id)) {
+            return $error;
+        }
+
         if ($this->currentUserId() === $id) {
             return $this->respondError('You cannot deactivate the currently logged-in user.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -148,6 +211,7 @@ class SettingsController extends BaseApiController
         }
 
         $this->settingsModel->deactivateUser($id);
+        AuditLog::record('user.deactivated', 'users', $id, 'Deactivated account of ' . $this->usernameOf($id));
         return $this->respondSuccess(null, 'User deactivated successfully.');
     }
 
@@ -179,116 +243,18 @@ class SettingsController extends BaseApiController
             return $this->respondError('Danger days must be between 1 and less than warning days.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $before = ['expiry_warning_days' => (int) get_setting('expiry_warning_days', 30), 'expiry_danger_days' => (int) get_setting('expiry_danger_days', 7)];
         save_setting('expiry_warning_days', $warningDays);
         save_setting('expiry_danger_days', $dangerDays);
+        AuditLog::record('settings.expiry_thresholds', 'system_settings', null,
+            "Expiry thresholds set to warn at {$warningDays} days, danger at {$dangerDays} days",
+            ['before' => $before, 'after' => ['expiry_warning_days' => $warningDays, 'expiry_danger_days' => $dangerDays]]
+        );
 
         return $this->respondSuccess([
             'expiry_warning_days' => $warningDays,
             'expiry_danger_days'  => $dangerDays,
         ], 'Inventory settings saved.');
-    }
-
-    // ── Email (SMTP) settings — Technical Staff ───────────────────────────
-    // The Gmail account used to send password-reset codes. The App Password is
-    // stored encrypted and never sent back to the browser.
-
-    /**
-     * GET /api/settings/email
-     */
-    public function emailSettings(): ResponseInterface
-    {
-        $config = (new SmtpSettingsModel())->getActive();
-        if (! $config) {
-            return $this->respondSuccess(['configured' => false], 'Email is not configured');
-        }
-
-        $configuredBy = $config['configured_by']
-            ? (new UserModel())->select('name, username')->find((int) $config['configured_by'])
-            : null;
-
-        return $this->respondSuccess([
-            'configured'    => true,
-            'smtp_email'    => $config['smtp_email'],
-            'configured_by' => $configuredBy ? ($configuredBy['name'] ?: $configuredBy['username']) : null,
-            'updated_at'    => $config['updated_at'] ?? $config['created_at'] ?? null,
-        ], 'Email settings retrieved');
-    }
-
-    /**
-     * POST /api/settings/email   { smtp_email, smtp_password? }
-     * The password may be left blank to keep the saved one (only when the account already exists).
-     */
-    public function saveEmailSettings(): ResponseInterface
-    {
-        $input    = $this->input();
-        $email    = trim((string) ($input['smtp_email'] ?? ''));
-        // Google shows App Passwords as "abcd efgh ijkl mnop"
-        $password = str_replace(' ', '', (string) ($input['smtp_password'] ?? ''));
-
-        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return $this->respondError('Please enter a valid Gmail address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $model    = new SmtpSettingsModel();
-        $existing = $model->getActive();
-
-        if ($password === '' && ! $existing) {
-            return $this->respondError('Please enter the Gmail App Password.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-        if ($password !== '' && strlen($password) < 8) {
-            return $this->respondError('The App Password looks too short. Gmail App Passwords are 16 characters.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $data = [
-            'smtp_email'    => $email,
-            'configured_by' => $this->currentUserId(),
-        ];
-        if ($password !== '') {
-            $data['smtp_password'] = base64_encode(service('encrypter')->encrypt($password));
-        }
-
-        if ($existing) {
-            $model->update($existing['id'], $data);
-        } else {
-            $model->insert($data);
-        }
-
-        return $this->respondSuccess(null, 'Email settings saved. Send a test email to make sure they work.');
-    }
-
-    /**
-     * POST /api/settings/email/test   { to? }  — defaults to the current user's email
-     */
-    public function testEmailSettings(): ResponseInterface
-    {
-        $to = trim((string) ($this->input()['to'] ?? ''));
-        if ($to === '') {
-            $to = (string) ((new UserModel())->find($this->currentUserId())['email'] ?? '');
-        }
-        if (! filter_var($to, FILTER_VALIDATE_EMAIL)) {
-            return $this->respondError('Enter an email address to send the test to.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $mailer = new Mailer();
-        if (! $mailer->isConfigured()) {
-            return $this->respondError('Save the email settings first.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $error = $mailer->send(
-            $to,
-            'Test Email - BSU Inventory',
-            '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;">' .
-            '<h2 style="color:#1a5209;">Email is working</h2>' .
-            '<p style="color:#475569;line-height:1.6;">This test confirms the BSU Inventory System can send email. ' .
-            'Password-reset codes will be sent from this account.</p>' .
-            '</div>'
-        );
-
-        if ($error !== null) {
-            return $this->respondError($error, [], ResponseInterface::HTTP_BAD_GATEWAY);
-        }
-
-        return $this->respondSuccess(['to' => $to], "Test email sent to {$to}. Check the inbox (and Spam folder).");
     }
 
     /**
@@ -301,6 +267,26 @@ class SettingsController extends BaseApiController
         } catch (PageNotFoundException) {
             return null;
         }
+    }
+
+    private function typeLabel(string $type): string
+    {
+        return [
+            'users'             => 'user',
+            'entity_table'      => 'entity',
+            'unit_table'        => 'unit',
+            'reference_table'   => 'reference',
+            'type_of_product'   => 'product type',
+            'office_table'      => 'office',
+            'user_office_table' => 'user office',
+        ][$type] ?? $type;
+    }
+
+    private function usernameOf(int $userId): string
+    {
+        $row = db_connect()->table('user_table')->select('username')->where('user_id', $userId)->get(1)->getRowArray();
+
+        return '"' . ($row['username'] ?? "user #{$userId}") . '"';
     }
 
     private function unknownType(): ResponseInterface
@@ -319,11 +305,36 @@ class SettingsController extends BaseApiController
         if ($payload['username'] === '' || $payload['lvl_of_access_id'] <= 0 || $payload['user_office_id'] <= 0) {
             return $this->respondError('Please fill in the required user fields.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
+        if (mb_strlen($payload['username']) < 3 || mb_strlen($payload['username']) > 50) {
+            return $this->respondError('Username must be 3 to 50 characters long.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($payload['email'] !== '' && ! filter_var($payload['email'], FILTER_VALIDATE_EMAIL)) {
+            return $this->respondError('Please enter a valid email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
         if ($error = $this->nameError($payload['name'], 'Full name', allowComma: true)) {
             return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        // The role and office handed out: real rows, and for a manager nothing above their own
+        // role and nothing outside their own office (see userAccessError for whom they may edit)
+        $newLevel = $this->accessLevelOf($payload['lvl_of_access_id']);
+        if ($newLevel < 1 || ! $this->userOfficeExists($payload['user_office_id'])) {
+            return $this->respondError('Choose a valid level of access and user office.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($this->currentLevelId() < 4) {
+            if ($newLevel > $this->currentLevelId()) {
+                return $this->respondError('You cannot give an account a higher level of access than your own.', [], ResponseInterface::HTTP_FORBIDDEN);
+            }
+            if ($payload['user_office_id'] !== $this->currentOfficeId()) {
+                return $this->respondError('You can only assign accounts to your own office.', [], ResponseInterface::HTTP_FORBIDDEN);
+            }
+        }
+
         $userModel = new UserModel();
+
+        if ($userModel->where('username', $payload['username'])->where('user_id !=', $id)->first()) {
+            return $this->respondError('That username is already used by another account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         // ── Email uniqueness check (skip when email is blank — allowed for null-email accounts) ──
         if ($payload['email'] !== '') {
@@ -342,13 +353,70 @@ class SettingsController extends BaseApiController
         }
 
         if (($payload['password'] ?? '') !== '') {
+            if ($error = $this->passwordStrengthError((string) $payload['password'])) {
+                return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
             $payload['password'] = password_hash((string) $payload['password'], PASSWORD_DEFAULT);
+            // A password someone else chose is temporary: the owner picks their own at next login
+            if ($id !== $this->currentUserId()) {
+                $payload['must_change_password'] = 1;
+            }
         } else {
             unset($payload['password']);
         }
 
         $userModel->update($id, $payload);
         return $this->respondSuccess(null, 'User updated successfully.');
+    }
+
+    /**
+     * Who may manage which account: technical staff (level 4) any account; a manager only the
+     * accounts of their own office whose level is not above their own (never Technical Staff).
+     * Null when allowed, else a 404 (the account is not shown to them either).
+     */
+    private function userAccessError(int $userId): ?ResponseInterface
+    {
+        $level = $this->currentLevelId();
+        $row   = db_connect()->table('user_table u')
+            ->select('u.user_office_id, COALESCE(loa.lvl_of_access, 0) AS level_id', false)
+            ->join('level_of_access loa', 'loa.lvl_of_access_id = u.lvl_of_access_id', 'left')
+            ->where('u.user_id', $userId)
+            ->get(1)->getRowArray();
+
+        if (! $row) {
+            return $this->respondError('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+        if ($level >= 4) {
+            return null;
+        }
+        if ($this->currentOfficeId() <= 0
+            || (int) $row['user_office_id'] !== $this->currentOfficeId()
+            || (int) $row['level_id'] > $level) {
+            return $this->respondError('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+
+        return null;
+    }
+
+    /**
+     * Records of another office are off limits below level 4 (users: see userAccessError).
+     */
+    private function recordAccessError(string $type, int $id): ?ResponseInterface
+    {
+        if ($type === 'users') {
+            return $this->userAccessError($id);
+        }
+        if ($type === 'user_office_table' || $this->currentLevelId() >= 4) {
+            return null; // technical staff only (SettingsModel::definitions)
+        }
+
+        $definition = $this->definitionFor($type);
+        $exists     = db_connect()->table($definition['table'])
+            ->where($definition['pk'], $id)
+            ->where('user_office_id', $this->currentOfficeId())
+            ->countAllResults() > 0;
+
+        return $exists ? null : $this->respondError('Record not found.', [], ResponseInterface::HTTP_NOT_FOUND);
     }
 
     private function saveUserOffice(int $id, array $payload): ResponseInterface

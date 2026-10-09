@@ -1,8 +1,10 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { dashboardApi } from '../api/dashboard'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import AppPagination from '../components/AppPagination.vue'
+import { typeLabel, typeBadge, isStockIn, signedQty } from '../utils/transactionTypes'
 
 const transactions = ref([])
 const total = ref(0)
@@ -11,7 +13,9 @@ const currentPage = ref(1)
 const limit = ref(25)
 const loading = ref(true)
 
-const search = ref('')
+const route = useRoute()
+// ?search= lets the dashboard open the log filtered to one product
+const search = ref(String(route.query.search || ''))
 const selectedType = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -48,6 +52,12 @@ function handleFilter() {
   currentPage.value = 1
   loadTransactions()
 }
+
+watch(() => route.query.search, (value) => {
+  if (value === undefined) return
+  search.value = String(value)
+  handleFilter()
+})
 
 function handleReset() {
   search.value = ''
@@ -114,8 +124,9 @@ onMounted(() => {
               <option value="receipt">Stock In (Receipt)</option>
               <option value="issue">Stock Out (Issue)</option>
               <option value="adjust_out">Adjust Out</option>
-              <option value="borrow">Borrow</option>
-              <option value="return">Return</option>
+              <option value="adjust_in">Adjust In</option>
+              <option value="borrow">Lent (Borrow)</option>
+              <option value="return">Returned</option>
             </select>
           </div>
 
@@ -153,23 +164,26 @@ onMounted(() => {
           <tbody>
             <tr v-for="t in transactions" :key="t.transaction_id">
               <td style="font-family: var(--font-mono); font-size: 0.825rem; color: var(--text-muted);">
-                {{ t.date }}
+                {{ t.transaction_date }}
               </td>
               <td>
-                <strong>{{ t.item }}</strong>
+                <strong>{{ t.product }}</strong>
+                <div v-if="t.stock_no" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">
+                  {{ t.stock_no }}
+                </div>
               </td>
               <td>
                 <span
                   class="badge"
-                  :class="t.transaction_type === 'receipt' ? 'badge-success' : t.transaction_type === 'issue' ? 'badge-info' : 'badge-warning'"
+                  :class="typeBadge(t.transaction_type)"
                   style="text-transform: uppercase;"
                 >
-                  {{ t.transaction_type }}
+                  {{ typeLabel(t.transaction_type) }}
                 </span>
               </td>
               <td style="text-align: right; font-weight: 700;">
-                <span :style="{ color: t.transaction_type === 'receipt' ? 'var(--color-success)' : 'inherit' }">
-                  {{ t.transaction_type === 'receipt' ? '+' : '-' }}{{ t.transaction_qty }}
+                <span :style="{ color: isStockIn(t.transaction_type) ? 'var(--color-success)' : 'inherit' }">
+                  {{ signedQty(t.transaction_type, t.transaction_qty) }}
                 </span>
               </td>
               <td style="text-align: right; font-family: var(--font-mono); font-size: 0.85rem;">
@@ -177,11 +191,11 @@ onMounted(() => {
               </td>
               <td>
                 <span class="badge badge-neutral" style="font-family: var(--font-mono);">
-                  {{ t.reference || '—' }}
+                  {{ (t.reference || '').trim() || '—' }}
                 </span>
               </td>
               <td>
-                <span style="font-size: 0.85rem;">{{ t.office || 'Direct' }}</span>
+                <span style="font-size: 0.85rem;">{{ t.office_name && t.office_name !== '—' ? t.office_name : 'Direct' }}</span>
               </td>
             </tr>
 

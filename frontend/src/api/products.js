@@ -30,4 +30,15 @@ export const productsApi = {
     const response = await client.delete(`/products/${id}`)
     return response.data
   },
+
+  // Hide a product that is no longer used; its records are kept
+  async archiveProduct(id, reason = '') {
+    const response = await client.post(`/products/${id}/archive`, { reason })
+    return response.data
+  },
+
+  async restoreProduct(id) {
+    const response = await client.post(`/products/${id}/restore`)
+    return response.data
+  },
 }

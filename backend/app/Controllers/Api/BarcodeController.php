@@ -76,6 +76,7 @@ class BarcodeController extends BaseApiController
             ->select('
                 b.batch_id,
                 b.batch_no,
+                b.copy_id,
                 b.barcode_value,
                 b.current_qty,
                 b.expiration_date,
@@ -87,7 +88,11 @@ class BarcodeController extends BaseApiController
             ')
             ->join('product_table p', 'b.product_id = p.product_id')
             ->join('unit_table ut', 'p.unit_id = ut.unit_id', 'left')
-            ->where('b.barcode_value', $value);
+            // The barcode itself, or the batch number printed under it
+            ->groupStart()
+                ->where('b.barcode_value', $value)
+                ->orWhere('b.batch_no', $value)
+            ->groupEnd();
 
         if ($this->currentOfficeId() > 0) {
             $builder->where('b.user_office_id', $this->currentOfficeId());
@@ -104,6 +109,7 @@ class BarcodeController extends BaseApiController
             'batch_no'        => $batch['batch_no'],
             'barcode_value'   => $batch['barcode_value'],
             'product_id'      => (int) $batch['product_id'],
+            'copy_id'         => (int) ($batch['copy_id'] ?? 0),
             'product'         => $batch['product'],
             'description'     => $batch['product_description'],
             'unit_name'       => $batch['unit_name'],
@@ -132,6 +138,7 @@ class BarcodeController extends BaseApiController
             ')
             ->join('type_of_product tp', 'p.type_id = tp.type_id')
             ->join('unit_table ut', 'p.unit_id = ut.unit_id', 'left')
+            ->where('p.archived_at', null)
             ->where('tp.type', 'Finished Product');
 
         if ($this->currentOfficeId() > 0) {

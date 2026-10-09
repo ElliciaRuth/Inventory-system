@@ -163,7 +163,7 @@ onMounted(load)
                   <strong v-else>{{ Number(item.quantity) }}</strong>
                 </td>
                 <td data-label="Stock Available"><span class="badge" :class="stockBadge(item).cls">{{ stockBadge(item).text }}</span></td>
-                <td data-label="Status"><span class="badge badge-neutral" style="text-transform: capitalize;">{{ item.status || 'pending' }}</span></td>
+                <td data-label="Status"><span class="badge" :class="(item.status || 'pending') === 'pending' ? 'badge-warning' : 'badge-neutral'" style="text-transform: capitalize;">{{ item.status || 'pending' }}</span></td>
                 <td class="cell-actions" style="text-align: right; white-space: nowrap;">
                   <template v-if="editingId !== Number(item.temp_stockout_item_id)">
                     <button type="button" class="btn btn-sm btn-secondary" @click="startEdit(item)">Edit</button>

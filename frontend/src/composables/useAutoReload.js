@@ -64,10 +64,14 @@ export function useAutoReload(fetchFn, options = {}) {
   } = options
 
   let intervalId = null
+  // Only skip when THIS fetch is still running: a shared flag would let the first
+  // listener block every other one (and triggerAutoReload sets it before calling them)
+  let inFlight = false
 
   // Wrap fetch function to track reloading state
   async function executeReload(reason = 'periodic') {
-    if (!fetchFn || isReloading.value) return
+    if (!fetchFn || inFlight) return
+    inFlight = true
     try {
       isReloading.value = true
       await fetchFn(reason)
@@ -75,6 +79,7 @@ export function useAutoReload(fetchFn, options = {}) {
     } catch (err) {
       console.error(`Auto-reload failed (${reason}):`, err)
     } finally {
+      inFlight = false
       setTimeout(() => {
         isReloading.value = false
       }, 300)

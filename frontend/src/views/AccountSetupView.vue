@@ -6,8 +6,7 @@ import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 import { AlertTriangle } from 'lucide-vue-next'
 
-// Forced first-login steps, driven by authStore.pendingSetup:
-//   change_password → (Technical Staff only) setup_smtp → setup_recovery_email
+// Forced first-login step, driven by authStore.pendingSetup: change_password
 const router = useRouter()
 const authStore = useAuthStore()
 
@@ -17,9 +16,6 @@ const successMessage = ref('')
 
 const password = ref('')
 const confirmPassword = ref('')
-const smtpEmail = ref('')
-const smtpPassword = ref('')
-const recoveryEmail = ref('')
 
 const step = computed(() => authStore.pendingSetup)
 
@@ -27,14 +23,6 @@ const copy = {
   change_password: {
     title: 'Change Your Password',
     subtitle: 'For security, please set a new password before continuing.',
-  },
-  setup_smtp: {
-    title: 'Configure Recovery Email Sender',
-    subtitle: 'Set the Gmail account (with an app password) used to send password reset codes.',
-  },
-  setup_recovery_email: {
-    title: 'Set Your Recovery Email',
-    subtitle: 'This address receives your own password reset codes.',
   },
 }
 
@@ -50,14 +38,7 @@ async function submit() {
 
   loading.value = true
   try {
-    let res
-    if (step.value === 'change_password') {
-      res = await authApi.changePassword(password.value, confirmPassword.value)
-    } else if (step.value === 'setup_smtp') {
-      res = await authApi.setupSmtp(smtpEmail.value, smtpPassword.value)
-    } else {
-      res = await authApi.setupRecoveryEmail(recoveryEmail.value)
-    }
+    const res = await authApi.changePassword(password.value, confirmPassword.value)
 
     if (res.data?.user) {
       authStore.user = res.data.user
@@ -121,34 +102,9 @@ async function handleLogout() {
                 <PasswordMatchHint :password="password" :confirm="confirmPassword" />
               </div>
               <p class="login-card-subtitle" style="font-size: 0.8rem;">
-                At least 6 characters with an uppercase letter, a lowercase letter and a number,
+                At least 8 characters with an uppercase letter, a lowercase letter and a number,
                 and no sequential numbers (e.g. 123).
               </p>
-            </template>
-
-            <template v-else-if="step === 'setup_smtp'">
-              <div class="login-field-group">
-                <label class="login-field-label">Gmail Address</label>
-                <input v-model="smtpEmail" type="email" class="login-field-input" required />
-              </div>
-              <div class="login-field-group">
-                <label class="login-field-label">App Password</label>
-                <input
-                  v-model="smtpPassword"
-                  type="password"
-                  class="login-field-input"
-                  autocomplete="off"
-                  minlength="8"
-                  required
-                />
-              </div>
-            </template>
-
-            <template v-else-if="step === 'setup_recovery_email'">
-              <div class="login-field-group">
-                <label class="login-field-label">Recovery Email</label>
-                <input v-model="recoveryEmail" type="email" class="login-field-input" required />
-              </div>
             </template>
 
             <button type="submit" class="login-submit-button" :disabled="loading">

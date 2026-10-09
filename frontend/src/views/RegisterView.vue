@@ -48,7 +48,7 @@ function hasSequentialNumbers(val) {
 }
 
 // Password rule evaluators
-const ruleLen = computed(() => form.value.password.length >= 6)
+const ruleLen = computed(() => form.value.password.length >= 8)
 const ruleUpper = computed(() => /[A-Z]/.test(form.value.password))
 const ruleLower = computed(() => /[a-z]/.test(form.value.password))
 const ruleNum = computed(() => /[0-9]/.test(form.value.password))
@@ -373,7 +373,7 @@ onMounted(() => {
 
             <!-- Live Password Strength Checklist (Matches screenshot exactly) -->
             <ul class="pw-checklist" aria-live="polite">
-              <li :class="{ ok: ruleLen }">At least 6 characters</li>
+              <li :class="{ ok: ruleLen }">At least 8 characters</li>
               <li :class="{ ok: ruleUpper }">At least one uppercase letter (A-Z)</li>
               <li :class="{ ok: ruleLower }">At least one lowercase letter (a-z)</li>
               <li :class="{ ok: ruleNum }">At least one number (0-9)</li>

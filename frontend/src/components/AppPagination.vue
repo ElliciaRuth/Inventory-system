@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   currentPage: {
@@ -43,10 +43,49 @@ const emit = defineEmits([
 
 const gotoVal = ref('')
 
+// Phones: fewer page buttons (Page items / Go to are hidden by CSS)
+const PHONE_QUERY = '(max-width: 640px)'
+const isPhone = ref(false)
+let phoneQuery = null
+const syncPhone = () => { isPhone.value = !!phoneQuery?.matches }
+
+onMounted(() => {
+  phoneQuery = window.matchMedia?.(PHONE_QUERY) || null
+  syncPhone()
+  phoneQuery?.addEventListener?.('change', syncPhone)
+})
+
+onUnmounted(() => {
+  phoneQuery?.removeEventListener?.('change', syncPhone)
+})
+
+// Phones always show 5 items per page; the earlier size comes back on a wider screen
+const PHONE_PAGE_SIZE = 5
+let sizeBeforePhone = null
+
+watch(isPhone, (phone) => {
+  if (phone && props.pageSize !== PHONE_PAGE_SIZE) {
+    sizeBeforePhone = props.pageSize
+    onPageSizeChange(PHONE_PAGE_SIZE)
+  } else if (!phone && sizeBeforePhone !== null) {
+    const restore = sizeBeforePhone
+    sizeBeforePhone = null
+    if (props.pageSize === PHONE_PAGE_SIZE) onPageSizeChange(restore)
+  }
+})
+
 // Compute items for the smart ellipsis pagination: < 1 2 3 ... x >
 const visiblePages = computed(() => {
   const total = Math.max(1, props.totalPages)
   const current = Math.min(Math.max(1, props.currentPage), total)
+
+  // Phones: at most 5 slots, e.g. 1 … 7 … 20
+  if (isPhone.value) {
+    if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1)
+    if (current <= 3) return [1, 2, 3, '...', total]
+    if (current >= total - 2) return [1, '...', total - 2, total - 1, total]
+    return [1, '...', current, '...', total]
+  }
 
   // When total pages is 7 or fewer, show all page numbers
   if (total <= 7) {
@@ -390,5 +429,47 @@ function submitGoto() {
 .page-goto-btn:hover {
   background: var(--color-primary-hover, #115e59);
   transform: translateY(-1px);
+}
+
+/* ── Phones: just the range and < 1 2 3 … x >, centred ── */
+@media (max-width: 640px) {
+  .app-pagination-container {
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px 10px;
+  }
+
+  .app-pagination-info {
+    width: 100%;
+    text-align: center;
+    font-size: 13px;
+  }
+
+  .app-pagination-controls {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .page-items-selector,
+  .page-goto-group {
+    display: none;
+  }
+
+  .page-numbers-group {
+    gap: 3px;
+  }
+
+  .pagination-btn {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 6px;
+  }
+
+  .pagination-ellipsis {
+    padding: 0 2px;
+  }
 }
 </style>

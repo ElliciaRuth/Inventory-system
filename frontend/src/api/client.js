@@ -17,8 +17,6 @@ const client = axios.create({
 // Error codes the backend sends while a forced first-login step is pending
 export const SETUP_CODES = {
   password_change_required: 'change_password',
-  smtp_setup_required: 'setup_smtp',
-  recovery_email_setup_required: 'setup_recovery_email',
 }
 
 // Registered by the router so this module doesn't import it directly
@@ -41,6 +39,18 @@ client.interceptors.response.use(
         error.response.data = data
       } catch {
         // leave as-is
+      }
+    }
+
+    // Server limits (too large / too many requests): make sure there is a readable message,
+    // also when the web server answers instead of the API
+    if ((status === 413 || status === 429) && !data?.message) {
+      const wait = Number(error.response?.headers?.['retry-after'] || 0)
+      error.response.data = {
+        ...(typeof data === 'object' && data ? data : {}),
+        message: status === 413
+          ? 'The data sent is too large.'
+          : `Too many requests. Please wait${wait ? ` ${wait} seconds` : ' a moment'} and try again.`,
       }
     }
 

@@ -1,0 +1,27 @@
+# The project folder sits inside XAMPP's htdocs, so Apache would otherwise serve
+# everything in it to the whole network: backend/.env (encryption key, database
+# password), the .git history, SQL backups, setup scripts. The app itself is served by
+# `php spark serve` / Vite (or Docker), never from this folder, so refuse it all here.
+# backend/.htaccess repeats the backend rules, because a sub-folder's own RewriteEngine
+# replaces the rules of this file.
+
+Options -Indexes
+
+# Dot files and folders (.env, .env.local, .git, .gitignore, .htaccess, .vscode …)
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Anything inside a dot folder, e.g. /.git/config
+    RewriteRule (^|/)\. - [F,L]
+
+    # Setup scripts, docs, Docker files, database dumps, lock files, logs
+    RewriteRule ^(docker|deploy)(/|$) - [F,L]
+    RewriteRule \.(sql|bat|ps1|sh|md|yml|yaml|lock|log|env|bak|zip|bsubackup)$ - [F,L,NC]
+
+    # Frontend sources and packages (the built app is served elsewhere)
+    RewriteRule ^frontend/(node_modules|src)(/|$) - [F,L]
+</IfModule>

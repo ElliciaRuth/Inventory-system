@@ -12,6 +12,17 @@ body {
   overflow-x: hidden;
 }
 
+/* Nothing may make a page wider than the screen; wide tables scroll inside their own box.
+   (.main-content keeps its 1360px limit from style.css, so pages line up with the navbar.) */
+.main-content {
+  min-width: 0;
+}
+
+.panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
 img,
 svg {
   max-width: 100%;

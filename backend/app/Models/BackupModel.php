@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\BackupPackageService;
 use CodeIgniter\Database\BaseConnection;
 
 class BackupModel
@@ -41,6 +42,17 @@ class BackupModel
                     $decoded['backup_dir'] = WRITEPATH . 'backups/';
                 }
 
+                // A folder saved before the location rules existed (or edited by hand) that the
+                // web server would publish: fall back to the protected default instead
+                if (self::unsafeDirectory((string) $decoded['backup_dir']) !== null) {
+                    log_message('warning', 'Backup folder ' . $decoded['backup_dir'] . ' is not allowed; using writable/backups instead.');
+                    $decoded['backup_dir'] = WRITEPATH . 'backups/';
+                }
+                if (trim((string) ($decoded['backup_dir_2'] ?? '')) !== '' && self::unsafeDirectory((string) $decoded['backup_dir_2']) !== null) {
+                    log_message('warning', 'Backup folder (Drive 2) ' . $decoded['backup_dir_2'] . ' is not allowed; Drive 2 is skipped.');
+                    $decoded['backup_dir_2'] = '';
+                }
+
                 return $decoded;
             }
         }
@@ -50,6 +62,55 @@ class BackupModel
             'backup_interval_hours' => 24,
             'backup_time'           => '00:00',
         ];
+    }
+
+    /**
+     * Backups hold every record of an office, including password hashes. They must not land
+     * where a web server hands files out (backend/public, the built frontend, XAMPP's htdocs),
+     * nor among the application files. backend/writable is fine: the web server refuses it.
+     * Null when the absolute folder is acceptable, else the reason. The folder need not exist yet.
+     */
+    public static function unsafeDirectory(string $absolutePath): ?string
+    {
+        $normalize = static function (string $path): string {
+            $path = rtrim(str_replace('\\', '/', $path), '/') . '/';
+
+            return DIRECTORY_SEPARATOR === '\\' ? strtolower($path) : $path;
+        };
+
+        // Resolve the deepest part that exists (symlinks, "..") and keep the rest as written
+        $path = rtrim($absolutePath, '/\\');
+        $rest = '';
+        while ($path !== '' && ! is_dir($path)) {
+            $parent = dirname($path);
+            if ($parent === $path) {
+                break;
+            }
+            $rest = '/' . basename($path) . $rest;
+            $path = $parent;
+        }
+        $base = realpath($path);
+        if ($base === false || str_contains($rest, '..')) {
+            return 'That backup folder cannot be used.';
+        }
+        $real = $normalize($base . $rest);
+
+        if (str_starts_with($real, $normalize((string) realpath(WRITEPATH)))) {
+            return null;
+        }
+
+        $refused = [FCPATH, ROOTPATH, ROOTPATH . '..' . DIRECTORY_SEPARATOR . 'frontend', (string) ($_SERVER['DOCUMENT_ROOT'] ?? '')];
+        foreach ($refused as $folder) {
+            $folderReal = $folder !== '' ? realpath($folder) : false;
+            if ($folderReal !== false && str_starts_with($real, $normalize($folderReal))) {
+                return 'Backups cannot be saved inside the system\'s own folders or a folder the web server publishes. Use backend/writable/backups or a folder on another drive.';
+            }
+        }
+        if (preg_match('#/(htdocs|public_html|wwwroot)/#', $real)) {
+            return 'Backups cannot be saved inside a web server folder (htdocs, public_html, wwwroot). Use a folder on another drive.';
+        }
+
+        return null;
     }
 
     public function saveConfig(array $config): void
@@ -140,11 +201,13 @@ class BackupModel
     // ─────────────────────────────────────────────────────────
 
     /**
-     * Create a new backup for the given office.
-     * Writes to Drive 1 (required) and Drive 2 (optional mirror).
-     * Cumulative: new file = previous file content + new SQL dump.
+     * Create a new backup package for the given office (see BackupPackageService).
+     * Writes to Drive 1 (required) and Drive 2 (optional mirror); keeps the newest slots.
+     *
+     * @param list<string> $sections empty = everything
+     * @param string|null  $password password-protect the package
      */
-    public function createBackup(int $officeId, int $userId, string $officeName, string $createdByName): array
+    public function createBackup(int $officeId, int $userId, string $officeName, string $createdByName, array $sections = [], ?string $password = null): array
     {
         // ── Drive 1 directory ──
         $dir1 = $this->getBackupDir($officeId);
@@ -161,33 +224,17 @@ class BackupModel
         }
 
         $count   = $this->countBackups($officeId);
-        $newest  = $this->getNewest($officeId);
         $newSlot = $count + 1;
 
-        // Generate fresh SQL dump
+        // A complete, self-contained package each time (no longer appended to the previous file)
         try {
-            $newDump = $this->generateDump($officeId);
+            $package = (new BackupPackageService($this->db))->create($officeId, $officeName, $sections, $password, $createdByName);
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'Dump failed: ' . $e->getMessage()];
+            return ['ok' => false, 'message' => 'Backup failed: ' . $e->getMessage()];
         }
 
-        // Cumulative: prepend previous backup content
-        $previousContent = '';
-        if ($newest && is_file($newest['backup_filepath'])) {
-            $previousContent = file_get_contents($newest['backup_filepath']);
-        } elseif ($newest && $hasDr2 && ! empty($newest['backup_filepath_2']) && is_file($newest['backup_filepath_2'])) {
-            // Fallback to drive 2 if drive 1 file is missing
-            $previousContent = file_get_contents($newest['backup_filepath_2']);
-        }
-
-        $timestamp   = date('Ymd_His');
-        $filename    = "backup_{$timestamp}_office{$officeId}.sql";
-        $separator   = $previousContent
-            ? "\n\n-- ==================================================\n"
-              . "-- Backup appended: {$timestamp}\n"
-              . "-- ==================================================\n\n"
-            : '';
-        $fullContent = $previousContent . $separator . $newDump;
+        $filename    = $package['filename'];
+        $fullContent = $package['bytes'];
 
         // ── Write to Drive 1 (required) ──
         $filepath1 = $dir1 . $filename;
@@ -230,6 +277,9 @@ class BackupModel
             'backup_filename'   => $filename,
             'backup_filepath'   => $filepath1,
             'backup_filepath_2' => $filepath2,
+            'backup_format'     => 'package',
+            'sections'          => implode(',', $package['manifest']['sections']),
+            'encrypted'         => $password !== null ? 1 : 0,
             'drive2_ok'         => $drive2ok,
             'user_office_id'    => $officeId,
             'office_name'       => $officeName,
@@ -244,129 +294,13 @@ class BackupModel
             : '';
 
         return [
-            'ok'       => true,
-            'message'  => 'Backup created successfully.' . $driveMsg,
-            'filename' => $filename,
-            'slot'     => $newSlot,
-            'drive2'   => $drive2ok,
+            'ok'        => true,
+            'message'   => 'Backup created successfully.' . $driveMsg,
+            'filename'  => $filename,
+            'slot'      => $newSlot,
+            'drive2'    => $drive2ok,
+            'backup_id' => (int) $this->db->insertID(),
         ];
-    }
-
-    // ─────────────────────────────────────────────────────────
-    //  SQL dump generator (pure PHP, office-scoped)
-    // ─────────────────────────────────────────────────────────
-
-    private function generateDump(int $officeId): string
-    {
-        $lines = [];
-        $lines[] = '-- ================================================';
-        $lines[] = '-- BSU Inventory Backup';
-        $lines[] = '-- Office ID : ' . $officeId;
-        $lines[] = '-- Generated : ' . date('Y-m-d H:i:s');
-        $lines[] = '-- ================================================';
-        $lines[] = '';
-        $lines[] = 'SET FOREIGN_KEY_CHECKS = 0;';
-        $lines[] = 'SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";';
-        $lines[] = 'SET time_zone = "+00:00";';
-        $lines[] = '';
-
-        // Shared / reference tables (full dump, no office filter)
-        $sharedTables = [
-            'user_office_table'      => 'user_office_id',
-            'level_of_access'        => 'lvl_of_access_id',
-            'user_activity_table'    => 'user_activity_id',
-            'adjustment_reason'      => 'adjustment_reason_id',
-            'transaction_type_table' => 'transaction_type_id',
-        ];
-
-        foreach ($sharedTables as $table => $pk) {
-            $lines[] = $this->dumpTable($table, $pk, null);
-        }
-
-        // Office-scoped tables
-        $officeTables = [
-            'entity_table'       => 'entity_id',
-            'unit_table'         => 'unit_id',
-            'type_of_product'    => 'type_id',
-            'reference_table'    => 'reference_id',
-            'office_table'       => 'office_id',
-            'user_table'         => 'user_id',
-            'product_table'      => 'product_id',
-            'batch_table'        => 'batch_id',
-            'transaction_table'  => 'transaction_id',
-            'temp_stockout'      => 'temp_stockout_id',
-            'temp_stockout_item' => 'temp_stockout_item_id',
-        ];
-
-        foreach ($officeTables as $table => $pk) {
-            $lines[] = $this->dumpTable($table, $pk, $officeId);
-        }
-
-        $lines[] = '';
-        $lines[] = 'SET FOREIGN_KEY_CHECKS = 1;';
-        $lines[] = '';
-
-        return implode("\n", $lines);
-    }
-
-    private function dumpTable(string $table, string $pk, ?int $officeId): string
-    {
-        $lines   = [];
-        $lines[] = "-- -- Table: `{$table}` --";
-        $lines[] = "DELETE FROM `{$table}`" . ($officeId ? " WHERE `user_office_id` = {$officeId}" : '') . ';';
-
-        $builder = $this->db->table($table)->orderBy($pk, 'ASC');
-        if ($officeId !== null && $table !== 'temp_stockout_item') {
-            $builder->where('user_office_id', $officeId);
-        }
-
-        if ($table === 'temp_stockout_item' && $officeId !== null) {
-            $subIds = $this->db->table('temp_stockout')
-                ->select('temp_stockout_id')
-                ->where('user_office_id', $officeId)
-                ->get()
-                ->getResultArray();
-            $ids = array_column($subIds, 'temp_stockout_id');
-            if (empty($ids)) {
-                $lines[] = '-- (no rows)';
-                $lines[] = '';
-                return implode("\n", $lines);
-            }
-            $builder = $this->db->table($table)
-                ->whereIn('temp_stockout_id', $ids)
-                ->orderBy($pk, 'ASC');
-        }
-
-        $rows = $builder->get()->getResultArray();
-
-        if (empty($rows)) {
-            $lines[] = '-- (no rows)';
-            $lines[] = '';
-            return implode("\n", $lines);
-        }
-
-        $columns = '`' . implode('`, `', array_keys($rows[0])) . '`';
-
-        foreach ($rows as $row) {
-            $values = array_map(function ($v) {
-                if ($v === null) return 'NULL';
-                return "'" . $this->db->escapeString((string) $v) . "'";
-            }, array_values($row));
-
-            $lines[] = "INSERT INTO `{$table}` ({$columns}) VALUES (" . implode(', ', $values) . ') ON DUPLICATE KEY UPDATE ' . $this->buildUpdateClause(array_keys($rows[0])) . ';';
-        }
-
-        $lines[] = '';
-        return implode("\n", $lines);
-    }
-
-    private function buildUpdateClause(array $columns): string
-    {
-        $parts = [];
-        foreach ($columns as $col) {
-            $parts[] = "`{$col}` = VALUES(`{$col}`)";
-        }
-        return implode(', ', $parts);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -390,12 +324,94 @@ class BackupModel
         return $this->executeSql($sql);
     }
 
+    /** Tables the older .sql backups wrote; nothing else may be touched by a restore. */
+    private const LEGACY_TABLES = [
+        'adjustment_reason', 'batch_table', 'entity_table', 'level_of_access', 'office_table', 'product_table',
+        'reference_table', 'temp_stockout_item', 'temp_stockout', 'transaction_table', 'transaction_type_table',
+        'type_of_product', 'unit_table', 'user_activity_table', 'user_office_table', 'user_table',
+    ];
+
+    /**
+     * Statements of an older .sql backup, split on the semicolons outside quoted values, or a
+     * string saying why the file is refused. Only the shapes the old backup writer produced are
+     * accepted (its SET lines, DELETE FROM / INSERT INTO a known table with literal values), so
+     * an edited file can't run other SQL (DROP, GRANT, SELECT … INTO OUTFILE, LOAD_FILE …).
+     *
+     * @return list<string>|string
+     */
+    private function legacyStatements(string $sql): array|string
+    {
+        $statements = [];
+        $current    = '';
+        $quote      = null;
+        $length     = strlen($sql);
+
+        for ($i = 0; $i < $length; $i++) {
+            $ch = $sql[$i];
+            if ($quote !== null) {
+                $current .= $ch;
+                if ($ch === '\\' && $i + 1 < $length) {
+                    $current .= $sql[++$i];
+                } elseif ($ch === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($ch === "'" || $ch === '"' || $ch === '`') {
+                $quote = $ch;
+            } elseif ($ch === '-' && ($sql[$i + 1] ?? '') === '-' && trim($current) === '') {
+                $end = strpos($sql, "\n", $i);
+                $i   = $end === false ? $length : $end;
+                continue;
+            } elseif ($ch === ';') {
+                $statements[] = trim($current);
+                $current      = '';
+                continue;
+            }
+            $current .= $ch;
+        }
+        if ($quote !== null) {
+            return 'The backup file is damaged (an unfinished quoted value).';
+        }
+        $statements[] = trim($current);
+        $statements   = array_values(array_filter($statements, static fn ($s) => $s !== ''));
+
+        $tables = implode('|', self::LEGACY_TABLES);
+        $value  = "(?:NULL|-?\\d+(?:\\.\\d+)?|'(?:[^'\\\\]|\\\\.|'')*')";
+        $column = '`[A-Za-z0-9_]+`';
+        $patterns = [
+            '/^SET FOREIGN_KEY_CHECKS = [01]$/',
+            '/^SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO"$/',
+            '/^SET time_zone = "\+00:00"$/',
+            "/^DELETE FROM `(?:{$tables})`(?: WHERE `user_office_id` = \\d+)?$/",
+            "/^INSERT INTO `(?:{$tables})` \\({$column}(?:, {$column})*\\) VALUES \\({$value}(?:, {$value})*\\)"
+                . "(?: ON DUPLICATE KEY UPDATE {$column} = VALUES\\({$column}\\)(?:, {$column} = VALUES\\({$column}\\))*)?$/s",
+        ];
+
+        foreach ($statements as $n => $statement) {
+            $allowed = false;
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $statement) === 1) {
+                    $allowed = true;
+                    break;
+                }
+            }
+            if (! $allowed) {
+                log_message('warning', 'Legacy restore refused statement #' . ($n + 1) . ': ' . mb_substr($statement, 0, 200));
+
+                return 'The backup file contains a statement that is not part of a BSU Inventory backup (statement ' . ($n + 1) . '), so nothing was restored.';
+            }
+        }
+
+        return $statements;
+    }
+
     private function executeSql(string $sql): array
     {
-        $statements = array_filter(
-            array_map('trim', explode(';', $sql)),
-            fn($s) => $s !== '' && ! str_starts_with($s, '--')
-        );
+        $statements = $this->legacyStatements($sql);
+        if (is_string($statements)) {
+            return ['ok' => false, 'message' => $statements];
+        }
 
         $this->db->query('SET FOREIGN_KEY_CHECKS = 0');
         try {
@@ -405,7 +421,9 @@ class BackupModel
             }
         } catch (\Throwable $e) {
             $this->db->query('SET FOREIGN_KEY_CHECKS = 1');
-            return ['ok' => false, 'message' => 'Restore failed: ' . $e->getMessage()];
+            log_message('error', 'Legacy .sql restore failed: ' . $e->getMessage());
+
+            return ['ok' => false, 'message' => 'Restore failed part-way; the safety backup made first holds the data as it was. The details were written to the server log.'];
         }
         $this->db->query('SET FOREIGN_KEY_CHECKS = 1');
         return ['ok' => true, 'message' => 'Restore completed successfully.'];

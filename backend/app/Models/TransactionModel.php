@@ -10,6 +10,10 @@ use CodeIgniter\Model;
  */
 class TransactionModel extends Model
 {
+    /** Movements that add to a batch; everything else takes away from it. */
+    public const STOCK_IN_TYPES  = ['receipt', 'return', 'adjust_in'];
+    public const STOCK_OUT_TYPES = ['issue', 'adjust_out', 'borrow'];
+
     protected $table                 = 'transaction_table';
     protected $primaryKey            = 'transaction_id';
     protected $returnType            = 'array';
@@ -116,7 +120,7 @@ class TransactionModel extends Model
                     t.transaction_id,
                     t.batch_id,
                     t.transaction_date                                          AS date,
-                    CASE WHEN tt.transaction_type IN ('receipt', 'return')
+                    CASE WHEN tt.transaction_type IN ('receipt', 'return', 'adjust_in')
                          THEN t.transaction_qty ELSE 0 END                     AS receipt_qty,
                     CASE WHEN tt.transaction_type IN ('issue','adjust_out','borrow')
                          THEN t.transaction_qty ELSE 0 END                     AS issue_qty,
@@ -136,7 +140,7 @@ class TransactionModel extends Model
                     COALESCE(et.fund_cluster, '-') AS fund_cluster,
                     tt.transaction_type,
                     b.product_id,
-                    SUM(CASE WHEN tt.transaction_type IN ('receipt', 'return') THEN t.transaction_qty
+                    SUM(CASE WHEN tt.transaction_type IN ('receipt', 'return', 'adjust_in') THEN t.transaction_qty
                              ELSE -t.transaction_qty END)
                         OVER (PARTITION BY b.product_id ORDER BY t.transaction_date ASC, t.transaction_id ASC) AS balance
                 FROM transaction_table t
@@ -149,7 +153,7 @@ class TransactionModel extends Model
                 LEFT JOIN reference_table r ON t.reference_id = r.reference_id
                 LEFT JOIN entity_table et ON p.entity_id = et.entity_id
                 WHERE b.product_id = ? {$officeFilter}
-                  AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return')
+                  AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
             ) AS base
             WHERE 1=1 {$searchFilter} {$dateFilter}
             GROUP BY date, transaction_type_id, transaction_type, office, reference,
@@ -192,7 +196,7 @@ class TransactionModel extends Model
             LEFT JOIN office_table ot ON t.office_id = ot.office_id
             LEFT JOIN reference_table r ON t.reference_id = r.reference_id
             WHERE b.product_id = ? {$countOfficeFilter}
-              AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return')
+              AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
               {$countSearchFilter}
               {$countDateFilter}
             GROUP BY t.transaction_date, t.transaction_type_id, t.office_id, t.reference_id,

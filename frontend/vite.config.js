@@ -17,6 +17,15 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_DEV_API_TARGET || 'http://localhost:8080',
           changeOrigin: true,
           secure: false,
+          // The backend sees every proxied request as coming from this PC. Pass the real
+          // client address (overwriting anything the browser sent) so per-device login locks
+          // and rate limits don't lock out everyone at once; the backend trusts this header
+          // only from 127.0.0.1 (Config\App::$proxyIPs).
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              proxyReq.setHeader('X-Real-IP', (req.socket.remoteAddress || '').replace(/^::ffff:/, ''))
+            })
+          },
         },
         // Finished-product barcode SVGs are written to backend/public/barcodes
         '/barcodes': {

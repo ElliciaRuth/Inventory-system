@@ -37,3 +37,51 @@ svg.lucide {
   vertical-align: -0.15em;
   flex-shrink: 0;
 }
+
+/* ── Dashboard summary cards: even grid (5 across; 3 + 2 on tablets; 1 per row on phones) ── */
+.dashboard-summary-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dashboard-summary-grid .summary-card {
+  height: 100%;
+  min-width: 0;
+  padding: 20px 22px;
+}
+
+/* Same header height on every card so the numbers line up */
+.dashboard-summary-grid .summary-card-header {
+  min-height: 24px;
+  gap: 8px;
+}
+
+.dashboard-summary-grid .card-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cards with nothing to show stay crisp; only the hint is muted */
+.dashboard-summary-grid .summary-card-action:disabled {
+  opacity: 1;
+}
+
+.dashboard-summary-grid .summary-card-action:disabled .card-hint {
+  color: var(--text-subtle);
+}
+
+@media (max-width: 1100px) {
+  .dashboard-summary-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .dashboard-summary-grid > :nth-child(-n + 3) { grid-column: span 2; }
+  .dashboard-summary-grid > :nth-child(n + 4) { grid-column: span 3; }
+}
+
+@media (max-width: 640px) {
+  .dashboard-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-summary-grid > * { grid-column: auto !important; }
+}

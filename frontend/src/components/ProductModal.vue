@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { X, AlertTriangle, Zap, Package, PlusCircle } from 'lucide-vue-next'
 import { productsApi } from '../api/products'
 import { triggerAutoReload } from '../composables/useAutoReload'
@@ -28,6 +28,48 @@ const form = reactive({
   type_name: '',
   unit_name: '',
   entity_name: '',
+})
+
+// Standard categories always offered first; the office's own types follow
+const STANDARD_CATEGORIES = [
+  'Perishable Raw Materials',
+  'Non-Perishable Raw Materials',
+  'Packaging',
+  'Operational Supplies',
+]
+const OTHER_TYPE = '__other__'
+
+const categoryOptions = computed(() => {
+  const seen = new Set()
+  const list = []
+  const add = (name) => {
+    const clean = String(name || '').trim()
+    if (!clean || seen.has(clean.toLowerCase())) return
+    seen.add(clean.toLowerCase())
+    list.push(clean)
+  }
+  STANDARD_CATEGORIES.forEach(add)
+  meta.value.types
+    .map((t) => t.type)
+    .sort((a, b) => String(a).localeCompare(String(b)))
+    .forEach(add)
+  add(form.type_name) // an edited product's own type stays selectable
+  return list
+})
+
+// "Other…" switches the field to free text for a brand-new category
+const customType = ref(false)
+const categorySelect = computed({
+  get: () => (customType.value ? OTHER_TYPE : form.type_name),
+  set: (value) => {
+    if (value === OTHER_TYPE) {
+      customType.value = true
+      form.type_name = ''
+    } else {
+      customType.value = false
+      form.type_name = value
+    }
+  },
 })
 
 async function fetchMeta() {
@@ -71,6 +113,7 @@ watch(
       form.unit_name = meta.value.units[0]?.unit || 'pcs'
       form.entity_name = meta.value.entities[0]?.entity || 'BSU Food Processing Center'
     }
+    customType.value = false
     errorMessage.value = ''
     askProductAction.value = false
   },
@@ -211,15 +254,19 @@ async function save(productAction) {
           <div class="form-grid-row grid-cols-3">
             <div class="form-group">
               <label class="form-label">Category / Type</label>
-              <input
-                v-model="form.type_name"
-                list="typeOptions"
-                class="form-input"
-                placeholder="Select or enter"
-              />
-              <datalist id="typeOptions">
-                <option v-for="t in meta.types" :key="t.type_id" :value="t.type" />
-              </datalist>
+              <div v-if="customType" class="category-custom">
+                <input
+                  v-model="form.type_name"
+                  class="form-input"
+                  placeholder="New category name"
+                  autofocus
+                />
+                <button type="button" class="category-back" @click="categorySelect = categoryOptions[0]">Choose from list</button>
+              </div>
+              <select v-else v-model="categorySelect" class="form-select">
+                <option v-for="t in categoryOptions" :key="t" :value="t">{{ t }}</option>
+                <option :value="OTHER_TYPE">Other (new category)…</option>
+              </select>
             </div>
 
             <div class="form-group">
@@ -309,6 +356,28 @@ async function save(productAction) {
 </template>
 
 <style scoped>
+.category-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.category-back {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.category-back:hover {
+  text-decoration: underline;
+}
+
 .product-modal-card {
   width: min(720px, calc(100vw - 32px)) !important;
   max-width: 720px !important;

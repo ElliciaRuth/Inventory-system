@@ -27,21 +27,4 @@ export const adminApi = {
     const response = await client.post(`/settings/${type}`, data)
     return response.data
   },
-
-  // Gmail account used to send password-reset codes
-  async getEmailSettings() {
-    const response = await client.get('/settings/email')
-    return response.data
-  },
-
-  // smtpPassword may be blank to keep the saved one
-  async saveEmailSettings(smtpEmail, smtpPassword) {
-    const response = await client.post('/settings/email', { smtp_email: smtpEmail, smtp_password: smtpPassword })
-    return response.data
-  },
-
-  async sendTestEmail(to = '') {
-    const response = await client.post('/settings/email/test', { to })
-    return response.data
-  },
 }

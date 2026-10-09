@@ -133,7 +133,7 @@ class App extends BaseConfig
      * @see https://www.php.net/manual/en/timezones.php for list of timezones
      *      supported by PHP.
      */
-    public string $appTimezone = 'UTC';
+    public string $appTimezone = 'Asia/Manila';
 
     /**
      * --------------------------------------------------------------------------
@@ -180,7 +180,12 @@ class App extends BaseConfig
      *
      * @var array<string, string>
      */
-    public array $proxyIPs = [];
+    public array $proxyIPs = [
+        // The Vite dev server (XAMPP setup) proxies /api from this PC and sets X-Real-IP to the
+        // real client address. Only requests from this PC itself may set it.
+        '127.0.0.1' => 'X-Real-IP',
+        '::1'       => 'X-Real-IP',
+    ];
 
     /**
      * --------------------------------------------------------------------------
