@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 import { AlertTriangle } from 'lucide-vue-next'
+import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 
 // Forced first-login step, driven by authStore.pendingSetup: change_password
 const router = useRouter()
@@ -64,9 +65,10 @@ async function handleLogout() {
 
 <template>
   <div class="login-page-screen">
-    <div class="login-shell">
-      <section class="login-card" style="margin: 0 auto;">
+    <div class="setup-shell">
+      <section class="login-card">
         <div class="login-card-content">
+          <AuthLogoHeader />
           <h2 class="login-card-title">{{ copy[step]?.title || 'Account Setup' }}</h2>
           <p class="login-card-subtitle">{{ copy[step]?.subtitle }}</p>
 
@@ -122,3 +124,11 @@ async function handleLogout() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* One centered card (the login page's .login-shell is a two-column grid) */
+.setup-shell {
+  width: min(520px, 100%);
+  margin: 0 auto;
+}
+</style>

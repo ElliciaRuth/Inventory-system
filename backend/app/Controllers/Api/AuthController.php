@@ -5,16 +5,23 @@ namespace App\Controllers\Api;
 use App\Filters\AuthFilter;
 use App\Libraries\AuditLog;
 use App\Libraries\Mailer;
+use App\Libraries\Privacy;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\PasswordReset;
 
 class AuthController extends BaseApiController
 {
-    /** Failed logins allowed per username (and per IP) before a temporary lock. */
-    private const MAX_LOGIN_FAILURES    = 5;
-    private const MAX_IP_LOGIN_FAILURES = 20;
-    private const LOGIN_LOCK_SECONDS    = 900;
+    /**
+     * Failed logins allowed before a temporary lock: per username from one device (IP), per
+     * device for all usernames, and per username from all devices together. The last is set
+     * high so that someone who knows a username can't lock its owner out from one device;
+     * it only stops guessing spread over many devices.
+     */
+    private const MAX_LOGIN_FAILURES         = 5;
+    private const MAX_IP_LOGIN_FAILURES      = 20;
+    private const MAX_ACCOUNT_LOGIN_FAILURES = 50;
+    private const LOGIN_LOCK_SECONDS         = 900;
 
     /** bcrypt hash of a random string, checked against when the username doesn't exist. */
     private const DUMMY_HASH = '$2y$10$OTpRNC5L1qHghgpmJxF5aeoLl9CsmPJpapckTIr0gRIEdl9enhXA6';
@@ -49,8 +56,11 @@ class AuthController extends BaseApiController
             'user_office_id' => (int) ($user['user_office_id'] ?? 0),
         ];
 
+        // Failures count per account, whether it was typed as the username or the email
+        $lockName = $user ? 'user#' . (int) $user['user_id'] : $username;
+
         // Locked after too many wrong passwords: refuse before even checking this one
-        if ($wait = $this->loginLockedFor($username)) {
+        if ($wait = $this->loginLockedFor($lockName)) {
             AuditLog::record('auth.login_locked', 'user', $user ? (int) $user['user_id'] : null, "Login attempt for \"{$username}\" while locked", [
                 'minutes_left' => $wait,
             ], $actor);
@@ -68,7 +78,7 @@ class AuthController extends BaseApiController
         }
 
         if (! $user || ! $this->passwordMatches($password, $user['password'])) {
-            $left = $this->recordLoginFailure($username);
+            $left = $this->recordLoginFailure($lockName);
             AuditLog::record('auth.login_failed', 'user', $user ? (int) $user['user_id'] : null, "Failed login for \"{$username}\"", [
                 'reason'        => $user ? 'wrong password' : 'unknown username',
                 'attempts_left' => $left,
@@ -77,7 +87,7 @@ class AuthController extends BaseApiController
             if ($left === 0) {
                 $minutes = intdiv(self::LOGIN_LOCK_SECONDS, 60);
                 AuditLog::record('auth.login_locked', 'user', $user ? (int) $user['user_id'] : null,
-                    "Login for \"{$username}\" locked for {$minutes} minutes after " . self::MAX_LOGIN_FAILURES . ' failed attempts', [], $actor);
+                    "Login for \"{$username}\" locked for {$minutes} minutes after too many failed attempts", [], $actor);
 
                 return $this->respondError(
                     "Too many failed login attempts. Login is locked for {$minutes} minutes.",
@@ -93,7 +103,7 @@ class AuthController extends BaseApiController
             );
         }
 
-        $this->clearLoginFailures($username);
+        $this->clearLoginFailures($lockName);
 
         $activityId = (int) ($user['user_activity_id'] ?? 3);
         if ($activityId === 3 || $activityId === 2) {
@@ -109,10 +119,10 @@ class AuthController extends BaseApiController
         }
 
         // Rehash legacy plain-text password if needed
-        if (! password_get_info($user['password'])['algo']) {
-            $userModel->update($user['user_id'], [
-                'password' => password_hash($password, PASSWORD_DEFAULT),
-            ]);
+        $passwordHash = (string) $user['password'];
+        if (! password_get_info($passwordHash)['algo']) {
+            $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+            $userModel->update($user['user_id'], ['password' => $passwordHash]);
         }
 
         $levelId  = (int) ($user['level_id'] ?? 0);
@@ -135,6 +145,7 @@ class AuthController extends BaseApiController
 
         session()->regenerate();
         session()->set('user', $sessionData);
+        AuthFilter::rememberPassword($passwordHash);
         session()->set('login_time', time());
         session()->set('last_activity', time());
 
@@ -149,7 +160,7 @@ class AuthController extends BaseApiController
         }
 
         return $this->respondSuccess([
-            'user'          => $sessionData,
+            'user'          => $this->publicUser($sessionData),
             'pending_setup' => $this->pendingSetup(),
         ], 'Login successful');
     }
@@ -183,8 +194,8 @@ class AuthController extends BaseApiController
         $userModel = new UserModel();
         $dbUser    = $userModel->find($userId);
 
-        // Deleted or deactivated since login: the session ends here too (as in AuthFilter)
-        if (! $dbUser || (int) ($dbUser['user_activity_id'] ?? 0) !== 1) {
+        // Deleted, deactivated or password changed since login: the session ends here too (as in AuthFilter)
+        if (! $dbUser || (int) ($dbUser['user_activity_id'] ?? 0) !== 1 || AuthFilter::passwordChanged((string) ($dbUser['password'] ?? ''))) {
             session()->destroy();
 
             return $this->respondSuccess([
@@ -216,7 +227,7 @@ class AuthController extends BaseApiController
 
         return $this->respondSuccess([
             'authenticated' => true,
-            'user'          => $sessionUser,
+            'user'          => $this->publicUser($sessionUser),
             'pending_setup' => $this->pendingSetup(),
         ], 'User profile retrieved');
     }
@@ -272,7 +283,8 @@ class AuthController extends BaseApiController
             'middle_name'      => 'permit_empty|max_length[100]',
             'suffix'           => 'permit_empty|max_length[20]',
             'username'         => 'required|min_length[3]|max_length[50]|is_unique[user_table.username]',
-            'email'            => 'required|valid_email|max_length[255]|is_unique[user_table.email]',
+            // Uniqueness of the email is checked below without telling the visitor
+            'email'            => 'required|valid_email|max_length[255]',
             'password'         => 'required|min_length[8]|max_length[255]',
             'confirm_password' => 'required|matches[password]',
             'lvl_of_access_id' => 'required|integer|greater_than[0]',
@@ -320,6 +332,19 @@ class AuthController extends BaseApiController
         }
 
         $model = new UserModel();
+        $email = trim((string) ($input['email'] ?? ''));
+
+        // An email already in use gets the same reply as a new account, so the sign-up form
+        // can't be used to find out which addresses have accounts. Nothing is created; the
+        // owner can sign in or reset the password with that address as usual.
+        if ($existing = $model->findByEmail($email)) {
+            AuditLog::record('auth.register_duplicate_email', 'user', (int) $existing['user_id'], 'Sign-up attempted with an email that already has an account', [
+                'username_tried' => trim((string) ($input['username'] ?? '')),
+            ], ['id' => 0, 'username' => trim((string) ($input['username'] ?? '')), 'user_office_id' => (int) ($existing['user_office_id'] ?? 0)]);
+
+            return $this->respondSuccess(null, self::REGISTERED_MESSAGE);
+        }
+
         $inserted = $model->insert([
             'name'              => $fullName,
             'first_name'        => $firstName,
@@ -327,7 +352,7 @@ class AuthController extends BaseApiController
             'middle_name'       => $middleName !== '' ? $middleName : null,
             'suffix'            => $suffix !== '' ? $suffix : null,
             'username'          => trim((string) ($input['username'] ?? '')),
-            'email'             => trim((string) ($input['email'] ?? '')),
+            'email'             => $email,
             'password'          => password_hash($password, PASSWORD_DEFAULT),
             'user_office_id'    => (int) ($input['user_office_id'] ?? 0),
             'lvl_of_access_id'  => (int) ($input['lvl_of_access_id'] ?? 0),
@@ -338,8 +363,11 @@ class AuthController extends BaseApiController
             return $this->respondError('Failed to create account. Please try again.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        return $this->respondSuccess(null, 'Account created successfully. Please wait for an administrator to activate your account.');
+        return $this->respondSuccess(null, self::REGISTERED_MESSAGE);
     }
+
+    private const REGISTERED_MESSAGE = 'Account created successfully. Please wait for an administrator to activate your account. '
+        . 'If you already have an account with this email address, sign in or reset your password instead.';
 
     // ════════════════════════════════════════════════════════════════
     //  CHANGE PASSWORD (first-login forced + general)
@@ -379,10 +407,13 @@ class AuthController extends BaseApiController
             return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $hash = password_hash($password, PASSWORD_DEFAULT);
         $userModel->update($userId, [
-            'password'             => password_hash($password, PASSWORD_DEFAULT),
+            'password'             => $hash,
             'must_change_password' => 0,
         ]);
+        // This session stays logged in; every other session of the account ends
+        AuthFilter::rememberPassword($hash);
 
         $isFirstLogin = (bool) session('must_change_password');
         session()->remove('must_change_password');
@@ -395,7 +426,8 @@ class AuthController extends BaseApiController
     }
 
     /**
-     * Update user profile information (name, username, email, and optional password).
+     * Update user profile information (name, username, and optional password).
+     * The email is changed only through requestEmailChange / confirmEmailChange.
      * POST /api/auth/update-profile
      */
     public function updateProfile(): ResponseInterface
@@ -411,7 +443,6 @@ class AuthController extends BaseApiController
         $input    = $this->input();
         $name     = $this->cleanName((string) ($input['name'] ?? ''));
         $username = trim((string) ($input['username'] ?? ''));
-        $email    = trim((string) ($input['email'] ?? ''));
 
         if ($error = $this->nameError($name, 'Full name', allowComma: true)) {
             return $this->respondError($error, ['name' => $error], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -420,7 +451,6 @@ class AuthController extends BaseApiController
         $rules = [
             'name'     => 'permit_empty|max_length[255]',
             'username' => 'required|min_length[3]|max_length[100]',
-            'email'    => 'permit_empty|valid_email|max_length[255]',
         ];
 
         if (! $this->validateData($input, $rules)) {
@@ -438,32 +468,9 @@ class AuthController extends BaseApiController
             }
         }
 
-        // Check email uniqueness if changed and provided
-        if ($email !== '' && $email !== ($user['email'] ?? '')) {
-            $exists = $userModel->where('email', $email)->where('user_id !=', $userId)->first();
-            if ($exists) {
-                return $this->respondError('The email is already registered to another account.', [
-                    'email' => 'Email is already registered.'
-                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-            }
-        }
-
-        // Password-reset codes go to this address, so changing it needs the current password:
-        // otherwise anyone at an unlocked screen could redirect the reset and take the account over
-        if (mb_strtolower($email) !== mb_strtolower((string) ($user['email'] ?? ''))) {
-            $currentPassword = (string) ($input['current_password'] ?? '');
-            if ($currentPassword === '' || ! $this->passwordMatches($currentPassword, (string) ($user['password'] ?? ''))) {
-                return $this->respondError('Enter your current password to change your email address.', [
-                    'current_password' => 'Current password required to change the email.',
-                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-            }
-        }
-
         $updateData = [
             'name'     => $name !== '' ? $name : $username,
             'username' => $username,
-            // NULL, not '', so the unique index allows several accounts without an email
-            'email'    => $email !== '' ? $email : null,
         ];
 
         // Optional password change within profile
@@ -497,6 +504,10 @@ class AuthController extends BaseApiController
         }
 
         $userModel->update($userId, $updateData);
+        if (isset($updateData['password'])) {
+            // This session stays logged in; every other session of the account ends
+            AuthFilter::rememberPassword($updateData['password']);
+        }
 
         // Fetch refreshed office & role
         $officeRow  = db_connect()->table('user_office_table')->where('user_office_id', (int) ($user['user_office_id'] ?? 0))->get(1)->getRowArray();
@@ -509,7 +520,7 @@ class AuthController extends BaseApiController
             'id'             => $userId,
             'username'       => $username,
             'name'           => $updateData['name'],
-            'email'          => $email,
+            'email'          => (string) ($user['email'] ?? ''),
             'role'           => $role,
             'level_id'       => $levelId,
             'user_office_id' => (int) ($user['user_office_id'] ?? 0),
@@ -519,8 +530,238 @@ class AuthController extends BaseApiController
 
         $msg = $newPassword !== '' ? 'Profile and password updated successfully.' : 'Profile information updated successfully.';
         return $this->respondSuccess([
-            'user' => $sessionData,
+            'user' => $this->publicUser($sessionData),
         ], $msg);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  CHANGE EMAIL (verified with a 6-digit code, like Forgot Password)
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Step 1: the current password, the new address and that address's app password. The code
+     * is sent from the new account to itself (as in forgotPassword), so only its owner can
+     * receive it; the app password is used for this one send and dropped. The pending change
+     * is kept in this session only.
+     * POST /api/auth/email-change/request   { email, app_key, current_password }
+     */
+    public function requestEmailChange(): ResponseInterface
+    {
+        $input  = $this->input();
+        $appKey = str_replace(' ', '', (string) ($input['app_key'] ?? ''));
+        unset($input['app_key']);
+
+        if (! $this->validateData($input, ['email' => 'required|valid_email|max_length[255]'])) {
+            return $this->respondError('Please enter a valid email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        $email  = trim((string) $input['email']);
+        $userId = $this->currentUserId();
+        $model  = new UserModel();
+        $user   = $model->find($userId);
+        $limits = config(PasswordReset::class);
+
+        if (! $user) {
+            return $this->respondError('User account not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+        if (mb_strtolower($email) === mb_strtolower((string) ($user['email'] ?? ''))) {
+            return $this->respondError('That is already your email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Reset codes go to this address, so changing it needs the current password: otherwise
+        // anyone at an unlocked screen could redirect the reset and take the account over
+        $pwFailKey = 'email_change_pw_fail_' . $userId;
+        if ((int) cache($pwFailKey) >= $limits->maxSignInFailures) {
+            return $this->respondError('Too many wrong passwords. Try again in 15 minutes.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+        }
+        $current = (string) ($input['current_password'] ?? '');
+        if ($current === '' || ! $this->passwordMatches($current, (string) ($user['password'] ?? ''))) {
+            cache()->save($pwFailKey, (int) cache($pwFailKey) + 1, 900);
+
+            return $this->respondError('Your current password is incorrect.', ['current_password' => 'Incorrect.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        cache()->delete($pwFailKey);
+
+        if ($appKey === '') {
+            return $this->respondError(
+                'Enter the app password of the new email account: the code is sent from that account.',
+                ['app_key' => 'Required.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+        if (! preg_match('/^[\x21-\x7E]{8,64}$/', $appKey)) {
+            return $this->respondError(
+                'That app password doesn\'t look right. A Gmail app password is 16 letters (the spaces don\'t matter).',
+                ['app_key' => 'Invalid format.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $failKey = 'email_change_signin_fail_' . $userId;
+        if ((int) cache($failKey) >= $limits->maxSignInFailures) {
+            return $this->respondError('Too many rejected app passwords. Try again in 15 minutes.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+        }
+        $sentKey = 'email_change_sent_' . $userId;
+        $sent    = array_values(array_filter((array) (cache($sentKey) ?? []), static fn ($t) => (int) $t > time() - 3600));
+        if ($sent !== [] && max($sent) > time() - $limits->sendCooldownSeconds) {
+            return $this->respondError('A code was just sent. Please wait a minute before asking for another one.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+        }
+        if (count($sent) >= $limits->sendsPerHour) {
+            return $this->respondError('Too many codes were requested. Please try again in an hour.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+        }
+
+        // Only the owner of the new mailbox can make it send, so telling that owner (by mail)
+        // that the address already has an account reveals nothing to anyone else
+        $taken = $model->where('email', $email)->where('user_id !=', $userId)->first();
+        $code  = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        $failure = (new Mailer())->sendFromOwnAccount(
+            $email,
+            $appKey,
+            $email,
+            $taken ? 'Email change request - BSU Inventory' : 'Email Verification Code - BSU Inventory',
+            $taken ? $this->emailTakenHtml() : $this->emailChangeHtml($code, $limits->codeMinutes)
+        );
+        $appKey = '';
+
+        if ($failure === Mailer::FAILED_SIGN_IN) {
+            cache()->save($failKey, (int) cache($failKey) + 1, 900);
+
+            return $this->respondError(
+                'Your email provider did not accept this email address and app password. Check both, make sure the app password is for this address, and try again.',
+                ['app_key' => 'Rejected by the email provider.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+        if ($failure === Mailer::FAILED_NETWORK) {
+            return $this->respondError(
+                'The server could not reach your email provider; it may have no internet connection right now. Try again later.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+        if ($failure !== null) {
+            return $this->respondError('The email could not be sent. Please try again later.', [], ResponseInterface::HTTP_BAD_GATEWAY);
+        }
+
+        cache()->delete($failKey);
+        $sent[] = time();
+        cache()->save($sentKey, $sent, 3600);
+
+        if ($taken) {
+            session()->remove('email_change');
+        } else {
+            session()->set('email_change', [
+                'email'    => $email,
+                'code'     => $this->emailChangeCodeHash($code, $userId, $email),
+                'expires'  => time() + $limits->codeMinutes * 60,
+                'attempts' => 0,
+            ]);
+        }
+        AuditLog::record('auth.email_change_requested', 'user', $userId, 'Email change code sent to ' . self::maskEmail($email), [
+            'address_in_use' => (bool) $taken,
+        ]);
+
+        return $this->respondSuccess(null, 'A 6-digit code was sent to ' . self::maskEmail($email) . '. Check its inbox (and the Spam folder).');
+    }
+
+    /**
+     * Step 2: the code from the email. The address changes only when it matches.
+     * POST /api/auth/email-change/confirm   { code }
+     */
+    public function confirmEmailChange(): ResponseInterface
+    {
+        $input = $this->input();
+        if (! $this->validateData($input, ['code' => 'required|exact_length[6]|numeric'])) {
+            return $this->respondError('Please enter the 6-digit code from your email.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $userId  = $this->currentUserId();
+        $pending = session('email_change');
+        if (! is_array($pending) || (int) ($pending['expires'] ?? 0) < time()) {
+            session()->remove('email_change');
+
+            return $this->respondError('The code is incorrect or has expired. Please request a new code.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $email = (string) $pending['email'];
+        if (! hash_equals((string) $pending['code'], $this->emailChangeCodeHash(trim((string) $input['code']), $userId, $email))) {
+            $max                 = config(PasswordReset::class)->maxCodeAttempts;
+            $pending['attempts'] = (int) ($pending['attempts'] ?? 0) + 1;
+            if ($pending['attempts'] >= $max) {
+                session()->remove('email_change');
+
+                return $this->respondError('Too many incorrect attempts. Please request a new code.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            session()->set('email_change', $pending);
+            $left = $max - $pending['attempts'];
+
+            return $this->respondError("The code is incorrect. {$left} " . ($left === 1 ? 'attempt' : 'attempts') . ' left.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        session()->remove('email_change');
+        $model = new UserModel();
+        if ($model->where('email', $email)->where('user_id !=', $userId)->first()) {
+            return $this->respondError('That email address is now used by another account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $old = (string) ($model->find($userId)['email'] ?? '');
+        // A reset code sent to the old address is void from now on
+        $model->update($userId, [
+            'email'                  => $email,
+            'password_reset_token'   => null,
+            'password_reset_expires' => null,
+        ]);
+
+        $sessionUser          = (array) session('user');
+        $sessionUser['email'] = $email;
+        session()->set('user', $sessionUser);
+        AuditLog::record('auth.email_changed', 'user', $userId, 'Email changed from ' . ($old !== '' ? self::maskEmail($old) : '(none)') . ' to ' . self::maskEmail($email));
+
+        return $this->respondSuccess(['user' => $this->publicUser($sessionUser)], 'Your email address has been changed.');
+    }
+
+    /** Code hash bound to this user and this new address. */
+    private function emailChangeCodeHash(string $code, int $userId, string $email): string
+    {
+        return $this->resetCodeHash($code . '|email-change|' . mb_strtolower($email), $userId);
+    }
+
+    private function emailChangeHtml(string $code, int $minutes): string
+    {
+        return '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">' .
+            '<h2 style="color:#0f3d3e;margin-bottom:16px;">Confirm Your New Email Address</h2>' .
+            '<p style="color:#475569;line-height:1.6;">You asked to use this address for your BSU Inventory account. Enter the code below on your profile page:</p>' .
+            '<div style="text-align:center;margin:28px 0;">' .
+            '<div style="display:inline-block;padding:18px 40px;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;border-radius:14px;font-size:32px;font-weight:700;letter-spacing:8px;">' . esc($code) . '</div>' .
+            '</div>' .
+            '<p style="color:#94a3b8;font-size:13px;">This code will expire in ' . $minutes . ' minutes. If you did not request this, you can ignore this email, and consider changing your email account\'s app password.</p>' .
+            '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' .
+            '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p>' .
+            '</div>';
+    }
+
+    private function emailTakenHtml(): string
+    {
+        return '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">' .
+            '<h2 style="color:#0f3d3e;margin-bottom:16px;">Email change request</h2>' .
+            '<p style="color:#475569;line-height:1.6;">Someone asked to move a BSU Inventory account to this email address, but another account already uses it, so nothing was changed. ' .
+            'An address can belong to one account only: use a different address, or ask your office manager.</p>' .
+            '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">' .
+            '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p>' .
+            '</div>';
+    }
+
+    /** The user as sent to the browser: the email is masked, so it can't be read off the screen or the network. */
+    private function publicUser(array $user): array
+    {
+        $user['email'] = self::maskEmail((string) ($user['email'] ?? ''));
+
+        return $user;
+    }
+
+    private static function maskEmail(string $email): string
+    {
+        return Privacy::maskEmail($email);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -792,52 +1033,69 @@ class AuthController extends BaseApiController
     }
 
     // ── Failed-login lock ────────────────────────────────────────────────
-    // Counted per username and per IP address in the cache; 5 misses on a username
-    // (or 20 from one IP) lock logins for 15 minutes.
+    // Counted in the cache. 5 misses on a username from one IP lock that username on that IP,
+    // 20 misses from one IP lock the IP, and 50 misses on a username from all IPs together lock
+    // the username everywhere; each lock lasts 15 minutes. A username alone can't be locked
+    // from a single device, so its owner can still log in from their own.
 
     private function loginKey(string $kind, string $value): string
     {
         return 'login_' . $kind . '_' . md5(mb_strtolower(trim($value)));
     }
 
-    /** Minutes until logins are allowed again for this username / this IP, or 0. */
+    /** Cache key part for one username on one IP. */
+    private function userOnIp(string $username): string
+    {
+        return mb_strtolower(trim($username)) . '|' . $this->request->getIPAddress();
+    }
+
+    /** Minutes until logins are allowed again for this username from this IP, or 0. */
     private function loginLockedFor(string $username): int
     {
         $ip    = (string) $this->request->getIPAddress();
-        $until = max((int) cache($this->loginKey('lock_user', $username)), (int) cache($this->loginKey('lock_ip', $ip)));
+        $until = max(
+            (int) cache($this->loginKey('lock_pair', $this->userOnIp($username))),
+            (int) cache($this->loginKey('lock_ip', $ip)),
+            (int) cache($this->loginKey('lock_user', $username))
+        );
 
         return $until > time() ? (int) ceil(($until - time()) / 60) : 0;
     }
 
-    /** Counts a failed login; returns how many tries remain for the username (0 = now locked). */
+    /** Counts a failed login; returns how many tries remain for the username on this IP (0 = now locked). */
     private function recordLoginFailure(string $username): int
     {
         $ip    = (string) $this->request->getIPAddress();
         $until = time() + self::LOGIN_LOCK_SECONDS;
+        $count = function (string $kind, string $value, int $max) use ($until): bool {
+            $fails = (int) cache($this->loginKey('fail_' . $kind, $value)) + 1;
+            if ($fails < $max) {
+                cache()->save($this->loginKey('fail_' . $kind, $value), $fails, self::LOGIN_LOCK_SECONDS);
 
-        $userFails = (int) cache($this->loginKey('fail_user', $username)) + 1;
-        cache()->save($this->loginKey('fail_user', $username), $userFails, self::LOGIN_LOCK_SECONDS);
+                return false;
+            }
+            cache()->save($this->loginKey('lock_' . $kind, $value), $until, self::LOGIN_LOCK_SECONDS);
+            cache()->delete($this->loginKey('fail_' . $kind, $value));
 
-        $ipFails = (int) cache($this->loginKey('fail_ip', $ip)) + 1;
-        cache()->save($this->loginKey('fail_ip', $ip), $ipFails, self::LOGIN_LOCK_SECONDS);
+            return true;
+        };
 
-        if ($ipFails >= self::MAX_IP_LOGIN_FAILURES) {
-            cache()->save($this->loginKey('lock_ip', $ip), $until, self::LOGIN_LOCK_SECONDS);
-            cache()->delete($this->loginKey('fail_ip', $ip));
-        }
-        if ($userFails >= self::MAX_LOGIN_FAILURES) {
-            cache()->save($this->loginKey('lock_user', $username), $until, self::LOGIN_LOCK_SECONDS);
-            cache()->delete($this->loginKey('fail_user', $username));
-
+        $ipLocked      = $count('ip', $ip, self::MAX_IP_LOGIN_FAILURES);
+        $accountLocked = $count('user', $username, self::MAX_ACCOUNT_LOGIN_FAILURES);
+        if ($count('pair', $this->userOnIp($username), self::MAX_LOGIN_FAILURES) || $ipLocked || $accountLocked) {
             return 0;
         }
 
-        return self::MAX_LOGIN_FAILURES - $userFails;
+        return self::MAX_LOGIN_FAILURES - (int) cache($this->loginKey('fail_pair', $this->userOnIp($username)));
     }
 
+    /**
+     * After a successful login, only this device's count for the username is cleared: the
+     * all-devices count keeps running so guesses spread over many devices are still caught.
+     */
     private function clearLoginFailures(string $username): void
     {
-        cache()->delete($this->loginKey('fail_user', $username));
+        cache()->delete($this->loginKey('fail_pair', $this->userOnIp($username)));
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\Privacy;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -43,9 +44,14 @@ class AuditController extends BaseApiController
             $builder->where('a.created_at <=', $dateTo . ' 23:59:59');
         }
         if ($search !== '') {
+            // Older entries may hold whole email addresses; the search skips them, so it can't be
+            // used to work an address out letter by letter
+            $like     = $db->escape('%' . $db->escapeLikeString($search) . '%');
+            $pattern  = $db->escape(Privacy::EMAIL_SQL_PATTERN);
+            $noEmails = static fn (string $column) => "REGEXP_REPLACE({$column}, {$pattern}, '') LIKE {$like} ESCAPE '!'";
             $builder->groupStart()
-                ->like('a.summary', $search)
-                ->orLike('a.username', $search)
+                ->where($noEmails('a.summary'), null, false)
+                ->orWhere($noEmails('a.username'), null, false)
                 ->orLike('a.action', $search)
                 ->orLike('a.ip_address', $search)
                 ->groupEnd();
@@ -57,7 +63,9 @@ class AuditController extends BaseApiController
             ->get()->getResultArray();
 
         foreach ($rows as &$row) {
-            $row['details'] = $row['details'] !== null ? json_decode((string) $row['details'], true) : null;
+            $row['details']  = $row['details'] !== null ? Privacy::maskEmailsDeep(json_decode((string) $row['details'], true)) : null;
+            $row['summary']  = Privacy::maskEmailsIn((string) $row['summary']);
+            $row['username'] = Privacy::maskEmailsIn((string) $row['username']);
         }
         unset($row);
 

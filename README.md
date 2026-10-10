@@ -1,5 +1,14 @@
 # BSU Integrated Inventory Monitoring System
 
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Release](https://img.shields.io/badge/release-October%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
+[![CodeIgniter](https://img.shields.io/badge/CodeIgniter-4.7-EF4423.svg?logo=codeigniter&logoColor=white)](https://codeigniter.com/)
+[![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
+
+> **Current Version:** `v2.2.0` (Production Release — October 2026)
+
 An integrated inventory, stock-card, and stock-out monitoring system engineered for Benguet State University production and operating units (Bakery Project, Food Processing Center, and administrative offices).
 
 The application is built as a decoupled web application with a CodeIgniter 4 REST API backend and a responsive Vue 3 single-page application frontend. It runs seamlessly on desktop workstations, tablets, and mobile smartphones over local office networks without requiring an active internet connection.
@@ -42,6 +51,7 @@ BSU_Inventory_System/
   - [Common Questions & Issues](#common-questions--issues)
 - [Development Workflow](#development-workflow)
 - [Production Server Architecture](#production-server-architecture)
+- [Version History & Changelog](#version-history--changelog)
 - [API Reference](#api-reference)
 
 ---
@@ -448,6 +458,17 @@ In production setups (such as the Docker Nginx container or XAMPP Apache):
 
 ---
 
+## Version History & Changelog
+
+| Version | Release Date | Key Enhancements & Changes |
+|---|---|---|
+| **`v2.2.0`** *(Current)* | October 2026 | **Full Functional Requirements & Security Hardening Release:**<br>• Appendix 58 Excel workbook importer with interactive preview and spell-check auto-correction.<br>• Automated First-Expired, First-Out (FEFO) stock issuance and real-time batch planning.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) with before/after diffs.<br>• Modular `.zip` and AES-256 encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical inventory count reconciler with automatic shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• Removal of stored plaintext SMTP credentials; user self-service ephemeral app-key resets.<br>• `RequestGuard` DoS/zip-bomb protection and IP/user rate-limiting.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning. |
+| **`v2.1.0`** | September 2026 | **Administrative & Operational Hardening:**<br>• Unified Profile management portal (`/profile`) replacing legacy password views.<br>• Protected technical staff administrator accounts against deletion and deactivation.<br>• Uniform Lucide icon set and responsive mobile mega-menu navigation.<br>• Cross-platform deployment and server launcher scripts (`setup.bat`, `setup.ps1`, `setup.sh`).<br>• Decimal quantity precision and custom per-product expiration alert thresholds. |
+| **`v2.0.0`** | July 2026 | **Decoupled Architecture Modernization:**<br>• Decoupled system into `backend/` (CodeIgniter 4 REST JSON API) and `frontend/` (Vue 3 + Vite SPA).<br>• Single-command containerized local Docker stack (`docker-compose.yml`).<br>• Responsive smartphone and tablet views with optimized card layouts.<br>• Office-level multi-tenant data segregation. |
+| **`v1.0.0`** | June 2026 | **Initial Baseline:**<br>• Monolithic CodeIgniter server-rendered inventory and stock-out prototype. |
+
+---
+
 ## API Reference
 
 All backend API endpoints return structured JSON responses:
@@ -478,4 +499,4 @@ Authentication is managed via HTTP cookies (`ci_session`).
 
 ---
 
-*Benguet State University Integrated Inventory Monitoring System · Developed for BSU Operating & Production Units.*
+*Benguet State University Integrated Inventory Monitoring System v2.2.0 · Developed for BSU Operating & Production Units.*

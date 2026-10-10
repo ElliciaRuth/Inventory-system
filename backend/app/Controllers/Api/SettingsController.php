@@ -299,6 +299,12 @@ class SettingsController extends BaseApiController
         $payload['name']             = $this->cleanName((string) ($payload['name'] ?? ''));
         $payload['username']         = trim((string) ($payload['username'] ?? ''));
         $payload['email']            = trim((string) ($payload['email'] ?? ''));
+        $currentEmail                = (string) ((new UserModel())->find($id)['email'] ?? '');
+        // The form only ever holds the masked address. Managers can't change an email at all
+        // (the owner does, confirmed with a code); technical staff may type a new one in full.
+        if ($this->currentLevelId() < 4 || str_contains($payload['email'], '*')) {
+            $payload['email'] = $currentEmail;
+        }
         $payload['lvl_of_access_id'] = (int) ($payload['lvl_of_access_id'] ?? 0);
         $payload['user_office_id']   = (int) ($payload['user_office_id'] ?? $this->currentOfficeId());
 

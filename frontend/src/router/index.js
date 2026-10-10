@@ -23,6 +23,7 @@ import ProfileView from '../views/ProfileView.vue'
 import AuditLogView from '../views/AuditLogView.vue'
 import PhysicalCountView from '../views/PhysicalCountView.vue'
 import BorrowsView from '../views/BorrowsView.vue'
+import HelpView from '../views/HelpView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 import { toast } from '../composables/useToast'
@@ -166,6 +167,13 @@ const routes = [
     name: 'audit-log',
     component: AuditLogView,
     meta: { title: 'Audit Log - BSU Inventory', minLevel: 3 },
+  },
+  {
+    // Every role: the guide shows only the topics for the user's level
+    path: '/help',
+    name: 'help',
+    component: HelpView,
+    meta: { title: 'Help & User Guide - BSU Inventory' },
   },
   {
     path: '/notifications',

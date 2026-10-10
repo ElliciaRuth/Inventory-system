@@ -13,6 +13,7 @@ use CodeIgniter\HTTP\ResponseInterface;
  * - Enforces a 24-hour session timeout (from login_time)
  * - Enforces a 15-minute inactivity timeout (from last_activity)
  * - Rejects sessions whose user was deactivated or deleted
+ * - Ends every other session of an account once its password is changed or reset
  * - Blocks everything except the matching setup endpoint while a forced
  *   first-login password change is pending
  * - Sets security response headers on every authenticated response
@@ -61,7 +62,7 @@ class AuthFilter implements FilterInterface
         $row         = $userId > 0
             ? db_connect()
                 ->table('user_table u')
-                ->select('u.user_activity_id, u.user_office_id, COALESCE(loa.lvl_of_access, 0) AS level_id, COALESCE(loa.role, "") AS role', false)
+                ->select('u.user_activity_id, u.user_office_id, u.password, COALESCE(loa.lvl_of_access, 0) AS level_id, COALESCE(loa.role, "") AS role', false)
                 ->join('level_of_access loa', 'loa.lvl_of_access_id = u.lvl_of_access_id', 'left')
                 ->where('u.user_id', $userId)
                 ->get(1)
@@ -72,6 +73,12 @@ class AuthFilter implements FilterInterface
         if (! $row || (int) $row['user_activity_id'] !== 1) {
             session()->destroy();
             return $this->deny(401, 'Your account has been deactivated. Please contact an administrator.', 'account_inactive');
+        }
+
+        // ── 3a. Password changed or reset since this session logged in ────
+        if (self::passwordChanged((string) $row['password'])) {
+            session()->destroy();
+            return $this->deny(401, 'Your password was changed. Please log in again.', 'session_expired');
         }
 
         // ── 3b. Role and office as they are now, not as they were at login ─
@@ -122,6 +129,29 @@ class AuthFilter implements FilterInterface
         $lastActivity = (int) (session('last_activity') ?? session('login_time') ?? 0);
 
         return $lastActivity === 0 || (time() - $lastActivity) > self::IDLE_TTL;
+    }
+
+    /**
+     * Ties the session to the account's current password hash. A session started before the
+     * password was changed (another device, or a stolen session) no longer matches.
+     * Only a digest goes into the session, not the hash itself.
+     */
+    public static function rememberPassword(string $hash): void
+    {
+        session()->set('password_stamp', self::passwordStamp($hash));
+    }
+
+    /** True when the account's password is no longer the one this session logged in with. */
+    public static function passwordChanged(string $currentHash): bool
+    {
+        $stamp = (string) (session('password_stamp') ?? '');
+
+        return $stamp === '' || ! hash_equals($stamp, self::passwordStamp($currentHash));
+    }
+
+    private static function passwordStamp(string $hash): string
+    {
+        return hash('sha256', 'session-password-stamp|' . $hash);
     }
 
     private function deny(int $status, string $message, string $code): ResponseInterface

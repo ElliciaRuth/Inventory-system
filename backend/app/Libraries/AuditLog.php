@@ -23,13 +23,17 @@ class AuditLog
         try {
             $user = $actor ?? (session('user') ?? []);
 
+            // Email addresses are never stored whole (a failed login may even use one as the username)
+            $summary = Privacy::maskEmailsIn($summary);
+            $details = Privacy::maskEmailsDeep($details);
+
             $request = service('request');
             $ip      = method_exists($request, 'getIPAddress') ? (string) $request->getIPAddress() : '';
 
             db_connect()->table('audit_log')->insert([
                 'created_at'     => date('Y-m-d H:i:s'),
                 'user_id'        => isset($user['id']) && (int) $user['id'] > 0 ? (int) $user['id'] : null,
-                'username'       => mb_substr((string) ($user['username'] ?? ''), 0, 100),
+                'username'       => mb_substr(Privacy::maskEmailsIn((string) ($user['username'] ?? '')), 0, 100),
                 'user_office_id' => isset($user['user_office_id']) && (int) $user['user_office_id'] > 0 ? (int) $user['user_office_id'] : null,
                 'action'         => mb_substr($action, 0, 60),
                 'entity'         => mb_substr($entity, 0, 60),

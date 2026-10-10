@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Libraries\Privacy;
 use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Model;
 
@@ -162,6 +163,7 @@ class SettingsModel extends Model
 
         if ($type === 'users') {
             unset($row['password'], $row['password_reset_token'], $row['password_reset_expires']);
+            $row = $this->maskedEmail($row);
         }
 
         return $row;
@@ -225,7 +227,21 @@ class SettingsModel extends Model
             $builder->where('user_table.user_office_id', $userOfficeId);
         }
 
-        return $builder->get()->getResultArray();
+        return array_map([$this, 'maskedEmail'], $builder->get()->getResultArray());
+    }
+
+    /**
+     * Users' email addresses go to the browser partly hidden: reset codes are sent there, so
+     * managers (and technical staff) never see them whole. Owners change their own address,
+     * confirmed with a code, on My Profile.
+     */
+    private function maskedEmail(array $row): array
+    {
+        if (array_key_exists('email', $row) && $row['email'] !== null) {
+            $row['email'] = Privacy::maskEmail((string) $row['email']);
+        }
+
+        return $row;
     }
 
     public function activateUser(int $userId): void
@@ -292,7 +308,7 @@ class SettingsModel extends Model
 
         $sql .= ' ORDER BY u.username ASC';
 
-        return $this->db->query($sql, $params)->getResultArray();
+        return array_map([$this, 'maskedEmail'], $this->db->query($sql, $params)->getResultArray());
     }
 
     private function preserveRelationsBeforeDelete(BaseConnection $db, string $type, int $id): void

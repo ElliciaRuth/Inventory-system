@@ -431,6 +431,9 @@ const VIEWS = computed(() => [
               <p v-if="passwordProblem && password" class="bk-inline-warn"><AlertTriangle :size="13" /> {{ passwordProblem }}</p>
               <p class="bk-inline-note"><KeyRound :size="13" /> Keep the password somewhere safe; the backup can't be restored without it.</p>
             </div>
+            <p v-else-if="selectedSections.includes('users')" class="bk-inline-warn">
+              <AlertTriangle :size="13" /> Without a password, this backup leaves out the users' passwords: anyone with the file could otherwise try to crack them. Accounts it brings back after being deleted will need a new password. Turn on protection to keep them.
+            </p>
           </div>
         </div>
 
@@ -674,7 +677,8 @@ const VIEWS = computed(() => [
               <input v-model="config.backup_time" type="time" class="form-input" :disabled="Number(config.backup_interval_hours) < 24" />
             </div>
           </div>
-          <p class="bk-inline-note"><Clock :size="13" /> Runs when a custodian or manager opens the system and one is due. Automatic backups contain everything and have no password.</p>
+          <p class="bk-inline-note"><Clock :size="13" /> Runs when a custodian or manager opens the system and one is due. Automatic backups contain everything except the users' passwords, and have no password.</p>
+          <p class="bk-inline-note"><Building2 :size="13" /> These settings are for your office only; other offices keep their own.</p>
         </div>
 
         <div class="bk-schedule-card">

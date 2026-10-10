@@ -151,7 +151,7 @@ function typeLabel(t) {
   return TYPE_LABELS[(t.transaction_type || '').toLowerCase()] || t.transaction_type
 }
 
-// ── Which batches a stock-out will use (soonest-expiring unexpired first) ──
+// ── Which batches a stock-out will use (oldest received unexpired first, FIFO) ──
 const plan = ref(null)
 const planLoading = ref(false)
 const previewType = computed(() => (['issue', 'borrow', 'adjust_out'].includes(typeName.value) ? typeName.value : ''))
@@ -527,7 +527,7 @@ async function handleSubmit() {
               <Layers :size="15" />
               <strong>{{ isAdjustOut ? 'Will be taken from' : 'Will be issued from' }}</strong>
               <span class="sm-plan-rule">
-                {{ plan?.mode === 'expired' ? 'expired batches only' : plan?.mode === 'adjust' ? 'expired batches first, then soonest expiry' : 'soonest-expiring unexpired batch first' }}
+                {{ plan?.mode === 'expired' ? 'expired batches only' : plan?.mode === 'adjust' ? 'expired batches first, then oldest received' : 'oldest received batch first (FIFO)' }}
               </span>
             </div>
             <p v-if="planLoading && !plan" class="sm-plan-empty">Checking batches…</p>

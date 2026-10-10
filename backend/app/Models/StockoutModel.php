@@ -477,7 +477,7 @@ class StockoutModel extends Model
     }
 
     /**
-     * Deduct stock from the soonest-expiring unexpired batches first (FEFO), like a direct issue.
+     * Deduct stock from the oldest received unexpired batches first (FIFO), like a direct issue.
      */
     private function deductStock(int $productId, float $quantity, int $userOfficeId = 0, int $copyId = 0): array
     {

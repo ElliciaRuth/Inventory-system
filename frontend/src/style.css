@@ -19,17 +19,27 @@ body::before {
     radial-gradient(50rem 38rem at 50% 115%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 70%);
 }
 
-/* Faint dot grid that fades out toward the centre so content stays clean */
+/* Faint dot grid across the whole page, behind every card and panel */
 body::after {
   background-image: radial-gradient(color-mix(in srgb, var(--color-primary) 22%, transparent) 1.2px, transparent 1.4px);
   background-size: 24px 24px;
-  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, transparent 35%, #000 100%);
-  mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, transparent 35%, #000 100%);
+}
+
+/* Stronger on the dark theme, where 22% barely shows against the near-black page */
+html[data-theme='dark'] body::after {
+  background-image: radial-gradient(color-mix(in srgb, var(--color-primary) 34%, transparent) 1.2px, transparent 1.4px);
 }
 
 @media print {
   body::before,
   body::after { display: none; }
+}
+
+/* Sign-in, sign-up, forgot-password and first-login pages show the same background as the
+   rest of the app (the glows and dot grid above) instead of their own gradient */
+.login-page-screen,
+html[data-theme] .login-page-screen {
+  background: transparent;
 }
 
 /* Lucide icons used inline in text (banners, buttons, labels) line up with the text */

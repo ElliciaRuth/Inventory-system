@@ -57,15 +57,15 @@ class InventoryService
     }
 
     /** Which batches a stock-out may use, see planDepletion(). */
-    public const MODE_ISSUE   = 'issue';    // unexpired only, soonest expiry first (FEFO)
-    public const MODE_ADJUST  = 'adjust';   // expired first, then soonest expiry
-    public const MODE_EXPIRED = 'expired';  // expired batches only
+    public const MODE_ISSUE   = 'issue';    // unexpired only, oldest received first (FIFO)
+    public const MODE_ADJUST  = 'adjust';   // expired first, then oldest received
+    public const MODE_EXPIRED = 'expired';  // expired batches only, oldest received first
 
     /**
      * Save one stock movement and return what it did (for the audit trail).
      *
      *   receipt    → new batch (unique batch no.) + receipt entry
-     *   issue      → takes from the soonest-expiring unexpired batches of the sub-product
+     *   issue      → takes from the oldest received unexpired batches of the sub-product (FIFO)
      *   borrow     → a borrow record (borrower, unit, qty) + stock-out entries linked to it
      *   return     → stock back in as a new batch, linked to the borrow it settles
      *   adjust_out → expired batches first ("Expired" reason: expired only), per-batch cost
@@ -256,9 +256,9 @@ class InventoryService
     /**
      * Which batches a stock-out of $qty would use, without changing anything.
      *
-     *   MODE_ISSUE   unexpired batches only, soonest expiry first (batches without a date last)
-     *   MODE_ADJUST  expired batches first, then soonest expiry
-     *   MODE_EXPIRED expired batches only
+     *   MODE_ISSUE   unexpired batches only, oldest received first (FIFO)
+     *   MODE_ADJUST  expired batches first, then oldest received
+     *   MODE_EXPIRED expired batches only, oldest received first
      *
      * @return array{batches: list<array>, usable: float, expired_qty: float, shortfall: float}
      */
@@ -299,11 +299,8 @@ class InventoryService
             if ($mode === self::MODE_ADJUST && $a['expired'] !== $b['expired']) {
                 return $a['expired'] ? -1 : 1;
             }
-            // Soonest expiry first; undated batches after dated ones
-            $ea = $a['expiration_date'] ?? '9999-12-31';
-            $eb = $b['expiration_date'] ?? '9999-12-31';
-
-            return [$ea, (string) $a['date_received'], (int) $a['batch_id']] <=> [$eb, (string) $b['date_received'], (int) $b['batch_id']];
+            // First in, first out: oldest received first; same day (or no date) in the order recorded
+            return [(string) $a['date_received'], (int) $a['batch_id']] <=> [(string) $b['date_received'], (int) $b['batch_id']];
         });
 
         $usable    = array_sum(array_column($batches, 'current_qty'));

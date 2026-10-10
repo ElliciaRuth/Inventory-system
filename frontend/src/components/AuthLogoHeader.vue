@@ -116,7 +116,7 @@ defineProps({
 }
 
 /* Dark mode styling */
-:global(html[data-theme='dark']) .auth-logo-badge {
+html[data-theme='dark'] .auth-logo-badge {
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5));
 }
 

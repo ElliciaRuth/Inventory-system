@@ -57,7 +57,7 @@ class BackupController extends BaseApiController
     public function index(): ResponseInterface
     {
         $model  = new BackupModel();
-        $config = $model->getConfig();
+        $config = $model->getConfig($this->currentOfficeId());
 
         // Server file paths stay on the server
         $backups = array_map(
@@ -337,10 +337,15 @@ class BackupController extends BaseApiController
     }
 
     /**
+     * Saves the backup settings of the user's own office only; other offices keep theirs.
      * POST /api/backups/config   { backup_dir, backup_dir_2?, backup_interval_hours, backup_time }
      */
     public function saveConfig(): ResponseInterface
     {
+        if (! $this->canRunBackups()) {
+            return $this->respondError('Access denied.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
         $input         = $this->input();
         $dir           = trim((string) ($input['backup_dir'] ?? ''));
         $dir2          = trim((string) ($input['backup_dir_2'] ?? ''));
@@ -388,7 +393,8 @@ class BackupController extends BaseApiController
             'backup_interval_hours' => $intervalHours,
             'backup_time'           => $backupTime,
         ];
-        (new BackupModel())->saveConfig($config);
+        (new BackupModel())->saveConfig($this->currentOfficeId(), $config);
+        AuditLog::record('backup.settings_saved', 'backup', null, 'Backup settings saved for ' . $this->officeName(), $config);
 
         return $this->respondSuccess($config, 'Backup settings updated.');
     }

@@ -49,6 +49,7 @@ import {
   ClipboardCheck,
   Handshake,
   CheckCheck,
+  CircleHelp,
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -628,6 +629,18 @@ onUnmounted(() => {
           <component :is="themeIconComponent" :size="18" />
         </button>
 
+        <!-- Help & User Guide (phones: in the menu card) -->
+        <router-link
+          to="/help"
+          class="theme-btn desktop-only"
+          :class="{ 'is-active': route.path === '/help' }"
+          title="Help & User Guide"
+          aria-label="Help and user guide"
+          @click="closeMegaMenu"
+        >
+          <CircleHelp :size="18" />
+        </router-link>
+
         <!-- Signed-in user chip → Edit Profile (avatar only on phones) -->
         <router-link
           to="/profile"
@@ -779,6 +792,10 @@ onUnmounted(() => {
 
             <!-- Bottom Action Buttons -->
             <div class="feature-action-buttons">
+              <router-link to="/help" class="feature-btn-secondary" @click="closeMegaMenu">
+                <CircleHelp :size="14" />
+                <span>Help &amp; User Guide</span>
+              </router-link>
               <button
                 type="button"
                 class="feature-btn-primary"
@@ -1855,6 +1872,24 @@ html[data-theme='bsu'] .feature-btn-primary {
   box-shadow: 0 4px 12px rgba(26, 82, 9, 0.35);
 }
 
+.feature-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  border-radius: 9999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 700;
+  transition: all var(--transition-fast, 0.2s);
+}
+.feature-btn-secondary:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-muted);
+}
 .feature-btn-primary:hover {
   transform: translateY(-1px);
   filter: brightness(1.1);

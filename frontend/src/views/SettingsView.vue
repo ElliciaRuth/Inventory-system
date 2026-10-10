@@ -371,6 +371,14 @@ onMounted(load)
               <label class="form-label">New Password <small style="font-weight: 400;">(leave blank to keep)</small></label>
               <input v-model="modal.values[field]" type="password" class="form-input" autocomplete="new-password" />
             </template>
+            <!-- Shown partly hidden; only the owner changes it (My Profile, confirmed with a code) -->
+            <template v-else-if="field === 'email' && authStore.levelId < 4">
+              <label class="form-label">{{ labelFor(modal.type, field) }}</label>
+              <input :value="modal.values[field] || 'No email address'" type="text" class="form-input" readonly />
+              <small style="color: var(--text-muted); font-size: 0.75rem;">
+                Users change their own email from My Profile; it is confirmed with a code sent to the new address.
+              </small>
+            </template>
             <template v-else>
               <label class="form-label">{{ labelFor(modal.type, field) }}</label>
               <input v-model="modal.values[field]" :type="field === 'email' ? 'email' : 'text'" class="form-input" :required="field !== 'email'" />

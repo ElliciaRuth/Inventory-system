@@ -5,7 +5,6 @@ import { useAuthStore } from '../stores/authStore'
 import { authApi } from '../api/auth'
 import { toast, errorMessage } from '../composables/useToast'
 import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.vue'
-import { maskEmail } from '../utils/maskEmail'
 import {
   User,
   Mail,
@@ -30,14 +29,10 @@ const router = useRouter()
 // Active tab
 const activeTab = ref('profile') // 'profile' | 'security'
 
-// The email field shows a masked address until it is clicked for editing
-const emailFocused = ref(false)
-
-// Profile Form State
+// Profile Form State (the email is changed separately, below)
 const profileForm = ref({
   name: '',
   username: '',
-  email: '',
 })
 
 // Password Form State
@@ -51,11 +46,84 @@ const showCurrentPassword = ref(false)
 const showNewPassword = ref(false)
 const showConfirmPassword = ref(false)
 
-// Changing the email (where reset codes go) needs the current password
-const emailPassword = ref('')
-const emailChanged = computed(
-  () => profileForm.value.email.trim().toLowerCase() !== String(authStore.user?.email || '').toLowerCase()
-)
+// ── Change email ──
+// The server only ever sends the address masked. A new address is confirmed like Forgot
+// Password: a 6-digit code is sent from the new account to itself (with that account's app
+// password), and the address changes only after the code is entered.
+const emailStep = ref(0) // 0 closed | 1 new address | 2 code
+const emailForm = ref({ email: '', appKey: '', currentPassword: '', code: '' })
+const showEmailAppKey = ref(false)
+const showEmailAppKeyHelp = ref(false)
+const emailLoading = ref(false)
+const emailError = ref('')
+const emailInfo = ref('')
+const emailCodeComplete = computed(() => /^\d{6}$/.test(emailForm.value.code))
+
+function openEmailChange() {
+  emailForm.value = { email: '', appKey: '', currentPassword: '', code: '' }
+  emailError.value = ''
+  emailInfo.value = ''
+  emailStep.value = 1
+}
+
+function closeEmailChange() {
+  emailForm.value = { email: '', appKey: '', currentPassword: '', code: '' }
+  showEmailAppKey.value = false
+  emailError.value = ''
+  emailStep.value = 0
+}
+
+async function requestEmailCode() {
+  emailError.value = ''
+  emailInfo.value = ''
+  // Take the secrets out of the form before sending: they are never shown again
+  const key = emailForm.value.appKey.trim()
+  const current = emailForm.value.currentPassword
+  emailForm.value.appKey = ''
+  emailForm.value.currentPassword = ''
+  showEmailAppKey.value = false
+  emailLoading.value = true
+  try {
+    const res = await authApi.requestEmailChange(emailForm.value.email.trim(), key, current)
+    emailInfo.value = res.message
+    emailForm.value.code = ''
+    emailStep.value = 2
+  } catch (err) {
+    emailError.value = errorMessage(err, 'Could not send the verification code.')
+  } finally {
+    emailLoading.value = false
+  }
+}
+
+async function confirmEmailCode() {
+  emailError.value = ''
+  if (!emailCodeComplete.value) {
+    emailError.value = 'Please enter the 6-digit code from your email.'
+    return
+  }
+  emailLoading.value = true
+  try {
+    const res = await authApi.confirmEmailChange(emailForm.value.code)
+    if (res.data?.user) authStore.setSession(res.data.user)
+    toast(res.message || 'Your email address has been changed.')
+    closeEmailChange()
+  } catch (err) {
+    emailError.value = errorMessage(err, 'Could not verify the code.')
+    // The code is cancelled after too many wrong tries: start again
+    if (/request a new code/i.test(emailError.value)) {
+      emailForm.value.code = ''
+      emailStep.value = 1
+    }
+  } finally {
+    emailLoading.value = false
+  }
+}
+
+// Keep only digits; paste of "123 456" still works
+function onEmailCodeInput(e) {
+  emailForm.value.code = e.target.value.replace(/\D/g, '').slice(0, 6)
+  e.target.value = emailForm.value.code
+}
 
 const loadingProfile = ref(false)
 const loadingPassword = ref(false)
@@ -71,7 +139,6 @@ function initProfileFromStore() {
     profileForm.value = {
       name: user.name || user.username || '',
       username: user.username || '',
-      email: user.email || '',
     }
   }
 }
@@ -130,10 +197,7 @@ async function handleSaveProfile() {
     const res = await authApi.updateProfile({
       name: profileForm.value.name.trim(),
       username: profileForm.value.username.trim(),
-      email: profileForm.value.email.trim(),
-      ...(emailChanged.value ? { current_password: emailPassword.value } : {}),
     })
-    emailPassword.value = ''
 
     if (res.data?.user) {
       authStore.setSession(res.data.user)
@@ -173,7 +237,6 @@ async function handleChangePassword() {
     const res = await authApi.updateProfile({
       name: profileForm.value.name || authStore.user?.name || '',
       username: profileForm.value.username || authStore.user?.username || '',
-      email: profileForm.value.email || authStore.user?.email || '',
       current_password: passwordForm.value.current_password,
       password: passwordForm.value.password,
       confirm_password: passwordForm.value.confirm_password,
@@ -307,36 +370,6 @@ onMounted(async () => {
               <small class="form-hint">Unique identifier used for signing in to the system.</small>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="profile_email">Email Address</label>
-              <input
-                id="profile_email"
-                :value="emailFocused ? profileForm.email : maskEmail(profileForm.email)"
-                type="email"
-                class="form-input"
-                placeholder="e.g. jdelacruz@bsu.edu.ph"
-                autocomplete="email"
-                @input="profileForm.email = $event.target.value"
-                @focus="emailFocused = true"
-                @blur="emailFocused = false"
-              />
-              <small class="form-hint">Used for official system communications and account recovery.</small>
-            </div>
-
-            <!-- Reset codes go to this address, so the server asks for the password to change it -->
-            <div v-if="emailChanged" class="form-group">
-              <label class="form-label" for="profile_email_password">Current Password</label>
-              <input
-                id="profile_email_password"
-                v-model="emailPassword"
-                type="password"
-                class="form-input"
-                autocomplete="current-password"
-                required
-              />
-              <small class="form-hint">Enter your current password to change your email address.</small>
-            </div>
-
             <div class="form-actions-bar">
               <button
                 type="submit"
@@ -349,6 +382,132 @@ onMounted(async () => {
               </button>
             </div>
           </form>
+
+          <!-- Email: shown masked only; a new address is confirmed with a code sent to it -->
+          <div class="profile-email-section">
+            <div class="form-group">
+              <span class="form-label">Email Address</span>
+              <div class="profile-email-row">
+                <span class="profile-email-value">
+                  <Mail :size="15" />
+                  {{ authStore.user?.email || 'No email address' }}
+                </span>
+                <button v-if="!emailStep" type="button" class="btn btn-secondary btn-sm" @click="openEmailChange">
+                  Change email
+                </button>
+              </div>
+              <small class="form-hint">Password reset codes are sent here. It is shown partly hidden for your privacy.</small>
+            </div>
+
+            <div v-if="emailStep" class="profile-email-change">
+              <div v-if="emailError" class="badge badge-danger form-feedback-alert">
+                <AlertTriangle :size="16" style="flex-shrink: 0;" />
+                <span>{{ emailError }}</span>
+              </div>
+
+              <!-- Step 1: new address, its app password, and the current password -->
+              <form v-if="emailStep === 1" class="profile-email-form" @submit.prevent="requestEmailCode">
+                <p class="profile-email-step">Step 1 of 2: a 6-digit code is sent from your new email account to itself.</p>
+                <div class="form-group">
+                  <label class="form-label" for="new_email">New Email Address</label>
+                  <input
+                    id="new_email"
+                    v-model="emailForm.email"
+                    type="email"
+                    class="form-input"
+                    placeholder="e.g. jdelacruz@bsu.edu.ph"
+                    autocomplete="off"
+                    required
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="new_email_app_key">App Password of the New Email</label>
+                  <div class="input-password-wrapper">
+                    <input
+                      id="new_email_app_key"
+                      v-model="emailForm.appKey"
+                      :type="showEmailAppKey ? 'text' : 'password'"
+                      class="form-input"
+                      autocomplete="off"
+                      autocapitalize="off"
+                      spellcheck="false"
+                      placeholder="e.g. abcd efgh ijkl mnop"
+                      required
+                    />
+                    <button
+                      type="button"
+                      class="password-toggle-btn"
+                      :title="showEmailAppKey ? 'Hide app password' : 'Show app password'"
+                      tabindex="-1"
+                      @click="showEmailAppKey = !showEmailAppKey"
+                    >
+                      <component :is="showEmailAppKey ? EyeOff : Eye" :size="16" />
+                    </button>
+                  </div>
+                  <small class="form-hint">
+                    Used once to send the code from that account to itself, then forgotten. It is not your normal email password.
+                    <button type="button" class="profile-link-btn" @click="showEmailAppKeyHelp = !showEmailAppKeyHelp">
+                      {{ showEmailAppKeyHelp ? 'Hide help' : 'How do I get one?' }}
+                    </button>
+                  </small>
+                  <div v-if="showEmailAppKeyHelp" class="profile-email-help">
+                    <strong>Gmail or a BSU (Google) account:</strong> open your Google Account → Security → turn on
+                    2-Step Verification → App passwords → create one (any name), and copy the 16 letters here.
+                    You can delete it in the same place afterwards.
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="email_current_pw">Current Password</label>
+                  <input
+                    id="email_current_pw"
+                    v-model="emailForm.currentPassword"
+                    type="password"
+                    class="form-input"
+                    autocomplete="current-password"
+                    required
+                  />
+                  <small class="form-hint">Your password for this system, to confirm it's you.</small>
+                </div>
+                <div class="profile-email-actions">
+                  <button type="submit" class="btn btn-primary" :disabled="emailLoading">
+                    {{ emailLoading ? 'Sending…' : 'Send Code' }}
+                  </button>
+                  <button type="button" class="btn btn-secondary" :disabled="emailLoading" @click="closeEmailChange">Cancel</button>
+                </div>
+              </form>
+
+              <!-- Step 2: the code from the new address -->
+              <form v-else class="profile-email-form" @submit.prevent="confirmEmailCode">
+                <div v-if="emailInfo && !emailError" class="badge badge-success form-feedback-alert">
+                  <Check :size="16" style="flex-shrink: 0;" />
+                  <span>{{ emailInfo }}</span>
+                </div>
+                <p class="profile-email-step">Step 2 of 2: enter the code from the email. It expires in 15 minutes.</p>
+                <div class="form-group">
+                  <label class="form-label" for="email_code">Verification Code</label>
+                  <input
+                    id="email_code"
+                    :value="emailForm.code"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    class="form-input profile-code-input"
+                    autocomplete="one-time-code"
+                    placeholder="000000"
+                    required
+                    @input="onEmailCodeInput"
+                  />
+                </div>
+                <div class="profile-email-actions">
+                  <button type="submit" class="btn btn-primary" :disabled="emailLoading || !emailCodeComplete">
+                    {{ emailLoading ? 'Verifying…' : 'Confirm New Email' }}
+                  </button>
+                  <button type="button" class="btn btn-secondary" :disabled="emailLoading" @click="emailStep = 1">Send a new code</button>
+                  <button type="button" class="btn btn-secondary" :disabled="emailLoading" @click="closeEmailChange">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
         </section>
 
         <!-- Read-Only Account Details Panel -->
@@ -709,6 +868,74 @@ onMounted(async () => {
   margin-top: 4px;
 }
 
+.profile-email-section {
+  border-top: 1px solid var(--border-subtle);
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+.profile-email-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.profile-email-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--text-main);
+  user-select: none;
+}
+.profile-email-change {
+  margin-top: 0.75rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.profile-email-form {
+  display: flex;
+  flex-direction: column;
+}
+.profile-email-step {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.9rem;
+}
+.profile-email-help {
+  margin-top: 6px;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.profile-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.profile-code-input {
+  max-width: 200px;
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  letter-spacing: 0.4em;
+}
+.profile-email-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
 .form-actions-bar {
   display: flex;
   justify-content: flex-start;

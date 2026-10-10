@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
 import AppPagination from '../components/AppPagination.vue'
+import AuditDetails from '../components/AuditDetails.vue'
 
 const authStore = useAuthStore()
 
@@ -33,6 +34,10 @@ const ACTION_LABELS = {
   'auth.login_locked': 'Login locked',
   'auth.password_changed': 'Password changed',
   'auth.password_reset': 'Password reset',
+  'auth.reset_code_sent': 'Reset code sent',
+  'auth.register_duplicate_email': 'Sign-up with used email',
+  'auth.email_change_requested': 'Email change requested',
+  'auth.email_changed': 'Email changed',
   'stock.receipt': 'Stock in',
   'stock.issue': 'Stock out',
   'stock.borrow': 'Borrow',
@@ -65,6 +70,7 @@ const ACTION_LABELS = {
   'user.deactivated': 'User deactivated',
   'backup.created': 'Backup created',
   'backup.restored': 'Backup restored',
+  'backup.settings_saved': 'Backup settings saved',
   'security.rate_limited': 'Too many requests',
   'security.payload_too_large': 'Data too large',
   'security.too_complex': 'Data too complex',
@@ -139,8 +145,9 @@ function when(value) {
   return d.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
 
-function pretty(details) {
-  return JSON.stringify(details, null, 2)
+// The server's own address means the request came from the computer running the system
+function ipLabel(ip) {
+  return ['::1', '127.0.0.1'].includes(ip) ? `This computer (${ip})` : ip
 }
 </script>
 
@@ -212,11 +219,11 @@ function pretty(details) {
                   <span class="audit-tag" :class="`is-${tone(log.action)}`">{{ ACTION_LABELS[log.action] || log.action }}</span>
                 </td>
                 <td data-label="What happened" class="audit-summary">{{ log.summary }}</td>
-                <td data-label="IP address" class="audit-ip">{{ log.ip_address || '—' }}</td>
+                <td data-label="IP address" class="audit-ip" :title="log.ip_address">{{ log.ip_address ? ipLabel(log.ip_address) : '—' }}</td>
               </tr>
               <tr v-if="expanded.has(log.audit_id)" class="audit-details-row">
                 <td colspan="6">
-                  <pre class="audit-details">{{ pretty(log.details) }}</pre>
+                  <AuditDetails :log="log" :tone="tone(log.action)" :when="when" :ip-label="ipLabel" />
                 </td>
               </tr>
             </template>
@@ -365,24 +372,24 @@ function pretty(details) {
   white-space: nowrap;
 }
 
-.audit-details-row td {
+.audit-table tbody tr.is-open > td {
   background: var(--bg-subtle);
-  padding-top: 0 !important;
+  border-bottom-color: transparent;
 }
 
-.audit-details {
-  margin: 0;
-  padding: 0.75rem 1rem;
-  max-height: 320px;
-  overflow: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+.audit-details-row td {
+  background: var(--bg-subtle);
+  padding: 0 1.25rem 1rem 2.75rem !important;
+}
+
+.audit-details-row:hover td {
+  background: var(--bg-subtle) !important;
+}
+
+@media (max-width: 640px) {
+  .audit-details-row td {
+    padding: 0 0.75rem 0.75rem !important;
+  }
 }
 
 @media (max-width: 640px) {

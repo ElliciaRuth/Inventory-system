@@ -34,6 +34,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         // ── Account setup & profile ─────────────────────────────────────────
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/update-profile', 'AuthController::updateProfile');
+        $routes->post('auth/email-change/request', 'AuthController::requestEmailChange');
+        $routes->post('auth/email-change/confirm', 'AuthController::confirmEmailChange');
 
         // ── Dashboard, transaction log, notifications ────────────────────────
         $routes->get('dashboard', 'DashboardController::index', ['filter' => 'level:1']);

@@ -42,7 +42,7 @@ class BackupPackageService
         ],
         'users' => [
             'title'       => 'Users & Accounts',
-            'description' => "This office's user accounts, roles and sign-in details (passwords stay encrypted).",
+            'description' => "This office's user accounts and roles. Password hashes are included only in password-protected backups.",
             'tables'      => ['user_table'],
             'requires'    => [],
         ],
@@ -108,6 +108,17 @@ class BackupPackageService
             $data[$table] = $this->rowsFor($table, $officeId);
         }
 
+        // Password hashes go only into password-protected packages: an unprotected zip can be
+        // opened by anyone holding the file, and the hashes could then be attacked offline.
+        // Reset codes are never kept (they are void after a restore anyway).
+        foreach ($data['user_table'] ?? [] as $i => $user) {
+            if ($password === null) {
+                $data['user_table'][$i]['password'] = null;
+            }
+            $data['user_table'][$i]['password_reset_token']   = null;
+            $data['user_table'][$i]['password_reset_expires'] = null;
+        }
+
         $zip   = new ZipFile();
         $files = [];
         $add   = static function (string $name, string $contents) use ($zip, &$files): void {
@@ -148,6 +159,7 @@ class BackupPackageService
             'rows'       => array_map('count', $data),
             'barcodes'   => $barcodes,
             'encrypted'  => $password !== null,
+            'passwords'  => $password !== null && in_array('users', $sections, true),
             'files'      => $files,
         ];
         $zip->add('manifest.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -331,7 +343,7 @@ class BackupPackageService
                 foreach (self::SECTIONS[$key]['tables'] as $table) {
                     $rows = $data[$table] ?? [];
                     if ($table === 'user_table') {
-                        $rows = $this->restorableUsers($rows, $officeId, $currentUserId, $currentLevel);
+                        $rows = $this->restorableUsers($rows, $officeId, $currentUserId, $currentLevel, BackupCrypto::isEncrypted($bytes));
                     } elseif ($key === 'setup') {
                         $rows = $this->ownSetupRows($table, $rows, $officeId);
                     }
@@ -662,8 +674,13 @@ class BackupPackageService
      * Accounts a restore may write: this office's accounts at or below the restoring user's own
      * level (never Technical Staff), not the restoring user, and never one that would land on
      * another person's account (same id, username or email in another office or a higher role).
+     *
+     * Passwords are never rolled back: accounts that still exist keep their current password.
+     * An account the restore brings back keeps its backed-up password only when the package was
+     * password-protected (encrypted and tamper-evident); otherwise it gets no usable password and
+     * its owner sets a new one (Forgot Password, or a manager in User Management).
      */
-    private function restorableUsers(array $rows, int $officeId, int $currentUserId, int $currentLevel): array
+    private function restorableUsers(array $rows, int $officeId, int $currentUserId, int $currentLevel, bool $trustedPasswords): array
     {
         $maxLevel = min($currentLevel, 3);
         $levels   = array_column($this->db->table('level_of_access')->get()->getResultArray(), 'lvl_of_access', 'lvl_of_access_id');
@@ -672,7 +689,7 @@ class BackupPackageService
         $byName   = [];
         $byEmail  = [];
         $current  = $this->db->table('user_table u')
-            ->select('u.user_id, u.username, u.email, u.user_office_id, COALESCE(loa.lvl_of_access, 0) AS level_id', false)
+            ->select('u.user_id, u.username, u.email, u.user_office_id, u.password, u.must_change_password, COALESCE(loa.lvl_of_access, 0) AS level_id', false)
             ->join('level_of_access loa', 'loa.lvl_of_access_id = u.lvl_of_access_id', 'left')
             ->get()->getResultArray();
         foreach ($current as $user) {
@@ -701,6 +718,16 @@ class BackupPackageService
             $emailOwner = (string) ($row['email'] ?? '') !== '' ? ($byEmail[mb_strtolower((string) $row['email'])] ?? $id) : $id;
             if ($nameOwner !== $id || $emailOwner !== $id) {
                 continue;
+            }
+
+            if (isset($existing[$id])) {
+                $row['password']             = $existing[$id]['password'];
+                $row['must_change_password'] = (int) ($existing[$id]['must_change_password'] ?? 0);
+            } elseif (! $trustedPasswords || (string) ($row['password'] ?? '') === '' || ! password_get_info((string) $row['password'])['algo']) {
+                $row['password']             = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
+                $row['must_change_password'] = 1;
+            } else {
+                $row['must_change_password'] = (int) ($row['must_change_password'] ?? 0);
             }
 
             // Reset codes from the backup are never valid again
@@ -885,6 +912,9 @@ HOW TO RESTORE
   A safety backup of the current data is made automatically first.
 
 TXT
-            . ($encrypted ? "\nThis package is password-protected. You need the password to restore it.\n" : '');
+            . ($encrypted
+                ? "\nThis package is password-protected. You need the password to restore it.\n"
+                : "\nThis package is not password-protected, so it leaves out the users' password hashes.\n"
+                    . "Accounts it brings back after they were deleted will need a new password.\n");
     }
 }

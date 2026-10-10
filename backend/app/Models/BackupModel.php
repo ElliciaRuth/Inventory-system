@@ -24,44 +24,60 @@ class BackupModel
         return WRITEPATH . 'backups/backup_config.json';
     }
 
-    public function getConfig(): array
+    /**
+     * The file holds each office's own settings under "offices" (keyed by office id). The
+     * top-level values are the defaults for offices that haven't saved their own, including
+     * everything saved before settings were per office.
+     */
+    private function readConfigFile(): array
     {
         $path = $this->getConfigPath();
-        if (is_file($path)) {
-            $decoded = json_decode(file_get_contents($path), true);
-            if (is_array($decoded)) {
-                // Relative directories are relative to the backend root, so the
-                // same config works on Windows (XAMPP) and on the Linux server.
-                foreach (['backup_dir', 'backup_dir_2'] as $key) {
-                    $dir = trim((string) ($decoded[$key] ?? ''));
-                    if ($dir !== '' && ! str_contains($dir, ':') && ! str_starts_with($dir, '/')) {
-                        $decoded[$key] = ROOTPATH . ltrim($dir, '/\\');
-                    }
-                }
-                if (trim((string) ($decoded['backup_dir'] ?? '')) === '') {
-                    $decoded['backup_dir'] = WRITEPATH . 'backups/';
-                }
+        $decoded = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
 
-                // A folder saved before the location rules existed (or edited by hand) that the
-                // web server would publish: fall back to the protected default instead
-                if (self::unsafeDirectory((string) $decoded['backup_dir']) !== null) {
-                    log_message('warning', 'Backup folder ' . $decoded['backup_dir'] . ' is not allowed; using writable/backups instead.');
-                    $decoded['backup_dir'] = WRITEPATH . 'backups/';
-                }
-                if (trim((string) ($decoded['backup_dir_2'] ?? '')) !== '' && self::unsafeDirectory((string) $decoded['backup_dir_2']) !== null) {
-                    log_message('warning', 'Backup folder (Drive 2) ' . $decoded['backup_dir_2'] . ' is not allowed; Drive 2 is skipped.');
-                    $decoded['backup_dir_2'] = '';
-                }
+        return is_array($decoded) ? $decoded : [];
+    }
 
-                return $decoded;
-            }
-        }
-        return [
+    /**
+     * Backup settings for one office: its own if it saved any, otherwise the shared defaults.
+     */
+    public function getConfig(int $officeId): array
+    {
+        $file    = $this->readConfigFile();
+        $offices = is_array($file['offices'] ?? null) ? $file['offices'] : [];
+        unset($file['offices']);
+        $own = is_array($offices[(string) $officeId] ?? null) ? $offices[(string) $officeId] : [];
+
+        $config = array_merge([
             'backup_dir'            => WRITEPATH . 'backups/',
             'backup_dir_2'          => '',
             'backup_interval_hours' => 24,
             'backup_time'           => '00:00',
-        ];
+        ], $file, $own);
+
+        // Relative directories are relative to the backend root, so the
+        // same config works on Windows (XAMPP) and on the Linux server.
+        foreach (['backup_dir', 'backup_dir_2'] as $key) {
+            $dir = trim((string) ($config[$key] ?? ''));
+            if ($dir !== '' && ! str_contains($dir, ':') && ! str_starts_with($dir, '/')) {
+                $config[$key] = ROOTPATH . ltrim($dir, '/\\');
+            }
+        }
+        if (trim((string) ($config['backup_dir'] ?? '')) === '') {
+            $config['backup_dir'] = WRITEPATH . 'backups/';
+        }
+
+        // A folder saved before the location rules existed (or edited by hand) that the
+        // web server would publish: fall back to the protected default instead
+        if (self::unsafeDirectory((string) $config['backup_dir']) !== null) {
+            log_message('warning', 'Backup folder ' . $config['backup_dir'] . ' is not allowed; using writable/backups instead.');
+            $config['backup_dir'] = WRITEPATH . 'backups/';
+        }
+        if (trim((string) ($config['backup_dir_2'] ?? '')) !== '' && self::unsafeDirectory((string) $config['backup_dir_2']) !== null) {
+            log_message('warning', 'Backup folder (Drive 2) ' . $config['backup_dir_2'] . ' is not allowed; Drive 2 is skipped.');
+            $config['backup_dir_2'] = '';
+        }
+
+        return $config;
     }
 
     /**
@@ -113,14 +129,24 @@ class BackupModel
         return null;
     }
 
-    public function saveConfig(array $config): void
+    /**
+     * Saves one office's settings; other offices' settings and the defaults are left alone.
+     */
+    public function saveConfig(int $officeId, array $config): void
     {
         $path = $this->getConfigPath();
         $dir  = dirname($path);
         if (! is_dir($dir)) {
             mkdir($dir, 0775, true);
         }
-        file_put_contents($path, json_encode($config, JSON_PRETTY_PRINT));
+
+        $file = $this->readConfigFile();
+        if (! is_array($file['offices'] ?? null)) {
+            $file['offices'] = [];
+        }
+        $file['offices'][(string) $officeId] = $config;
+
+        file_put_contents($path, json_encode($file, JSON_PRETTY_PRINT), LOCK_EX);
     }
 
     /**
@@ -133,13 +159,13 @@ class BackupModel
 
     public function getBackupDir(int $officeId): string
     {
-        $config = $this->getConfig();
+        $config = $this->getConfig($officeId);
         return $this->officeSubDir($config['backup_dir'] ?? WRITEPATH . 'backups/', $officeId);
     }
 
     public function getBackupDir2(int $officeId): string
     {
-        $config = $this->getConfig();
+        $config = $this->getConfig($officeId);
         $dir2   = trim($config['backup_dir_2'] ?? '');
         if ($dir2 === '') return '';
         return $this->officeSubDir($dir2, $officeId);
@@ -413,6 +439,8 @@ class BackupModel
             return ['ok' => false, 'message' => $statements];
         }
 
+        $credentials = $this->currentCredentials();
+
         $this->db->query('SET FOREIGN_KEY_CHECKS = 0');
         try {
             foreach ($statements as $statement) {
@@ -421,12 +449,60 @@ class BackupModel
             }
         } catch (\Throwable $e) {
             $this->db->query('SET FOREIGN_KEY_CHECKS = 1');
+            $this->keepCurrentPasswords($credentials);
             log_message('error', 'Legacy .sql restore failed: ' . $e->getMessage());
 
             return ['ok' => false, 'message' => 'Restore failed part-way; the safety backup made first holds the data as it was. The details were written to the server log.'];
         }
         $this->db->query('SET FOREIGN_KEY_CHECKS = 1');
-        return ['ok' => true, 'message' => 'Restore completed successfully.'];
+        $this->keepCurrentPasswords($credentials);
+
+        return ['ok' => true, 'message' => 'Restore completed successfully. Everyone keeps their current password.'];
+    }
+
+    /**
+     * Sign-in details of every account as they are now, taken before an older .sql backup
+     * overwrites user_table.
+     *
+     * @return array<int, array<string, mixed>> by user id
+     */
+    private function currentCredentials(): array
+    {
+        if (! $this->db->tableExists('user_table')) {
+            return [];
+        }
+
+        $rows = $this->db->table('user_table')
+            ->select('user_id, password, must_change_password, password_reset_token, password_reset_expires')
+            ->get()->getResultArray();
+
+        return array_column($rows, null, 'user_id');
+    }
+
+    /**
+     * An older .sql backup holds the password hashes from when it was made, and the file is
+     * neither encrypted nor tamper-evident. After restoring one, accounts that existed before
+     * get their current password back (a changed or reset password is never rolled back), and
+     * accounts the backup brought back get no usable password: their owners set a new one
+     * (Forgot Password, or a manager in User Management).
+     */
+    private function keepCurrentPasswords(array $credentials): void
+    {
+        if (! $this->db->tableExists('user_table')) {
+            return;
+        }
+
+        $ids = array_map('intval', array_column($this->db->table('user_table')->select('user_id')->get()->getResultArray(), 'user_id'));
+        foreach ($ids as $id) {
+            $update = $credentials[$id] ?? [
+                'password'               => password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT),
+                'must_change_password'   => 1,
+                'password_reset_token'   => null,
+                'password_reset_expires' => null,
+            ];
+            unset($update['user_id']);
+            $this->db->table('user_table')->where('user_id', $id)->update($update);
+        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -440,7 +516,7 @@ class BackupModel
      */
     public function needsAutoBackup(int $officeId): bool
     {
-        $config        = $this->getConfig();
+        $config        = $this->getConfig($officeId);
         $intervalHours = (int) ($config['backup_interval_hours'] ?? 24);
         if ($intervalHours <= 0) {
             return false;

@@ -79,9 +79,6 @@ async function handleLogin() {
           <AuthLogoHeader />
 
           <h2 class="login-card-title">Sign In</h2>
-          <p class="login-card-subtitle">
-            Access the dashboard and continue managing inventory.
-          </p>
 
           <!-- Error Alert Banner -->
           <div v-if="errorMessage" class="login-error-banner">
