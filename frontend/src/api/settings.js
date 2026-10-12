@@ -35,6 +35,12 @@ export const settingsApi = {
     return response.data
   },
 
+  // Turn down a pending sign-up: the registration is removed
+  async declineUser(userId) {
+    const response = await client.post(`/settings/users/${userId}/decline`)
+    return response.data
+  },
+
   async getSystemSettings() {
     const response = await client.get('/settings/system')
     return response.data

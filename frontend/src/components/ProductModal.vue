@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { X, AlertTriangle, Zap, Package, PlusCircle } from 'lucide-vue-next'
 import { productsApi } from '../api/products'
 import { triggerAutoReload } from '../composables/useAutoReload'
+import { confirmDialog } from '../composables/useConfirm'
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -31,13 +32,10 @@ const form = reactive({
 })
 
 // Standard categories always offered first; the office's own types follow
-const STANDARD_CATEGORIES = [
-  'Perishable Raw Materials',
-  'Non-Perishable Raw Materials',
-  'Packaging',
-  'Operational Supplies',
-]
+const STANDARD_CATEGORIES = ['Finished Product']
 const OTHER_TYPE = '__other__'
+// New products default to this entity (fund cluster 06); the server creates it per office
+const DEFAULT_ENTITY = 'Benguet State University'
 
 const categoryOptions = computed(() => {
   const seen = new Set()
@@ -109,9 +107,9 @@ watch(
       form.product_reorder_point = 10
       form.expiry_warning_days = 30
       form.expiry_danger_days = 7
-      form.type_name = meta.value.types[0]?.type || 'General Inventory'
+      form.type_name = meta.value.types[0]?.type || 'Finished Product'
       form.unit_name = meta.value.units[0]?.unit || 'pcs'
-      form.entity_name = meta.value.entities[0]?.entity || 'BSU Food Processing Center'
+      form.entity_name = DEFAULT_ENTITY
     }
     customType.value = false
     errorMessage.value = ''
@@ -142,10 +140,28 @@ async function handleSubmit() {
     return
   }
 
+  // A changed name/description asks its own question (same product or a new one)
   if (identityChanged()) {
     askProductAction.value = true
     return
   }
+
+  const editing = Boolean(props.product?.product_id)
+  const ok = await confirmDialog({
+    title: editing ? 'Save changes to this product?' : 'Add this product?',
+    message: `${form.product} (${form.product_no}) will be ${editing ? 'updated' : 'added to the catalog'}.`,
+    details: [
+      ['Product no.', form.product_no],
+      ['Name', form.product],
+      ['Category', form.type_name],
+      ['Unit', form.unit_name],
+      ['Measurement', form.measurement],
+      ['Entity', form.entity_name],
+      ['Reorder point', form.product_reorder_point],
+    ],
+    confirmText: editing ? 'Save changes' : 'Add product',
+  })
+  if (!ok) return
 
   await save('existing')
 }
@@ -300,7 +316,7 @@ async function save(productAction) {
               v-model="form.entity_name"
               list="entityOptions"
               class="form-input"
-              placeholder="e.g. BSU Food Processing Center"
+              placeholder="e.g. Benguet State University"
             />
             <datalist id="entityOptions">
               <option v-for="e in meta.entities" :key="e.entity_id" :value="e.entity" />

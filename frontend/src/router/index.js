@@ -114,8 +114,8 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: SettingsView,
-    // Others Management: managers only
-    meta: { title: 'Others Management - BSU Inventory', minLevel: 3, maxLevel: 3 },
+    // Office Settings: managers only
+    meta: { title: 'Office Settings - BSU Inventory', minLevel: 3, maxLevel: 3 },
   },
   {
     path: '/profile',

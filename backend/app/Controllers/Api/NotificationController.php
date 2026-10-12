@@ -152,7 +152,7 @@ class NotificationController extends BaseApiController
             $expDate   = date('M d, Y', strtotime($item['expiration_date']));
             $ago       = $daysAgo === 1 ? 'yesterday' : "{$daysAgo} days ago";
             $todo      = $levelId >= 2
-                ? 'Take it out of stock with an Adjust Out, reason "Expired".'
+                ? 'Take it out of stock with an Adjust Out.'
                 : 'Do not use it; tell your custodian so it can be taken out of stock.';
 
             $notifications[] = [
@@ -224,7 +224,7 @@ class NotificationController extends BaseApiController
                     'message'      => "Registered account for {$userName} ({$office}) requires administrative activation.",
                     'badge'        => 'Pending Approval',
                     'created_at'   => $user['created_at'] ?? date('Y-m-d H:i:s'),
-                    // Managers activate applicants in Others Management, technical staff in User Management
+                    // Managers activate applicants in Office Settings, technical staff in User Management
                     'action_url'   => $levelId >= 4 ? '/admin' : '/settings',
                     'action_label' => 'Manage Users',
                     'details'      => [

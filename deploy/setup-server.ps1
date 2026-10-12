@@ -564,7 +564,7 @@ nameConstraints = critical, permitted;IP:10.0.0.0/255.0.0.0, permitted;IP:172.16
     Write-Host ''
     Write-Host '  Forgotten passwords: "Forgot password" emails a code through the user''s own email'
     Write-Host '  account; this PC needs internet only while it sends. Without internet, a manager'
-    Write-Host '  sets a new password in Others Management > Users, or run in the backend folder:'
+    Write-Host '  sets a new password in Office Settings > Users, or run in the backend folder:'
     Write-Host "    $Php spark user:reset-password <username>"
     Write-Host ''
     Wait-ForKey

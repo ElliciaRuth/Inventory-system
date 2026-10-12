@@ -7,6 +7,7 @@ import {
 import { importApi } from '../api/import'
 import StockcardCardEditor from './StockcardCardEditor.vue'
 import { triggerAutoReload } from '../composables/useAutoReload'
+import { confirmDialog } from '../composables/useConfirm'
 import { useAuthStore } from '../stores/authStore'
 
 const props = defineProps({
@@ -92,19 +93,23 @@ const existing = computed(() => plan.value?.existing || { products: 0, batches: 
 const typeOptions = computed(() => plan.value?.types || [])
 const spellingFixes = computed(() => okProducts.value.filter((p) => p.spelling?.length))
 
+// A blank category falls back to the detected one (as the server does)
+const typeOf = (p) => String(types.value[p.key] || '').trim() || p.type
+
 // "12 Product Label, 3 Raw Materials" for the current choices
 const typeSummary = computed(() => {
   const counts = {}
   for (const p of okProducts.value) {
-    const t = types.value[p.key] || p.type
+    const t = typeOf(p)
     counts[t] = (counts[t] || 0) + 1
   }
   return Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(', ')
 })
 
 function applyTypeToAll() {
-  if (!setAllType.value) return
-  for (const p of okProducts.value) types.value[p.key] = setAllType.value
+  const name = setAllType.value.trim()
+  if (!name) return
+  for (const p of okProducts.value) types.value[p.key] = name
   setAllType.value = ''
 }
 
@@ -178,10 +183,21 @@ function closePasswordPrompt(force = false) {
 }
 
 // "Delete & Import" first asks for the password; "Keep existing" imports straight away
-function startImport() {
+async function startImport() {
   if (!canImport.value) return
-  if (mode.value === 'replace') openPasswordPrompt()
-  else runImport()
+  if (mode.value === 'replace') return openPasswordPrompt()
+  const ok = await confirmDialog({
+    title: 'Import these stock cards?',
+    message: 'The stock cards will be added. Your existing records are kept.',
+    details: [
+      ['File', plan.value?.file_name],
+      ['Products', okProducts.value.length],
+      ['Offices', officeList.value],
+      ['Categories', typeSummary.value],
+    ],
+    confirmText: 'Import',
+  })
+  if (ok) runImport()
 }
 
 function confirmWithPassword() {
@@ -302,10 +318,22 @@ function num(value) {
             <h3 class="import-section-title">Products to import ({{ okProducts.length }})</h3>
             <div class="import-setall">
               <span class="import-muted">{{ typeSummary }}</span>
-              <select v-model="setAllType" class="form-select" @change="applyTypeToAll">
-                <option value="">Set all types to…</option>
-                <option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
-              </select>
+              <div class="import-setall-field">
+                <input
+                  v-model="setAllType"
+                  type="text"
+                  class="form-input"
+                  list="import-type-options"
+                  maxlength="100"
+                  placeholder="Set all categories to…"
+                  aria-label="Category for every product"
+                  @keydown.enter.prevent="applyTypeToAll"
+                />
+                <button type="button" class="btn btn-sm btn-secondary" :disabled="!setAllType.trim()" @click="applyTypeToAll">Apply</button>
+              </div>
+              <datalist id="import-type-options">
+                <option v-for="t in typeOptions" :key="t" :value="t" />
+              </datalist>
             </div>
           </div>
           <div class="import-hint">
@@ -361,9 +389,15 @@ function num(value) {
                     </div>
                   </td>
                   <td>
-                    <select v-model="types[p.key]" class="form-select import-type-select">
-                      <option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
-                    </select>
+                    <input
+                      v-model="types[p.key]"
+                      type="text"
+                      class="form-input import-type-select"
+                      list="import-type-options"
+                      maxlength="100"
+                      :placeholder="p.type"
+                      :aria-label="`Category for ${p.name}`"
+                    />
                   </td>
                   <td>{{ p.unit }}</td>
                   <td class="import-mono">{{ p.stock_no || 'auto' }}</td>
@@ -434,7 +468,7 @@ function num(value) {
           <div v-if="mode === 'replace'" class="import-confirm">
             <div class="import-alert import-alert-info" style="margin-bottom: 0.75rem;">
               <ShieldCheck :size="16" />
-              <span>A backup of {{ officeList }} is made automatically before anything is deleted. It can be restored from <strong>Others Management → Data Backup &amp; Restore</strong>.</span>
+              <span>A backup of {{ officeList }} is made automatically before anything is deleted. It can be restored from <strong>Office Settings → Data Backup &amp; Restore</strong>.</span>
             </div>
             <p class="import-muted import-password-note">
               <Lock :size="13" />
@@ -704,9 +738,14 @@ function num(value) {
   flex-wrap: wrap;
 }
 
-.import-setall .form-select {
-  width: auto;
-  min-width: 180px;
+.import-setall-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.import-setall .form-input {
+  width: 220px;
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
   font-size: 0.82rem;

@@ -297,7 +297,7 @@ class BackupPackageService
         $available = $manifest['sections'] ?? [];
         $sections  = array_values(array_intersect($this->withRequired($sections), $available));
         if ($currentLevel < 3) {
-            // System settings are changed by managers only (Others Management)
+            // System settings are changed by managers only (Office Settings)
             $sections = array_values(array_diff($sections, ['settings']));
         }
         if ($sections === []) {
@@ -907,7 +907,7 @@ HOW TO KEEP IT SAFE
   Do not rename or edit the files inside; the system will refuse a changed backup.
 
 HOW TO RESTORE
-  Sign in as a Manager -> Menu -> Others Management -> Data Backup & Restore
+  Sign in as a Manager -> Menu -> Office Settings -> Data Backup & Restore
   -> "Restore" tab -> choose this file -> pick what to restore -> Restore.
   A safety backup of the current data is made automatically first.
 

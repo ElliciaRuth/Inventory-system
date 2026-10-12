@@ -532,7 +532,7 @@ HTML;
     }
 
     /**
-     * POST /api/export/summary   { format: pdf|csv|word, month_from, month_to, paper_size?, type_id?, search? }
+     * POST /api/export/summary   { format: pdf|word, month_from, month_to, paper_size?, type_id?, search? }
      */
     public function summaryDownload()
     {
@@ -551,7 +551,7 @@ HTML;
         ];
         $paper = $paperMap[$paperSize] ?? $paperMap['long'];
 
-        if (! in_array($format, ['pdf', 'csv', 'word'], true)) {
+        if (! in_array($format, ['pdf', 'word'], true)) {
             return $this->respondError('Please select a download format.');
         }
         if ($monthFrom === '' || $monthTo === '') {
@@ -591,109 +591,15 @@ HTML;
 
         $filename = 'SummaryReport_' . $monthFrom . '_to_' . $monthTo;
 
-        // Build flat rows for CSV and grouped structure for PDF/Word
-        $allRows = [];
         $multiGrouped = []; // monthLabel => [ typeName => rows ]
         foreach ($multiMonth as $monthLabel => $report) {
-            foreach (($report['rows'] ?? []) as $row) {
-                $row['month_label'] = $monthLabel;
-                $allRows[] = $row;
-            }
             $multiGrouped[$monthLabel] = $report['groupedRows'] ?? [];
         }
 
         return match ($format) {
-            'csv'  => $this->downloadSummaryCsv($allRows, $filename, $reportTitle),
             'word' => $this->downloadSummaryWord($multiGrouped, $filename, $reportTitle, $paper),
             'pdf'  => $this->downloadSummaryPdf($multiGrouped, $filename, $reportTitle, $paper),
         };
-    }
-
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Summary CSV
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    private function downloadSummaryCsv(array $rows, string $filename, string $title): \CodeIgniter\HTTP\Response
-    {
-        ob_start();
-        $fp = fopen('php://output', 'w');
-        fwrite($fp, "\xEF\xBB\xBF"); // UTF-8 BOM
-
-        $this->putCsv($fp, [strtoupper($title)]);
-        $this->putCsv($fp, []);
-
-        $csvHeader = [
-            'No.', 'Items/Products',
-            'Beg. Qty', 'Unit', 'Beg. Unit Cost', 'Beg. Amount',
-            'Purch. Qty', 'Purch. Unit Cost', 'Purch. Amount',
-            'Used Qty',  'Used Unit Cost',  'Used Amount',
-            'Breakage Qty', 'Breakage Unit Cost', 'Breakage Amount',
-            'End. Qty', 'End. Unit Cost', 'End. Amount',
-        ];
-
-        // Group rows by month_label
-        $byMonth = [];
-        foreach ($rows as $row) {
-            $byMonth[$row['month_label'] ?? 'Unknown'][] = $row;
-        }
-
-        foreach ($byMonth as $monthLabel => $monthRows) {
-            // Month header
-            $this->putCsv($fp, [strtoupper($monthLabel)]);
-            $this->putCsv($fp, $csvHeader);
-
-            foreach ($monthRows as $row) {
-                $this->putCsv($fp, [
-                    $row['counter'],
-                    $row['item'],
-                    $row['begin_qty'],
-                    $row['unit_name'],
-                    number_format($row['begin_cost'],    2, '.', ''),
-                    number_format($row['begin_qty']  * $row['begin_cost'],    2, '.', ''),
-                    $row['purchase_qty'],
-                    number_format($row['purchase_cost'], 2, '.', ''),
-                    number_format($row['purchase_total'],2, '.', ''),
-                    $row['used_qty'],
-                    number_format($row['used_cost'],     2, '.', ''),
-                    number_format($row['used_total'],    2, '.', ''),
-                    $row['spoiled_qty'],
-                    number_format($row['spoiled_cost'],  2, '.', ''),
-                    number_format($row['spoiled_total'], 2, '.', ''),
-                    $row['ending_qty'],
-                    number_format($row['ending_cost'],   2, '.', ''),
-                    number_format($row['ending_qty'] * $row['ending_cost'], 2, '.', ''),
-                ]);
-            }
-
-            // Month totals row
-            $totals = array_reduce($monthRows, function ($carry, $r) {
-                $carry['begin_amt']   += $r['begin_qty']   * $r['begin_cost'];
-                $carry['purch_total'] += $r['purchase_total'];
-                $carry['used_total']  += $r['used_total'];
-                $carry['spoil_total'] += $r['spoiled_total'];
-                $carry['end_amt']     += $r['ending_qty']  * $r['ending_cost'];
-                return $carry;
-            }, ['begin_amt' => 0, 'purch_total' => 0, 'used_total' => 0, 'spoil_total' => 0, 'end_amt' => 0]);
-
-            $this->putCsv($fp, [
-                '', 'TOTAL', '', '', '', number_format($totals['begin_amt'],   2, '.', ''),
-                '', '', number_format($totals['purch_total'], 2, '.', ''),
-                '', '', number_format($totals['used_total'],  2, '.', ''),
-                '', '', number_format($totals['spoil_total'], 2, '.', ''),
-                '', '', number_format($totals['end_amt'],     2, '.', ''),
-            ]);
-
-            $this->putCsv($fp, []); // blank line between months
-        }
-
-        fclose($fp);
-        $csv = ob_get_clean();
-
-        return $this->response
-            ->setHeader('Content-Type', 'text/csv; charset=UTF-8')
-            ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '.csv"')
-            ->setHeader('Cache-Control', 'no-store')
-            ->setBody($csv);
     }
 
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

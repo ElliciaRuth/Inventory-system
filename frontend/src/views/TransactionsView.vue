@@ -158,7 +158,7 @@ onMounted(() => {
               <th style="text-align: right;">Quantity</th>
               <th style="text-align: right;">Unit Cost</th>
               <th>Reference / PO</th>
-              <th>Destination / Office</th>
+              <th>Username</th>
             </tr>
           </thead>
           <tbody>
@@ -195,7 +195,7 @@ onMounted(() => {
                 </span>
               </td>
               <td>
-                <span style="font-size: 0.85rem;">{{ t.office_name && t.office_name !== '—' ? t.office_name : 'Direct' }}</span>
+                <span style="font-size: 0.85rem; font-weight: 600;" title="Recorded by">{{ t.recorded_by && t.recorded_by !== '—' ? t.recorded_by : '—' }}</span>
               </td>
             </tr>
 

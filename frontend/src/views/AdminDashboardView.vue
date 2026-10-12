@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
-import { Users, Clock, Building2, Trash2, Pencil, Check, ShieldCheck } from 'lucide-vue-next'
+import { Users, Clock, Building2, Trash2, Pencil, Check, X, ShieldCheck, UserPlus } from 'lucide-vue-next'
 import { adminApi } from '../api/admin'
 import { maskEmail } from '../utils/maskEmail'
 import { useAuthStore } from '../stores/authStore'
@@ -74,8 +74,25 @@ async function fetchAdminData() {
 useAutoReload(fetchAdminData)
 
 // Actions
-async function handleActivateUser(userId) {
+// The account an action is about
+function userDetails(user = {}) {
+  return [
+    ['Name', user.name],
+    ['Username', user.username],
+    ['Role', user.role],
+    ['Office', user.user_office_name],
+  ]
+}
+
+async function handleActivateUser(userId, username, user = {}) {
   if (actionLoading.value) return
+  const ok = await confirmDialog({
+    title: 'Activate user?',
+    message: `${username ? `"${username}"` : 'This user'} will be able to log in.`,
+    details: userDetails(user),
+    confirmText: 'Activate',
+  })
+  if (!ok) return
   actionLoading.value = true
   try {
     await adminApi.activateUser(userId)
@@ -89,11 +106,35 @@ async function handleActivateUser(userId) {
   }
 }
 
-async function handleDeactivateUser(userId, username) {
+async function handleDeclineUser(userId, user = {}) {
+  if (actionLoading.value) return
+  const ok = await confirmDialog({
+    title: 'Decline this sign-up?',
+    message: 'The account will not be accepted and the registration is removed. The person can sign up again later.',
+    details: userDetails(user),
+    confirmText: 'Decline',
+    variant: 'danger',
+  })
+  if (!ok) return
+  actionLoading.value = true
+  try {
+    await adminApi.declineUser(userId)
+    flashMessage('Sign-up declined.')
+    triggerAutoReload('decline-user')
+    await fetchAdminData()
+  } catch (err) {
+    toast(errorMessage(err, 'Failed to decline the sign-up.'), 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleDeactivateUser(userId, username, user = {}) {
   if (actionLoading.value) return
   const ok = await confirmDialog({
     title: 'Deactivate user?',
     message: `${username ? `"${username}"` : 'This user'} will no longer be able to log in. You can reactivate the account later.`,
+    details: userDetails(user),
     confirmText: 'Deactivate',
     variant: 'danger',
   })
@@ -112,11 +153,12 @@ async function handleDeactivateUser(userId, username) {
   }
 }
 
-async function handleDeleteRecord(type, id, label) {
+async function handleDeleteRecord(type, id, label, record = {}) {
   if (actionLoading.value) return
   const ok = await confirmDialog({
     title: type === 'users' ? 'Delete user?' : 'Delete office?',
     message: `${label ? `"${label}"` : 'This record'} will be permanently deleted. This cannot be undone.`,
+    details: type === 'users' ? userDetails(record) : [['Office', label]],
     confirmText: 'Delete',
     variant: 'danger',
   })
@@ -153,6 +195,13 @@ function openEditOfficeModal(office) {
 
 async function handleSaveOffice() {
   if (modalLoading.value || !officeFormName.value.trim()) return
+  const ok = await confirmDialog({
+    title: editId.value ? 'Save changes to this office?' : 'Add this office?',
+    message: `"${officeFormName.value.trim()}" will be ${editId.value ? 'updated' : 'added'}.`,
+    details: [['Office name', officeFormName.value.trim()]],
+    confirmText: editId.value ? 'Save changes' : 'Add office',
+  })
+  if (!ok) return
   modalLoading.value = true
   try {
     await adminApi.saveRecord('user_office_table', {
@@ -284,49 +333,61 @@ onMounted(() => {
       />
     </section>
 
-    <!-- Pending Applicants Section (Matches admin.php) -->
-    <section v-if="adminData.pendingUsers.length > 0 || activeSection === 'pending'" class="panel" style="border: 1px solid var(--color-warning);">
-      <div class="panel-header" style="background: var(--color-warning-bg);">
-        <div class="panel-title-group">
-          <h2 class="panel-title" style="color: var(--color-warning);">
-            Pending Applicants ({{ adminData.pendingUsers.length }})
-          </h2>
-          <p class="panel-subtitle">New registrations awaiting administrator activation before they can log in.</p>
+    <!-- Pending Applicants: sign-ups waiting to be activated or declined -->
+    <section v-if="adminData.pendingUsers.length > 0 || activeSection === 'pending'" class="panel pending-panel">
+      <div class="panel-header pending-head">
+        <div class="pending-title-wrap">
+          <span class="pending-icon"><UserPlus :size="18" /></span>
+          <div class="panel-title-group">
+            <h2 class="panel-title">
+              Pending Applicants
+              <span class="pending-count">{{ adminData.pendingUsers.length }}</span>
+            </h2>
+            <p class="panel-subtitle">New sign-ups waiting to be activated or declined before they can log in.</p>
+          </div>
         </div>
       </div>
 
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table stack-mobile">
           <thead>
             <tr>
+              <th>Full Name</th>
               <th>Username</th>
               <th>Email</th>
               <th>Requested Role</th>
               <th>Assigned Office</th>
-              <th style="width: 140px; text-align: center;">Action</th>
+              <th class="pending-actions-head">Action</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="pUser in adminData.pendingUsers" :key="pUser.user_id">
-              <td><strong>{{ pUser.username }}</strong></td>
-              <td>{{ maskEmail(pUser.email) || '—' }}</td>
-              <td><span class="badge badge-info">{{ pUser.role }}</span></td>
-              <td>{{ pUser.user_office_name || 'N/A' }}</td>
-              <td style="text-align: center;">
-                <button
-                  type="button"
-                  class="btn btn-sm btn-primary"
-                  style="background: var(--color-success); border-color: var(--color-success); display: inline-flex; align-items: center; gap: 4px;"
-                  @click="handleActivateUser(pUser.user_id)"
-                >
-                  <Check :size="14" />
-                  <span>Activate</span>
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!adminData.pendingUsers.length">
-              <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                No accounts currently awaiting activation.
+              <td data-label="Full Name" class="cell-title"><strong>{{ pUser.name || '—' }}</strong></td>
+              <td data-label="Username">{{ pUser.username }}</td>
+              <td data-label="Email">{{ maskEmail(pUser.email) || '—' }}</td>
+              <td data-label="Requested Role"><span class="badge badge-info">{{ pUser.role }}</span></td>
+              <td data-label="Assigned Office">{{ pUser.user_office_name || 'N/A' }}</td>
+              <td class="cell-actions">
+                <div class="pending-actions">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-primary pending-btn"
+                    :disabled="actionLoading"
+                    @click="handleActivateUser(pUser.user_id, pUser.username, pUser)"
+                  >
+                    <Check :size="14" />
+                    <span>Activate</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary pending-btn pending-btn-decline"
+                    :disabled="actionLoading"
+                    @click="handleDeclineUser(pUser.user_id, pUser)"
+                  >
+                    <X :size="14" />
+                    <span>Decline</span>
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -414,7 +475,7 @@ onMounted(() => {
                     class="btn btn-sm btn-secondary"
                     style="color: var(--color-warning);"
                     title="Deactivate Account"
-                    @click="handleDeactivateUser(user.user_id, user.username)"
+                    @click="handleDeactivateUser(user.user_id, user.username, user)"
                   >
                     Deactivate
                   </button>
@@ -425,7 +486,7 @@ onMounted(() => {
                     class="btn btn-sm btn-secondary"
                     style="color: var(--color-success);"
                     title="Activate Account"
-                    @click="handleActivateUser(user.user_id)"
+                    @click="handleActivateUser(user.user_id, user.username, user)"
                   >
                     Activate
                   </button>
@@ -436,7 +497,7 @@ onMounted(() => {
                     class="btn btn-sm btn-secondary"
                     style="color: var(--color-danger); display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;"
                     title="Delete User"
-                    @click="handleDeleteRecord('users', user.user_id, user.username)"
+                    @click="handleDeleteRecord('users', user.user_id, user.username, user)"
                   >
                     <Trash2 :size="14" />
                   </button>
@@ -576,3 +637,95 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ── Pending applicants ── */
+.pending-panel {
+  border-color: var(--color-warning);
+}
+
+.pending-head {
+  background: var(--color-warning-bg);
+}
+
+.pending-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.pending-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  color: var(--color-warning);
+}
+
+.pending-head .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-main);
+}
+
+.pending-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.pending-actions-head {
+  width: 220px;
+  text-align: right !important;
+}
+
+/* Activate and Decline side by side, the same size */
+.pending-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+}
+
+.pending-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 96px;
+  white-space: nowrap;
+}
+
+.pending-btn-decline {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+
+.pending-btn-decline:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+@media (max-width: 640px) {
+  .pending-actions {
+    width: 100%;
+  }
+  .pending-btn {
+    flex: 1;
+  }
+}
+</style>

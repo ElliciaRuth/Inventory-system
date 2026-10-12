@@ -105,11 +105,24 @@ function openEditModal(prod) {
   isModalOpen.value = true
 }
 
+// The product an action is about
+function productDetails(p) {
+  return [
+    ['Product no.', p.product_no],
+    ['Name', p.product],
+    ['Stock no.', p.stock_no],
+    ['Category', p.type_name],
+    ['Unit', p.unit_name],
+    ['Stock on hand', p.total_stock !== undefined ? `${p.total_stock} ${p.unit_name || ''}` : ''],
+  ]
+}
+
 async function handleDelete(prod) {
   if (deletingId.value) return
   const ok = await confirmDialog({
     title: 'Delete product?',
     message: `"${prod.product}" will be permanently deleted. This cannot be undone. Only products with no stock history can be deleted; archive the others.`,
+    details: productDetails(prod),
     confirmText: 'Delete',
     variant: 'danger',
   })
@@ -156,6 +169,14 @@ function closeArchive() {
 }
 
 async function confirmArchive() {
+  const ok = await confirmDialog({
+    title: 'Archive product?',
+    message: `"${archiving.value.product}" will be hidden from the product lists, the stock forms and stock alerts. You can restore it later.`,
+    details: [...productDetails(archiving.value), ['Reason', archiveReason.value.trim() || 'None given']],
+    confirmText: 'Archive',
+    variant: 'warning',
+  })
+  if (!ok) return
   archiveBusy.value = true
   archiveError.value = ''
   try {
@@ -175,6 +196,7 @@ async function handleRestore(prod) {
   const ok = await confirmDialog({
     title: 'Restore product?',
     message: `"${prod.product}" goes back to the product lists, the stock forms and stock alerts.`,
+    details: productDetails(prod),
     confirmText: 'Restore',
   })
   if (!ok) return

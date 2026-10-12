@@ -1,20 +1,22 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { AlertTriangle, HelpCircle, ShieldAlert } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle2, HelpCircle, Info, ShieldAlert } from 'lucide-vue-next'
 import { confirmState, settleConfirm } from '../composables/useConfirm'
 
 const cancelBtn = ref(null)
 const confirmBtn = ref(null)
 
-const icon = computed(() => ({ danger: ShieldAlert, warning: AlertTriangle }[confirmState.variant] || HelpCircle))
+const icon = computed(
+  () => ({ danger: ShieldAlert, warning: AlertTriangle, success: CheckCircle2, info: Info }[confirmState.variant] || HelpCircle)
+)
 
-// Focus the safe choice for destructive actions, so a stray Enter cancels
+// Focus the safe choice for destructive actions, so a stray Enter cancels (a notice has only OK)
 watch(
   () => confirmState.open,
   async (open) => {
     if (!open) return
     await nextTick()
-    ;(confirmState.variant === 'primary' ? confirmBtn : cancelBtn).value?.focus()
+    ;(confirmState.alert || confirmState.variant === 'primary' ? confirmBtn : cancelBtn).value?.focus()
   }
 )
 
@@ -41,9 +43,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <span class="cd-icon"><component :is="icon" :size="26" /></span>
           <h2 id="cd-title" class="cd-title">{{ confirmState.title }}</h2>
           <p v-if="confirmState.message" id="cd-message" class="cd-message">{{ confirmState.message }}</p>
+          <dl v-if="confirmState.details.length" class="cd-details">
+            <div v-for="([label, value], i) in confirmState.details" :key="i" class="cd-detail">
+              <dt>{{ label }}</dt>
+              <dd>{{ value }}</dd>
+            </div>
+          </dl>
         </div>
         <div class="cd-actions">
-          <button ref="cancelBtn" type="button" class="btn btn-secondary cd-btn" @click="settleConfirm(false)">
+          <button v-if="!confirmState.alert" ref="cancelBtn" type="button" class="btn btn-secondary cd-btn" @click="settleConfirm(false)">
             {{ confirmState.cancelText }}
           </button>
           <button ref="confirmBtn" type="button" class="btn cd-btn cd-confirm" @click="settleConfirm(true)">
@@ -57,14 +65,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <style scoped>
 .cd-backdrop {
-  z-index: 1000;
+  z-index: 1300;
 }
 
 .cd-card {
   --cd-accent: var(--color-primary);
   --cd-accent-bg: var(--color-primary-light);
   width: 100%;
-  max-width: 420px;
+  max-width: 460px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-top: 4px solid var(--cd-accent);
@@ -82,6 +90,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .cd-warning {
   --cd-accent: var(--color-warning);
   --cd-accent-bg: var(--color-warning-bg);
+}
+
+.cd-success {
+  --cd-accent: var(--color-success);
+  --cd-accent-bg: var(--color-success-bg);
+}
+
+.cd-info {
+  --cd-accent: var(--color-info);
+  --cd-accent-bg: var(--color-info-bg);
 }
 
 .cd-body {
@@ -115,6 +133,44 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   font-size: 14px;
   line-height: 1.55;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* What is being deleted / saved: label on the left, value on the right */
+.cd-details {
+  margin: 16px 0 0;
+  padding: 4px 14px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--cd-accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  text-align: left;
+}
+
+.cd-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 7px 0;
+  font-size: 13px;
+}
+
+.cd-detail + .cd-detail {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cd-detail dt {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.cd-detail dd {
+  margin: 0;
+  color: var(--text-main);
+  font-weight: 700;
+  text-align: right;
   overflow-wrap: anywhere;
 }
 

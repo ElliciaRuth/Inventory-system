@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
+import { alertDialog } from '../composables/useConfirm'
 import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 import { AlertTriangle, Palette, Moon, Sun } from 'lucide-vue-next'
 
@@ -37,6 +38,18 @@ async function handleLogin() {
         ? route.query.redirect
         : '/'
       router.push(redirect)
+    } else if (authStore.accountStatus === 'pending') {
+      await alertDialog({
+        title: 'Account not yet approved',
+        message: 'Your account is still waiting for approval. A manager of your office or an administrator has to accept it before you can sign in. Please try again later.',
+        variant: 'warning',
+      })
+    } else if (authStore.accountStatus === 'deactivated') {
+      await alertDialog({
+        title: 'Account deactivated',
+        message: 'Your account has been deactivated. Please contact a manager of your office or an administrator.',
+        variant: 'danger',
+      })
     } else {
       errorMessage.value = authStore.error || 'Invalid username or password.'
     }

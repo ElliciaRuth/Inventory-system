@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, Hash, Clock, Monitor, Tag } from 'lucide-vue-next'
+import { ArrowRight, Hash, Clock, Tag } from 'lucide-vue-next'
 
 // Readable view of an audit entry's details: a before → after table for changes,
 // labelled values for everything else, and the entry's own facts underneath.
@@ -8,7 +8,6 @@ const props = defineProps({
   log: { type: Object, required: true },
   tone: { type: String, default: 'info' },
   when: { type: Function, required: true },
-  ipLabel: { type: Function, required: true },
 })
 
 // Labels that read better than the field name turned into words
@@ -32,6 +31,25 @@ const LABELS = {
   pending_setup: 'Pending setup',
   archived_at: 'Archived at',
   protected: 'Password-protected',
+  category_changes: 'Category changes',
+  type_overrides: 'Category changes',
+}
+
+// Category changes made in an import preview: [{ product, unit, from, to }].
+// Older entries stored the raw product keys ("office|name|unit|size|detected type" → chosen).
+function categoryRows(key, value) {
+  if (key === 'category_changes' && Array.isArray(value)) {
+    return value.filter(isPlainObject).map((c) => ({ product: c.product, unit: c.unit, from: c.from, to: c.to }))
+  }
+  if (key === 'type_overrides' && isPlainObject(value)) {
+    return Object.entries(value)
+      .map(([productKey, chosen]) => {
+        const [, name = '', unit = '', , detected = ''] = String(productKey).split('|')
+        return { product: name.replace(/\b\w/g, (c) => c.toUpperCase()), unit, from: detected, to: String(chosen ?? '').trim() }
+      })
+      .filter((c) => c.to && c.to.toLowerCase() !== c.from.toLowerCase())
+  }
+  return null
 }
 
 function label(key) {
@@ -81,6 +99,10 @@ const fields = computed(() =>
   Object.entries(details.value)
     .filter(([key]) => !(key === 'before' && hasBefore.value) && !(key === 'after' && hasAfter.value))
     .map(([key, value]) => {
+      const categories = categoryRows(key, value)
+      if (categories) {
+        return { key, label: label(key), kind: 'categories', items: categories }
+      }
       if (isPlainObject(value) && 'before' in value && 'after' in value && isScalar(value.before) && isScalar(value.after)) {
         return { key, label: label(key), kind: 'pair', before: format(key, value.before), after: format(key, value.after) }
       }
@@ -121,7 +143,7 @@ const fields = computed(() =>
     <section v-if="fields.length" class="ad-section">
       <h4 class="ad-heading">Details</h4>
       <dl class="ad-fields">
-        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': f.kind === 'json' || f.kind === 'list' }">
+        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': ['json', 'list', 'categories'].includes(f.kind) }">
           <dt>{{ f.label }}</dt>
           <dd v-if="f.kind === 'pair'" class="ad-pair">
             <span class="ad-pair-old">{{ f.before }}</span>
@@ -135,6 +157,25 @@ const fields = computed(() =>
           <dd v-else-if="f.kind === 'list'" class="ad-sublist">
             <span v-for="item in f.items" :key="item.label"><em>{{ item.label }}</em> {{ item.value }}</span>
           </dd>
+          <dd v-else-if="f.kind === 'categories'">
+            <span v-if="!f.items.length" class="ad-none">None: every product kept its detected category</span>
+            <div v-else class="ad-cats">
+              <div class="ad-cats-head">
+                <span>Product</span>
+                <span>Unit</span>
+                <span>Category</span>
+              </div>
+              <div v-for="(c, i) in f.items" :key="i" class="ad-cat">
+                <span class="ad-cat-product">{{ c.product || '—' }}</span>
+                <span class="ad-cat-unit">{{ c.unit || '—' }}</span>
+                <span class="ad-pair">
+                  <span class="ad-pair-old">{{ c.from || '—' }}</span>
+                  <ArrowRight :size="13" />
+                  <span class="ad-pair-new">{{ c.to }}</span>
+                </span>
+              </div>
+            </div>
+          </dd>
           <dd v-else-if="f.kind === 'json'"><pre class="ad-json">{{ f.value }}</pre></dd>
           <dd v-else>{{ f.value }}</dd>
         </div>
@@ -146,7 +187,6 @@ const fields = computed(() =>
       <span><Hash :size="12" /> Entry {{ log.audit_id }}</span>
       <span><Tag :size="12" /> <code>{{ log.action }}</code></span>
       <span><Clock :size="12" /> {{ when(log.created_at) }}</span>
-      <span v-if="log.ip_address"><Monitor :size="12" /> {{ ipLabel(log.ip_address) }}</span>
     </footer>
   </div>
 </template>
@@ -261,6 +301,61 @@ const fields = computed(() =>
   font-weight: 500;
   color: var(--text-muted);
   margin-right: 0.25rem;
+}
+
+/* Category changes: one row per product */
+.ad-cats {
+  display: grid;
+  margin-top: 0.25rem;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.ad-cats-head,
+.ad-cat {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 0.8fr) minmax(0, 2fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0.75rem;
+}
+.ad-cats-head {
+  position: sticky;
+  top: 0;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ad-cat {
+  font-size: 0.82rem;
+}
+.ad-cat + .ad-cat {
+  border-top: 1px solid var(--border-subtle);
+}
+.ad-cat-product {
+  font-weight: 600;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+.ad-cat-unit {
+  color: var(--text-muted);
+}
+@media (max-width: 640px) {
+  .ad-cats-head {
+    display: none;
+  }
+  .ad-cat {
+    grid-template-columns: 1fr auto;
+  }
+  .ad-cat .ad-pair {
+    grid-column: 1 / -1;
+  }
 }
 
 .ad-json {

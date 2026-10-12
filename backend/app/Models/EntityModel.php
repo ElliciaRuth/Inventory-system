@@ -6,6 +6,10 @@ use CodeIgniter\Model;
 
 class EntityModel extends Model
 {
+    /** Every office's default entity, used when a product names none. */
+    public const DEFAULT_ENTITY       = 'Benguet State University';
+    public const DEFAULT_FUND_CLUSTER = '06';
+
     protected $table                 = 'entity_table';
     protected $primaryKey            = 'entity_id';
     protected $returnType            = 'array';
@@ -38,8 +42,14 @@ class EntityModel extends Model
         $id = $this->insert([
             'entity'         => $name,
             'user_office_id' => $userOfficeId,
-            'fund_cluster'   => '',
+            'fund_cluster'   => strcasecmp($name, self::DEFAULT_ENTITY) === 0 ? self::DEFAULT_FUND_CLUSTER : '',
         ]);
         return (int) $id;
+    }
+
+    /** The office's "Benguet State University" entity (fund cluster 06), created if missing. */
+    public function defaultFor(int $userOfficeId): int
+    {
+        return $this->firstOrCreate(self::DEFAULT_ENTITY, $userOfficeId);
     }
 }

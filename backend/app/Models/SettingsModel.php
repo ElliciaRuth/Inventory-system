@@ -13,7 +13,7 @@ class SettingsModel extends Model
     /**
      * Return settings definitions filtered by access level.
      * Level 2: inventory settings only (no users)
-     * Level 3: inventory settings + users (within office)
+     * Level 3: inventory settings + users (within office, lower roles only)
      * Level 4: user + user_office_table management only
      */
     public function definitions(int $levelId = 2): array
@@ -99,14 +99,14 @@ class SettingsModel extends Model
         ];
     }
 
-    public function indexData(int $userOfficeId = 0, int $levelId = 2): array
+    public function indexData(int $userOfficeId = 0, int $levelId = 2, int $userId = 0): array
     {
         $definitions = $this->definitions($levelId);
 
         $records = [];
         foreach (array_keys($definitions) as $type) {
             if ($type === 'users') {
-                $records['users'] = $this->userRecords($userOfficeId, $levelId);
+                $records['users'] = $this->userRecords($userOfficeId, $levelId, $userId);
             } elseif ($type === 'user_office_table') {
                 $records['user_office_table'] = $this->db->table('user_office_table')
                     ->orderBy('user_office_name', 'ASC')->get()->getResultArray();
@@ -226,6 +226,10 @@ class SettingsModel extends Model
         if ($levelId < 4 && $userOfficeId > 0) {
             $builder->where('user_table.user_office_id', $userOfficeId);
         }
+        // Below technical staff, only sign-ups for a lower role (a manager never sees another manager's)
+        if ($levelId < 4) {
+            $builder->where('COALESCE(loa.lvl_of_access, 0) <', $levelId, false);
+        }
 
         return array_map([$this, 'maskedEmail'], $builder->get()->getResultArray());
     }
@@ -249,6 +253,17 @@ class SettingsModel extends Model
         $this->db->table('user_table')
             ->where('user_id', $userId)
             ->update(['user_activity_id' => 1]);
+    }
+
+    /** Remove a sign-up that is still pending (nothing else can refer to it yet). False if it isn't pending. */
+    public function deletePendingUser(int $userId): bool
+    {
+        $this->db->table('user_table')
+            ->where('user_id', $userId)
+            ->where('user_activity_id', 3)
+            ->delete();
+
+        return $this->db->affectedRows() > 0;
     }
 
     public function deactivateUser(int $userId): void
@@ -282,7 +297,7 @@ class SettingsModel extends Model
         return $builder->get()->getResultArray();
     }
 
-    private function userRecords(int $userOfficeId = 0, int $levelId = 2): array
+    private function userRecords(int $userOfficeId = 0, int $levelId = 2, int $userId = 0): array
     {
         $sql = 'SELECT u.user_id, u.name, u.username, u.email, u.user_office_id, u.user_activity_id, u.lvl_of_access_id,
                        COALESCE(uot.user_office_name, "Global") AS user_office_name,
@@ -300,6 +315,13 @@ class SettingsModel extends Model
         if ($levelId < 4 && $userOfficeId > 0) {
             $conditions[] = 'u.user_office_id = ?';
             $params[]     = $userOfficeId;
+        }
+
+        // Below technical staff: accounts with a lower role, plus their own (managers never see other managers)
+        if ($levelId < 4) {
+            $conditions[] = '(COALESCE(loa.lvl_of_access, 0) < ? OR u.user_id = ?)';
+            $params[]     = $levelId;
+            $params[]     = $userId;
         }
 
         if ($conditions) {

@@ -95,10 +95,10 @@ function closeReturn() {
   <div>
     <div class="page-hero">
       <div>
-        <p class="hero-eyebrow">Inter-Unit Borrowing</p>
+        <p class="hero-eyebrow">Inter-Office Borrowing</p>
         <h1 class="hero-title">Borrowed Items</h1>
         <p class="hero-subtitle">
-          Stock lent to other units: who borrowed it, how much is back, and what is still out.
+          Stock lent to other offices: who borrowed it, how much is back, and what is still out.
           Lending is recorded as a stock-out; each return comes back in as stock-in.
         </p>
       </div>
@@ -122,7 +122,7 @@ function closeReturn() {
         </div>
         <div class="br-search">
           <Search :size="15" />
-          <input v-model="search" type="search" class="form-input" placeholder="Search item, borrower or unit…" @input="page = 1" />
+          <input v-model="search" type="search" class="form-input" placeholder="Search item, borrower or office…" @input="page = 1" />
         </div>
       </div>
 
@@ -130,7 +130,7 @@ function closeReturn() {
       <div v-else-if="!filtered.length" class="br-empty">
         <Handshake :size="30" />
         <strong>{{ search ? 'Nothing matches your search.' : tab === 'open' ? 'Nothing is out on loan.' : 'No borrows here.' }}</strong>
-        <span v-if="!borrows.length">Use “Lend to Another Unit (Borrow)” in Record Stock In / Out to lend stock.</span>
+        <span v-if="!borrows.length">Use “Lend to Another Office (Borrow)” in Record Stock In / Out to lend stock.</span>
       </div>
 
       <div v-else class="table-responsive">

@@ -18,11 +18,6 @@ namespace App\Libraries;
  */
 class StockcardWorkbookParser
 {
-    public const TYPES = [
-        'Raw Materials', 'Product Label', 'Other Supplies', 'Finished Product',
-        'Perishable Raw Materials', 'Non-Perishable Raw Materials', 'Packaging', 'Operational Supplies',
-    ];
-
     private const MONTHS = [
         'jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'jun' => 6,
         'jul' => 7, 'aug' => 8, 'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12,
@@ -114,7 +109,6 @@ class StockcardWorkbookParser
 
         return [
             'default_year' => $defaultYear,
-            'types'        => self::TYPES,
             'notes'        => $this->notes,
             'cards'        => array_map(fn (array $c) => $this->publicCard($c), $cards),
             'products'     => $products,

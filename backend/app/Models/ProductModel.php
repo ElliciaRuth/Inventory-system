@@ -34,8 +34,13 @@ class ProductModel extends Model
      */
     public function listForSelect(int $userOfficeId = 0, int $alsoProductId = 0): array
     {
-        $builder = $this->select('product_table.product_id, product_table.product, product_table.product_no, product_table.stock_no, product_table.product_description, product_table.measurement, product_table.archived_at, unit_table.unit')
+        // Category and stock on hand feed the Stock Card's item navigator
+        $builder = $this->select('product_table.product_id, product_table.product, product_table.product_no, product_table.stock_no, product_table.product_description, product_table.measurement, product_table.archived_at, unit_table.unit,
+                product_table.type_id, COALESCE(type_of_product.type, "") AS type_name,
+                (SELECT COALESCE(SUM(bt.current_qty), 0) FROM batch_table bt
+                    WHERE bt.product_id = product_table.product_id AND bt.user_office_id <=> product_table.user_office_id) AS stock_on_hand', false)
             ->join('unit_table', 'product_table.unit_id = unit_table.unit_id', 'left')
+            ->join('type_of_product', 'product_table.type_id = type_of_product.type_id', 'left')
             ->groupStart()
                 ->where('product_table.archived_at', null)
                 ->orWhere('product_table.product_id', $alsoProductId)

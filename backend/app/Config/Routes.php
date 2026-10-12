@@ -34,8 +34,6 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         // ── Account setup & profile ─────────────────────────────────────────
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/update-profile', 'AuthController::updateProfile');
-        $routes->post('auth/email-change/request', 'AuthController::requestEmailChange');
-        $routes->post('auth/email-change/confirm', 'AuthController::confirmEmailChange');
 
         // ── Dashboard, transaction log, notifications ────────────────────────
         $routes->get('dashboard', 'DashboardController::index', ['filter' => 'level:1']);
@@ -87,13 +85,14 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('export/summary/options', 'ExportController::summaryOptions', ['filter' => 'level:2']);
         $routes->post('export/summary', 'ExportController::summaryDownload', ['filter' => 'level:2']);
 
-        // ── Settings ("Others Management"): managers; technical staff for users & user offices ──
+        // ── Settings ("Office Settings"): managers; technical staff for users & user offices ──
         // Which record types a level may manage is decided by SettingsModel::definitions().
         $routes->get('settings', 'SettingsController::index', ['filter' => 'level:3']);
         $routes->get('settings/system', 'SettingsController::systemSettings', ['filter' => 'level:2']);
         $routes->post('settings/system', 'SettingsController::saveSystemSettings', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/activate', 'SettingsController::activate/$1', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/deactivate', 'SettingsController::deactivate/$1', ['filter' => 'level:3']);
+        $routes->post('settings/users/(:num)/decline', 'SettingsController::decline/$1', ['filter' => 'level:3']);
         $routes->get('settings/(:segment)/(:num)', 'SettingsController::fetch/$1/$2', ['filter' => 'level:3']);
         $routes->post('settings/(:segment)', 'SettingsController::save/$1', ['filter' => 'level:3']);
         $routes->delete('settings/(:segment)/(:num)', 'SettingsController::delete/$1/$2', ['filter' => 'level:3']);

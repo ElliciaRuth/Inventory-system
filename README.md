@@ -63,8 +63,8 @@ The system enforces strict role-based access control (RBAC) segregated by office
 | Role (Level) | Accessible Modules & Permissions |
 |---|---|
 | **Staff** (1) | **Dashboard**, **Item Catalog** (read-only product inventory), **Request Stock Out** (search or scan batch barcodes, build personal list, submit for approval), **My Stock-Out List**, **Request History** (track submitted requests, approval decisions, and custodian rejection reasons), **Transaction Log**, **Notifications** (request status updates and stock alerts), and **Edit Profile**. |
-| **Custodian** (2) | All Staff capabilities, plus: **Stockcard Ledger** (record receipts/stock-in, issues, lends, returns, and adjust in/out with required reasons; edit report unit cost), **Physical Count** (reconcile shelf stock against recorded balances), **Borrowed Items** (track open, overdue, and returned inter-unit loans), **Pending Stock-Out Requests** (review requests, edit quantities, approve individual/all, reject with mandatory feedback reason), **Products & Catalog** (add/edit products, archive/restore items, generate & download finished product and batch barcodes in SVG), **Reports** (Inventory Summary Report, Batch Inventory report), **Exports** (Stockcard ledger and summary reports to Excel/CSV), **Import from Excel** (load Appendix 58 stock cards into office inventory; replace mode requires manager password), and **Automatic Daily Backups** on login. |
-| **Manager** (3) | All Custodian capabilities, plus: **Others Management** (System settings: manage user accounts and activate pending registrants, entity types, units of measure, reference types, product categories, offices, and batch expiry alert thresholds), **Data Backup & Restore** (create modular ZIP packages or encrypted `.bsubackup` archives, download archives, restore backups with automatic pre-restore safety snapshots, configure backup schedule), **Audit Log** (detailed, filterable audit trail for their office), and **Excel Stockcard Import** with direct replace authorization. |
+| **Custodian** (2) | All Staff capabilities, plus: **Stockcard Ledger** (record receipts/stock-in, issues, lends, returns, and adjust in/out with required reasons; edit report unit cost), **Physical Count** (reconcile shelf stock against recorded balances), **Borrowed Items** (track open, overdue, and returned inter-unit loans), **Pending Stock-Out Requests** (review requests, edit quantities, approve individual/all, reject with mandatory feedback reason), **Products & Catalog** (add/edit products, archive/restore items, generate & download finished product and batch barcodes in SVG), **Reports** (Inventory Summary Report, Batch Inventory report), **Exports** (Stockcard ledger to PDF, Word or Excel/CSV; summary reports to PDF or Word), **Import from Excel** (load Appendix 58 stock cards into office inventory; replace mode requires manager password), and **Automatic Daily Backups** on login. |
+| **Manager** (3) | All Custodian capabilities, plus: **Office Settings** (System settings: manage user accounts and activate pending registrants, entity types, units of measure, reference types, product categories, offices, and batch expiry alert thresholds), **Data Backup & Restore** (create modular ZIP packages or encrypted `.bsubackup` archives, download archives, restore backups with automatic pre-restore safety snapshots, configure backup schedule), **Audit Log** (detailed, filterable audit trail for their office), and **Excel Stockcard Import** with direct replace authorization. |
 | **Technical Staff** (4) | System Administration: **User Management** (manage all users and assignments across all offices; activate/deactivate accounts), **Office Management**, **Global Audit Log** (inspect immutable audit records across all university offices), and **Edit Profile**. Technical staff accounts are protected: they **cannot be deactivated or deleted** by any user or API request. Inventory operations and notification alerts are hidden for admin accounts. |
 
 ### Account Lifecycle & Authentication
@@ -296,7 +296,7 @@ Client devices on the same local network access the system directly through the 
 
 ### Backup & Disaster Recovery
 
-Managers configure and trigger backups under **Menu → Management → Others Management → Data Backup & Restore**.
+Managers configure and trigger backups under **Menu → Management → Office Settings → Data Backup & Restore**.
 
 - **Creating Backups:** Click **Create Backup**. Choose the modules to package:
   - *Office Setup:* Entities, product types, reference types, and units.
@@ -388,7 +388,7 @@ Every API call passes through `RequestGuard` middleware, enforcing strict bounda
 ### Resetting Forgotten Passwords
 
 #### Option 1: Manager Self-Service
-An office Manager can reset passwords for staff in their office via **Others Management → Users → Edit User**.
+An office Manager can reset passwords for staff in their office via **Office Settings → Users → Edit User**.
 
 #### Option 2: Spark CLI Command (Offline Server)
 If an administrator account password is forgotten, run the password reset command from a terminal on the host computer:

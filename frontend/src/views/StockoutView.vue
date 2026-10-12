@@ -4,7 +4,9 @@ import { ClipboardList, AlertTriangle, Package } from 'lucide-vue-next'
 import { stockoutApi } from '../api/stockout'
 import { stockApi } from '../api/stock'
 import { barcodesApi } from '../api/reports'
+import CameraScanButton from '../components/CameraScanButton.vue'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 const items = ref([])
 const loading = ref(true)
@@ -114,6 +116,12 @@ async function handlePickerEnter() {
   }
 }
 
+// Camera scan: same as a USB scanner typing the code and pressing Enter
+function onCameraScan(text) {
+  pickerQuery.value = text
+  handlePickerEnter()
+}
+
 async function addToList() {
   formError.value = ''
   if (!selected.value) {
@@ -133,6 +141,18 @@ async function addToList() {
     formError.value = `Cannot request ${qty} — only ${maxQty.value} available.`
     return
   }
+  const ok = await confirmDialog({
+    title: 'Add to your list?',
+    message: `${qty} ${selected.value.unit_name || ''} of ${selected.value.product} will be added to your stock-out list.`,
+    details: [
+      ['Product', selected.value.product],
+      ['Sub-product', selectedCopy.value ? `₱${Number(selectedCopy.value.unit_cost).toFixed(2)}${selectedCopy.value.label ? ` (${selectedCopy.value.label})` : ''}` : ''],
+      ['Quantity', `${qty} ${selected.value.unit_name || ''}`],
+      ['Available', maxQty.value],
+    ],
+    confirmText: 'Add to list',
+  })
+  if (!ok) return
 
   saving.value = true
   try {
@@ -191,14 +211,17 @@ onMounted(loadItems)
             <button type="button" class="btn btn-sm btn-secondary" @click="clearSelection">Change</button>
           </div>
           <template v-else>
-            <input
-              v-model="pickerQuery"
-              type="text"
-              class="form-input"
-              placeholder="Search product or scan barcode…"
-              autocomplete="off"
-              @keydown.enter.prevent="handlePickerEnter"
-            />
+            <div class="input-cam-wrap">
+              <input
+                v-model="pickerQuery"
+                type="text"
+                class="form-input"
+                placeholder="Search product or scan barcode…"
+                autocomplete="off"
+                @keydown.enter.prevent="handlePickerEnter"
+              />
+              <span class="input-cam"><CameraScanButton @scanned="onCameraScan" /></span>
+            </div>
             <small v-if="scanning" style="color: var(--text-muted);">Looking up barcode…</small>
             <ul v-if="pickerMatches.length" class="picker-list">
               <li v-for="item in pickerMatches" :key="item.product_id" @mousedown.prevent="selectProduct(item)">

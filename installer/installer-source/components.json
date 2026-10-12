@@ -1,0 +1,62 @@
+{
+  "_comment": "Pinned downloads for build.ps1. Every file is checked against its SHA-256; a mismatch stops the build. To move to a newer version, change url/file/sha256 together (take the checksum from the publisher's page, not from your own download) and test the installer again.",
+  "laragon": {
+    "version": "6.0.0",
+    "url": "https://github.com/leokhoa/laragon/releases/download/6.0.0/laragon-wamp.exe",
+    "file": "laragon-wamp-6.0.0.exe",
+    "sha256": "333a8eaa06b0d4078027deec2e04fb59c8bbdc06c03398c9253e637aeb2c00d8",
+    "_note": "Laragon 6.0 is the last free release (7.x and later need a paid license). Only its manager, HeidiSQL and folder layout are used; its old Apache/PHP/MySQL are replaced by the components below."
+  },
+  "php": {
+    "version": "8.3.35",
+    "url": "https://downloads.php.net/~windows/releases/archives/php-8.3.35-Win32-vs16-x64.zip",
+    "fallbackUrl": "https://downloads.php.net/~windows/releases/php-8.3.35-Win32-vs16-x64.zip",
+    "file": "php-8.3.35-Win32-vs16-x64.zip",
+    "folder": "php-8.3.35-Win32-vs16-x64",
+    "sha256": "b454bed828a74536125d8a96119eae8ffbb186b305759dd6cf8d9bb4b55968b1",
+    "_note": "Thread-safe build: Apache loads PHP as a module (php8apache2_4.dll). The backend needs PHP ^8.2 (composer.json, CodeIgniter 4.7)."
+  },
+  "apache": {
+    "version": "2.4.69",
+    "url": "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.69-261002-Win64-VS18.zip",
+    "file": "httpd-2.4.69-261002-Win64-VS18.zip",
+    "folder": "httpd-2.4.69-win64-VS18",
+    "sha256": "ca272e0b75abad78b1e4029a0753b20ff2232d2d857e8eebeea5d469c5776977"
+  },
+  "mariadb": {
+    "version": "10.11.19",
+    "url": "https://archive.mariadb.org/mariadb-10.11.19/winx64-packages/mariadb-10.11.19-winx64.zip",
+    "file": "mariadb-10.11.19-winx64.zip",
+    "folder": "mariadb-10.11.19-winx64",
+    "sha256": "398ea30e5036010bbebe01d2b1804280424dcc2626e36d8e95155c04d25a0490",
+    "_note": "10.11 LTS: the version docker-compose.yml uses."
+  },
+  "vcredist": {
+    "version": "14.x (latest)",
+    "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "file": "vc_redist.x64.exe",
+    "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+    "_note": "Visual C++ 2015-2026 runtime needed by Apache (VS18) and PHP (VS16). The aka.ms link always serves Microsoft's newest build, so this checksum changes when Microsoft updates it: run build.ps1 -AcceptNewVcRedist after checking the file's digital signature."
+  },
+  "composer": {
+    "version": "2.10.3",
+    "url": "https://getcomposer.org/download/2.10.3/composer.phar",
+    "file": "composer-2.10.3.phar",
+    "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6",
+    "_note": "Build time only (composer install --no-dev). Not installed on the server."
+  },
+  "innoextract": {
+    "version": "1.9",
+    "url": "https://github.com/dscharrer/innoextract/releases/download/1.9/innoextract-1.9-windows.zip",
+    "file": "innoextract-1.9-windows.zip",
+    "sha256": "6989342c9b026a00a72a38f23b62a8e6a22cc5de69805cf47d68ac2fec993065",
+    "_note": "Build time only: unpacks Laragon's installer without running it."
+  },
+  "innosetup": {
+    "version": "6.7.3",
+    "url": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe",
+    "file": "innosetup-6.7.3.exe",
+    "sha256": "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732",
+    "_note": "Build time only: compiles BSU-Inventory.iss. Installed portably inside the build cache."
+  }
+}

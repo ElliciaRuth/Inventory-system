@@ -27,7 +27,7 @@ class SettingsController extends BaseApiController
     public function index(): ResponseInterface
     {
         return $this->respondSuccess(
-            $this->settingsModel->indexData($this->currentOfficeId(), $this->currentLevelId()),
+            $this->settingsModel->indexData($this->currentOfficeId(), $this->currentLevelId(), $this->currentUserId()),
             'Settings retrieved'
         );
     }
@@ -79,6 +79,8 @@ class SettingsController extends BaseApiController
             if ($id <= 0) {
                 return $this->respondError('Users must create their own accounts via registration.', [], ResponseInterface::HTTP_FORBIDDEN);
             }
+            // An account's email can't be changed by anyone, so it is never saved or logged here
+            unset($payload['email']);
             return $this->audited($type, $id, $payload, $this->saveUser($id, $payload));
         }
 
@@ -194,6 +196,35 @@ class SettingsController extends BaseApiController
     }
 
     /**
+     * Decline a pending sign-up: the registration is removed, so the person can sign up again.
+     * POST /api/settings/users/{id}/decline
+     */
+    public function decline(int $id): ResponseInterface
+    {
+        if ($error = $this->userAccessError($id)) {
+            return $error;
+        }
+
+        // Kept for the audit entry: the account is gone afterwards
+        $user = db_connect()->table('user_table u')
+            ->select('u.username, u.name, uot.user_office_name')
+            ->join('user_office_table uot', 'uot.user_office_id = u.user_office_id', 'left')
+            ->where('u.user_id', $id)
+            ->get(1)->getRowArray();
+
+        if (! $this->settingsModel->deletePendingUser($id)) {
+            return $this->respondError('Only accounts still waiting for approval can be declined.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        AuditLog::record('user.declined', 'users', $id, 'Declined the sign-up of "' . ($user['username'] ?? "user #{$id}") . '"', [
+            'name'   => $user['name'] ?? '',
+            'office' => $user['user_office_name'] ?? '',
+        ]);
+
+        return $this->respondSuccess(null, 'Sign-up declined. The registration was removed.');
+    }
+
+    /**
      * POST /api/settings/users/{id}/deactivate
      */
     public function deactivate(int $id): ResponseInterface
@@ -298,13 +329,6 @@ class SettingsController extends BaseApiController
     {
         $payload['name']             = $this->cleanName((string) ($payload['name'] ?? ''));
         $payload['username']         = trim((string) ($payload['username'] ?? ''));
-        $payload['email']            = trim((string) ($payload['email'] ?? ''));
-        $currentEmail                = (string) ((new UserModel())->find($id)['email'] ?? '');
-        // The form only ever holds the masked address. Managers can't change an email at all
-        // (the owner does, confirmed with a code); technical staff may type a new one in full.
-        if ($this->currentLevelId() < 4 || str_contains($payload['email'], '*')) {
-            $payload['email'] = $currentEmail;
-        }
         $payload['lvl_of_access_id'] = (int) ($payload['lvl_of_access_id'] ?? 0);
         $payload['user_office_id']   = (int) ($payload['user_office_id'] ?? $this->currentOfficeId());
 
@@ -313,9 +337,6 @@ class SettingsController extends BaseApiController
         }
         if (mb_strlen($payload['username']) < 3 || mb_strlen($payload['username']) > 50) {
             return $this->respondError('Username must be 3 to 50 characters long.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-        if ($payload['email'] !== '' && ! filter_var($payload['email'], FILTER_VALIDATE_EMAIL)) {
-            return $this->respondError('Please enter a valid email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
         if ($error = $this->nameError($payload['name'], 'Full name', allowComma: true)) {
             return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -342,22 +363,6 @@ class SettingsController extends BaseApiController
             return $this->respondError('That username is already used by another account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // ── Email uniqueness check (skip when email is blank — allowed for null-email accounts) ──
-        if ($payload['email'] !== '') {
-            $query = $userModel->where('email', $payload['email']);
-            if ($id > 0) {
-                $query = $query->where('user_id !=', $id);
-            }
-            if ($query->first()) {
-                return $this->respondError('That email address is already used by another account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-            }
-        }
-
-        // Store NULL instead of empty string so the unique index allows multiple blank emails
-        if ($payload['email'] === '') {
-            $payload['email'] = null;
-        }
-
         if (($payload['password'] ?? '') !== '') {
             if ($error = $this->passwordStrengthError((string) $payload['password'])) {
                 return $this->respondError($error, [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -376,8 +381,9 @@ class SettingsController extends BaseApiController
     }
 
     /**
-     * Who may manage which account: technical staff (level 4) any account; a manager only the
-     * accounts of their own office whose level is not above their own (never Technical Staff).
+     * Who may manage which account: technical staff (level 4) any account; a manager only their
+     * own account and the accounts of their own office with a lower level (never another
+     * manager, never Technical Staff).
      * Null when allowed, else a 404 (the account is not shown to them either).
      */
     private function userAccessError(int $userId): ?ResponseInterface
@@ -397,7 +403,7 @@ class SettingsController extends BaseApiController
         }
         if ($this->currentOfficeId() <= 0
             || (int) $row['user_office_id'] !== $this->currentOfficeId()
-            || (int) $row['level_id'] > $level) {
+            || ((int) $row['level_id'] >= $level && $userId !== $this->currentUserId())) {
             return $this->respondError('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
         }
 

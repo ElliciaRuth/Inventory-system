@@ -18,6 +18,12 @@ export const adminApi = {
     return response.data
   },
 
+  // Turn down a pending sign-up: the registration is removed
+  async declineUser(userId) {
+    const response = await client.post(`/settings/users/${userId}/decline`)
+    return response.data
+  },
+
   async deleteRecord(type, id) {
     const response = await client.delete(`/settings/${type}/${id}`)
     return response.data

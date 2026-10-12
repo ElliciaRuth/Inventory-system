@@ -4,6 +4,7 @@ import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.v
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
+import { confirmDialog } from '../composables/useConfirm'
 import { AlertTriangle } from 'lucide-vue-next'
 import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 
@@ -37,6 +38,14 @@ async function submit() {
     return
   }
 
+  const ok = await confirmDialog({
+    title: 'Set this as your password?',
+    message: 'Use it from now on to sign in.',
+    details: [['Username', authStore.user?.username]],
+    confirmText: 'Set password',
+  })
+  if (!ok) return
+
   loading.value = true
   try {
     const res = await authApi.changePassword(password.value, confirmPassword.value)
@@ -58,6 +67,13 @@ async function submit() {
 }
 
 async function handleLogout() {
+  const ok = await confirmDialog({
+    title: 'Sign out?',
+    message: 'You will need to sign in again and finish this step.',
+    details: [['Signed in as', authStore.user?.username]],
+    confirmText: 'Sign out',
+  })
+  if (!ok) return
   await authStore.logout()
   router.push('/login')
 }

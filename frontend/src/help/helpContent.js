@@ -116,13 +116,12 @@ export const TOPICS = [
     category: 'start',
     levels: ALL,
     icon: UserCog,
-    title: 'Your profile, password and email',
-    summary: 'Change your name, username, password or email address.',
+    title: 'Your profile and password',
+    summary: 'Change your name, username or password.',
     steps: [
       'Click your name in the top bar to open My Profile.',
       'Profile Details: edit your full name and username, then click Save Profile Changes.',
       'Password & Security: enter your current password and the new one twice. Your other devices are signed out.',
-      'To change your email, click "Change email", enter the new address, its app password and your current password, then type the 6-digit code sent to the new address.',
     ],
     tips: ['Your email is always shown partly hidden (for example ju*****z@bsu.edu.ph) so it can\'t be read off your screen.'],
     to: '/profile',
@@ -152,7 +151,7 @@ export const TOPICS = [
     summary: 'Pick the items and quantities you need.',
     steps: [
       'Open Menu → Request Stock Out.',
-      'Search for a product by name, or scan the barcode on its batch label.',
+      'Search for a product by name, or scan the barcode on its batch label (with a scanner, or tap the camera button in the search box to use the camera of your phone).',
       'Enter the quantity and add it to your list. Repeat for every item you need.',
     ],
     tips: ['Nothing is sent yet: items wait in your list until you submit them.'],
@@ -216,8 +215,8 @@ export const TOPICS = [
       'Click "Record Stock In / Out" and pick the movement:',
       'Stock In (Receipt) for deliveries and purchases, with the batch, cost and expiry date.',
       'Stock Out (Issue) for items released for use.',
-      'Adjust Out for spoiled, spilled or expired stock (choose the reason); Adjust In for a count correction.',
-      'Lend to Another Unit for borrowed items (see "Lend and track borrowed items").',
+      'Adjust Out for spoiled, damaged or expired stock, or a correction (choose the reason); Adjust In for a wrong count.',
+      'Lend to Another Office for borrowed items (see "Lend and track borrowed items").',
     ],
     tips: [
       'To fix a mistake, use the edit button on the ledger row. Every edit and deletion is kept in the audit log with the before and after values.',
@@ -247,7 +246,7 @@ export const TOPICS = [
     title: 'Lend and track borrowed items',
     summary: 'Who borrowed what, and what is still out.',
     steps: [
-      'To lend: Stockcard Ledger → Record Stock In / Out → "Lend to Another Unit". Enter who borrowed it and from which unit.',
+      'To lend: Stockcard Ledger → Record Stock In / Out → "Lend to Another Office". Enter who borrowed it and from which office.',
       'Open Menu → Borrowed Items to see what is still out and how much has come back.',
       'When items come back, record the return from that page. It goes back into stock as a stock-in.',
     ],
@@ -262,7 +261,7 @@ export const TOPICS = [
     summary: 'Compare the shelf with the records and fix the difference.',
     steps: [
       'Count what is actually on the shelf.',
-      'Open Menu → Physical Count and enter the counted quantity of each product.',
+      'Open Menu → Physical Count. Each counted quantity starts at the system quantity; change only the products that differ from the shelf.',
       'The system shows the difference. Reconcile to record an Adjust Out for shortages (expired batches first) or an Adjust In for overages, with the reason "Physical Count".',
     ],
     to: '/stock/count',
@@ -308,7 +307,10 @@ export const TOPICS = [
     steps: [
       'Every batch gets its own barcode when stock is received. Open Menu → Batch Barcodes to download one and print a label.',
       'For finished products, open Menu → Finished Products to generate a barcode or download a saved one.',
-      'Staff can scan these labels on the Request Stock Out page.',
+      'Scan these labels in the search boxes of Stockcard Ledger, Physical Count, Stock Movement and Request Stock Out, with a USB or wireless scanner or with the camera button in the box.',
+    ],
+    tips: [
+      'The camera button works on phones, tablets and PCs with a camera, when the app is opened with its secure address (https://). The first time, allow the browser to use the camera.',
     ],
     to: '/reports/batches',
   },
@@ -344,15 +346,16 @@ export const TOPICS = [
 
   // ── Administration ─────────────────────────────────────────────────────
   {
-    id: 'others-management',
+    id: 'office-settings',
     category: 'admin',
     levels: [3],
     icon: Settings,
-    title: 'Accounts and lists (Others Management)',
+    title: 'Accounts and lists (Office Settings)',
     summary: 'New applicants, user accounts and the lists the system uses.',
     steps: [
-      'Open Menu → Others Management. New sign-ups also appear as "New applicant" under the bell.',
+      'Open Menu → Office Settings. New sign-ups also appear as "New applicant" under the bell.',
       'Users: activate a pending account, deactivate one that should no longer sign in, or set a temporary password (the user must change it at the next login).',
+      'You see the custodian and staff accounts of your office. Other managers\' accounts, including new manager sign-ups, are handled by technical staff.',
       'Entities, Units, References, Product Types and Offices: add, edit or remove the entries used in forms and reports.',
     ],
     to: '/settings',
@@ -365,7 +368,7 @@ export const TOPICS = [
     title: 'Backups and restore',
     summary: 'Keep a copy of your office\'s data, and bring it back if needed.',
     steps: [
-      'Open Menu → Others Management → Data Backup & Restore.',
+      'Open Menu → Office Settings → Data Backup & Restore.',
       'Back up: choose what to include and click Create backup. Turn on password protection for any copy that leaves this computer (USB drive, email); only protected backups keep users\' passwords.',
       'Schedule: set how often automatic backups run and where they are saved (a second drive is recommended). These settings apply to your office only.',
       'Restore: choose a saved backup or a file, check what it contains, pick the parts to restore and confirm. A safety backup of the current data is made first.',
@@ -386,7 +389,7 @@ export const TOPICS = [
     steps: [
       'Open Menu → Audit Log (technical staff: the button on User Management).',
       'Every login, failed login, stock movement, correction, approval, backup and settings change is listed with the person and time.',
-      'Filter by kind of action and dates, or search by user, item or IP address. Managers see their own office; technical staff see every office.',
+      'Filter by kind of action and dates, or search by user or item. Managers see their own office; technical staff see every office.',
     ],
     tips: ['The audit log can\'t be edited or deleted, by anyone.'],
     to: '/audit-log',
@@ -449,7 +452,7 @@ export const FAQS = [
   {
     levels: [3, 4],
     q: 'A new user signed up. How do I let them in?',
-    a: 'New sign-ups appear as "New applicant" under the bell. Activate the account in Others Management (managers) or User Management (technical staff).',
+    a: 'New sign-ups appear as "New applicant" under the bell. Activate the account in Office Settings (managers) or User Management (technical staff).',
   },
 ]
 

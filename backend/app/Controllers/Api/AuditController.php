@@ -25,8 +25,9 @@ class AuditController extends BaseApiController
 
         $db      = db_connect();
         $builder = $db->table('audit_log a')
-            ->select('a.*, uot.user_office_name AS office_name')
-            ->join('user_office_table uot', 'uot.user_office_id = a.user_office_id', 'left');
+            ->select('a.*, uot.user_office_name AS office_name, u.name AS user_full_name')
+            ->join('user_office_table uot', 'uot.user_office_id = a.user_office_id', 'left')
+            ->join('user_table u', 'u.user_id = a.user_id', 'left');
 
         // Managers: their office only (plus failed logins on their office's usernames)
         if ($this->currentLevelId() < 4 && $this->currentOfficeId() > 0) {
@@ -53,7 +54,7 @@ class AuditController extends BaseApiController
                 ->where($noEmails('a.summary'), null, false)
                 ->orWhere($noEmails('a.username'), null, false)
                 ->orLike('a.action', $search)
-                ->orLike('a.ip_address', $search)
+                ->orLike('u.name', $search)
                 ->groupEnd();
         }
 
@@ -66,6 +67,8 @@ class AuditController extends BaseApiController
             $row['details']  = $row['details'] !== null ? Privacy::maskEmailsDeep(json_decode((string) $row['details'], true)) : null;
             $row['summary']  = Privacy::maskEmailsIn((string) $row['summary']);
             $row['username'] = Privacy::maskEmailsIn((string) $row['username']);
+            // Not shown in the log; kept in the table for security checks only
+            unset($row['ip_address']);
         }
         unset($row);
 

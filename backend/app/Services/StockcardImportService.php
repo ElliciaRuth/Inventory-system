@@ -211,8 +211,41 @@ class StockcardImportService
 
         // What "replace" would delete, so the dialog can say it before anyone confirms
         $plan['existing'] = $this->inventoryCounts($plan['summary']['office_ids']);
+        $plan['types']    = $this->typeSuggestions($plan);
 
         return $plan;
+    }
+
+    /** Category names to suggest while typing: the file's offices' categories plus the detected ones. */
+    private function typeSuggestions(array $plan): array
+    {
+        $officeIds = array_map('intval', $plan['summary']['office_ids'] ?? []);
+        $names     = $officeIds === [] ? [] : array_column(
+            $this->db->table('type_of_product')->select('type')->whereIn('user_office_id', $officeIds)->get()->getResultArray(),
+            'type'
+        );
+        foreach ($plan['products'] ?? [] as $product) {
+            $names[] = (string) ($product['type'] ?? '');
+        }
+
+        $unique = [];
+        foreach ($names as $name) {
+            $name = trim($name);
+            if ($name !== '') {
+                $unique[mb_strtolower($name)] ??= $name;
+            }
+        }
+        natcasesort($unique);
+
+        return array_values($unique);
+    }
+
+    /** A category typed in the preview: trimmed, spaces collapsed, at most 100 characters ('' if unusable). */
+    public static function cleanTypeName(mixed $value): string
+    {
+        $name = trim((string) preg_replace('/\s+/u', ' ', is_string($value) ? $value : ''));
+
+        return preg_match('/[\x00-\x1F\x7F]/', $name) ? '' : mb_substr($name, 0, 100);
     }
 
     /**
@@ -310,14 +343,14 @@ class StockcardImportService
 
     /**
      * @param bool                  $replace delete the existing inventory of the file's offices first
-     * @param array<string, string> $types   product key => product type chosen in the preview (detected type otherwise)
+     * @param array<string, string> $types   product key => category typed in the preview (detected type when blank)
      */
     public function commit(array $plan, bool $replace, array $types, array $user): array
     {
         $products = array_values(array_filter($plan['products'], static fn ($p) => $p['status'] === 'ok'));
         foreach ($products as &$product) {
-            $chosen          = $types[$product['key']] ?? '';
-            $product['type'] = in_array($chosen, StockcardWorkbookParser::TYPES, true) ? $chosen : $product['type'];
+            $chosen          = self::cleanTypeName($types[$product['key']] ?? '');
+            $product['type'] = $chosen !== '' ? $chosen : $product['type'];
         }
         unset($product);
         $officeIds = array_map('intval', $plan['summary']['office_ids']);
@@ -454,7 +487,8 @@ class StockcardImportService
             'unit_id'               => $unitId,
             'type_id'               => $typeId,
             'user_office_id'        => $officeId,
-            'entity_id'             => $this->entityId($product['entity'] ?: $office, $officeId),
+            // Always the office's "Benguet State University" (fund cluster 06), whatever the card says
+            'entity_id'             => (new EntityModel())->defaultFor($officeId) ?: null,
             'stock_no'              => $product['stock_no'] !== '' ? mb_substr($product['stock_no'], 0, 255) : strtoupper($office) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT),
         ]);
 
@@ -670,31 +704,6 @@ class StockcardImportService
         }
 
         return $this->destinations[$key];
-    }
-
-    /**
-     * The entity for imported products: the one named on the card if the office has it,
-     * otherwise the office's existing entity (e.g. "Benguet State University" set up in
-     * Others Management). A new entity is only created when the office has none.
-     */
-    private function entityId(string $cardEntity, int $officeId): ?int
-    {
-        $existing = $this->db->table('entity_table')
-            ->select('entity_id')
-            ->where('user_office_id', $officeId)
-            ->where('entity', trim($cardEntity))
-            ->get(1)->getRowArray()
-            ?? $this->db->table('entity_table')
-                ->select('entity_id')
-                ->where('user_office_id', $officeId)
-                ->orderBy('entity_id', 'ASC')
-                ->get(1)->getRowArray();
-
-        if ($existing) {
-            return (int) $existing['entity_id'];
-        }
-
-        return (new EntityModel())->firstOrCreate($cardEntity, $officeId) ?: null;
     }
 
     private function officeName(int $officeId): string
