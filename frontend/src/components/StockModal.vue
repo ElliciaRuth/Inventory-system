@@ -341,6 +341,7 @@ async function handleSubmit() {
     // Reset transient fields to avoid accidental duplicates if reopened
     form.quantity = 1
     form.unit_cost = ''
+    form.office = ''
     form.reference = ''
     form.expiration_date = ''
     form.manufacturing_date = ''

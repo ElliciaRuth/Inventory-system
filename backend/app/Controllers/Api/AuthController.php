@@ -6,6 +6,7 @@ use App\Filters\AuthFilter;
 use App\Libraries\AuditLog;
 use App\Libraries\Mailer;
 use App\Libraries\Privacy;
+use App\Libraries\SmtpCrypto;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\PasswordReset;
@@ -27,7 +28,7 @@ class AuthController extends BaseApiController
     private const DUMMY_HASH = '$2y$10$OTpRNC5L1qHghgpmJxF5aeoLl9CsmPJpapckTIr0gRIEdl9enhXA6';
 
     /** Session flags for the forced first-login steps, in the order they happen. */
-    private const SETUP_FLAGS = ['must_change_password'];
+    private const SETUP_FLAGS = ['must_change_password', 'must_setup_smtp', 'must_setup_recovery_email'];
 
     /**
      * Authenticate user credentials and start session.
@@ -159,6 +160,20 @@ class AuthController extends BaseApiController
             session()->set('must_change_password', true);
         }
 
+        // ── Admin only: must configure the system SMTP account before use ──
+        if ((int) ($user['must_setup_smtp'] ?? 0) === 1) {
+            session()->set('must_setup_smtp', true);
+        }
+
+        // ── All users: must set a recovery e-mail (if not already done) ──
+        $hasRecovery = ($user['recovery_email'] ?? '') !== '';
+        if ((int) ($user['must_setup_recovery_email'] ?? 0) === 1 || ! $hasRecovery) {
+            // Only block users who still have this flag or truly have no recovery e-mail
+            if ((int) ($user['must_setup_recovery_email'] ?? 0) === 1) {
+                session()->set('must_setup_recovery_email', true);
+            }
+        }
+
         return $this->respondSuccess([
             'user'          => $this->publicUser($sessionData),
             'pending_setup' => $this->pendingSetup(),
@@ -282,8 +297,7 @@ class AuthController extends BaseApiController
             'last_name'        => 'required|min_length[2]|max_length[100]',
             'middle_name'      => 'permit_empty|max_length[100]',
             'suffix'           => 'permit_empty|max_length[20]',
-            'username'         => 'required|min_length[3]|max_length[50]|is_unique[user_table.username]',
-            // Uniqueness of the email is checked below without telling the visitor
+            'username'         => 'required|min_length[3]|max_length[50]',
             'email'            => 'required|valid_email|max_length[255]',
             'password'         => 'required|min_length[8]|max_length[255]',
             'confirm_password' => 'required|matches[password]',
@@ -331,18 +345,26 @@ class AuthController extends BaseApiController
             $fullName .= ', ' . $suffix;
         }
 
-        $model = new UserModel();
-        $email = trim((string) ($input['email'] ?? ''));
+        $model    = new UserModel();
+        $username = trim((string) ($input['username'] ?? ''));
+        $email    = trim((string) ($input['email'] ?? ''));
 
-        // An email already in use gets the same reply as a new account, so the sign-up form
-        // can't be used to find out which addresses have accounts. Nothing is created; the
-        // owner can sign in or reset the password with that address as usual.
-        if ($existing = $model->findByEmail($email)) {
-            AuditLog::record('auth.register_duplicate_email', 'user', (int) $existing['user_id'], 'Sign-up attempted with an email that already has an account', [
-                'username_tried' => trim((string) ($input['username'] ?? '')),
-            ], ['id' => 0, 'username' => trim((string) ($input['username'] ?? '')), 'user_office_id' => (int) ($existing['user_office_id'] ?? 0)]);
+        // Check username uniqueness explicitly with a clear, field-level error
+        if ($model->where('username', $username)->first()) {
+            return $this->respondError(
+                'This username is already taken. Please choose a different one.',
+                ['username' => 'This username is already taken.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
 
-            return $this->respondSuccess(null, self::REGISTERED_MESSAGE);
+        // Check email uniqueness explicitly with a clear, field-level error
+        if ($model->findByEmail($email)) {
+            return $this->respondError(
+                'This email address is already in use. Please use a different email or log in.',
+                ['email' => 'This email address is already in use.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
         }
 
         $inserted = $model->insert([
@@ -419,8 +441,16 @@ class AuthController extends BaseApiController
         session()->remove('must_change_password');
         AuditLog::record('auth.password_changed', 'user', $userId, ($isFirstLogin ? 'First-login password set' : 'Password changed'));
 
-        // No email setup step any more: users reset their password through their own email
-        // account (forgotPassword), so no administrator has to enter a personal mail account
+        // After the first-login password change, queue the recovery-email step for users who
+        // have not set one yet, and also clear the smtp step flag if it was not set.
+        if ($isFirstLogin) {
+            $freshUser  = $userModel->find($userId);
+            $hasRecovery = ($freshUser['recovery_email'] ?? '') !== '';
+            if (! $hasRecovery && ! (bool) session('must_setup_recovery_email')) {
+                session()->set('must_setup_recovery_email', true);
+                $userModel->update($userId, ['must_setup_recovery_email' => 1]);
+            }
+        }
 
         return $this->respondSuccess(['pending_setup' => $this->pendingSetup()], 'Password changed successfully.');
     }
@@ -769,22 +799,18 @@ class AuthController extends BaseApiController
     // ════════════════════════════════════════════════════════════════
 
     /** Shown whether or not an account uses the address, so the reply reveals nothing */
-    private const RESET_SENT_MESSAGE = 'If an account uses this email address, a password reset code has been sent to it. Check your inbox (and the Spam folder).';
+    private const RESET_SENT_MESSAGE = 'If an account uses this email address, a password reset code has been sent to the recovery email on file. Check your recovery email inbox (and the Spam folder).';
 
     /**
-     * POST /api/auth/forgot-password   { email, app_key }
+     * POST /api/auth/forgot-password   { email }
      *
-     * With app_key: the code is sent from the user's own email account to itself, signing in
-     * with that app password (Config\PasswordReset picks the mail server). The key is used for
-     * this one send and then dropped: it is not stored, logged, put in the session or echoed.
-     * Only the owner of the mailbox can make it send, and the mail goes to the same mailbox,
-     * so the answer never reveals whether the address has an account here.
+     * Sends a 6-digit OTP to the user's recovery_email (or primary email if no recovery email
+     * is set) using the system SMTP account configured in smtp_settings. No app-password is
+     * ever asked from the end-user.
      */
     public function forgotPassword(): ResponseInterface
     {
-        $input  = $this->input();
-        $appKey = str_replace(' ', '', (string) ($input['app_key'] ?? '')); // Google shows "abcd efgh ijkl mnop"
-        unset($input['app_key']);
+        $input = $this->input();
 
         if (! $this->validateData($input, ['email' => 'required|valid_email|max_length[255]'])) {
             return $this->respondError('Please enter a valid email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -792,30 +818,7 @@ class AuthController extends BaseApiController
         $email  = trim((string) $input['email']);
         $limits = config(PasswordReset::class);
 
-        if ($appKey === '') {
-            return $this->respondError(
-                'Enter the app password of your email account: the reset code is sent from your own account.',
-                ['app_key' => 'Required.'],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
-        }
-        if (! preg_match('/^[\x21-\x7E]{8,64}$/', $appKey)) {
-            return $this->respondError(
-                'That app password doesn\'t look right. A Gmail app password is 16 letters (the spaces don\'t matter).',
-                ['app_key' => 'Invalid format.'],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
-        }
-
-        // Rejected app passwords per address: stops this server being used to try passwords
-        $failKey = 'reset_signin_fail_' . md5(strtolower($email));
-        if ((int) cache($failKey) >= $limits->maxSignInFailures) {
-            return $this->respondError('Too many rejected app passwords for this email. Try again in 15 minutes.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
-        }
-
-        // Each new code resets the wrong-guess counter, so limit how often one address gets a
-        // code: otherwise guesses per code × codes on demand would make the 6 digits guessable
-        // (and the inbox could be flooded)
+        // Rate-limit per submitted address
         $sentKey = 'reset_sent_' . md5(strtolower($email));
         $sent    = array_values(array_filter((array) (cache($sentKey) ?? []), static fn ($t) => (int) $t > time() - 3600));
         if ($sent !== [] && max($sent) > time() - $limits->sendCooldownSeconds) {
@@ -825,32 +828,38 @@ class AuthController extends BaseApiController
             return $this->respondError('Too many codes were requested for this email. Please try again in an hour.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
         }
 
-        $model = new UserModel();
-        $user  = $model->findByEmail($email);
-        $code  = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $model   = new UserModel();
+        $user    = $model->findByEmail($email);
+        $code    = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
-        // Sent from the user's own account. No account here: the mailbox owner is told so by mail.
-        $failure = (new Mailer())->sendFromOwnAccount(
-            $email,
-            $appKey,
-            $email,
+        // Destination: prefer recovery_email; fall back to primary email
+        $destination = ($user && ($user['recovery_email'] ?? '') !== '')
+            ? (string) $user['recovery_email']
+            : $email;
+
+        $failure = (new Mailer())->sendFromSystem(
+            $destination,
             $user ? 'Password Reset Code - BSU Inventory' : 'Password reset request - BSU Inventory',
             $user ? $this->resetEmailHtml($code, $limits->codeMinutes) : $this->noAccountEmailHtml()
         );
-        $appKey = '';
 
-        if ($failure === Mailer::FAILED_SIGN_IN) {
-            cache()->save($failKey, (int) cache($failKey) + 1, 900);
-
+        if ($failure === Mailer::FAILED_NO_ACCOUNT) {
             return $this->respondError(
-                'Your email provider did not accept this email address and app password. Check both, make sure the app password is for this address, and try again.',
-                ['app_key' => 'Rejected by the email provider.'],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                'The system email is not configured yet. Please ask your Technical Administrator to set up the SMTP account.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+        if ($failure === Mailer::FAILED_SIGN_IN) {
+            return $this->respondError(
+                'The system email account credentials are invalid. Please ask your Technical Administrator to reconfigure the SMTP settings.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
             );
         }
         if ($failure === Mailer::FAILED_NETWORK) {
             return $this->respondError(
-                'The server could not reach your email provider; it may have no internet connection right now. Try again later, or ask your office manager to set a new password for you.',
+                'The server could not reach the email provider. Please try again later, or ask your office manager to set a new password.',
                 [],
                 ResponseInterface::HTTP_SERVICE_UNAVAILABLE
             );
@@ -859,16 +868,16 @@ class AuthController extends BaseApiController
             return $this->respondError('The email could not be sent. Please try again later.', [], ResponseInterface::HTTP_BAD_GATEWAY);
         }
 
-        cache()->delete($failKey);
         $sent[] = time();
         cache()->save($sentKey, $sent, 3600);
         if ($user) {
             $this->storeResetCode($user, $code, $limits->codeMinutes);
-            AuditLog::record('auth.reset_code_sent', 'user', (int) $user['user_id'], "Password reset code sent to {$email} from the user's own email account", [], $this->resetActor($user, $email));
+            AuditLog::record('auth.reset_code_sent', 'user', (int) $user['user_id'], "Password reset code sent to recovery email of {$email}", [], $this->resetActor($user, $email));
         }
 
         return $this->respondSuccess(null, self::RESET_SENT_MESSAGE);
     }
+
 
     /** Saves a new code (hashed) and makes the earlier one and its wrong guesses void. */
     private function storeResetCode(array $user, string $code, int $minutes): void
@@ -1098,6 +1107,238 @@ class AuthController extends BaseApiController
         cache()->delete($this->loginKey('fail_pair', $this->userOnIp($username)));
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  SETUP — SMTP (level 4 / admin_tech only)
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Save the system SMTP account so the forgot-password flow can send OTPs.
+     * POST /api/auth/setup-smtp   { smtp_email, smtp_password }
+     *
+     * smtp_password is the Gmail app-password (never stored in plain text: it is
+     * AES-256-GCM encrypted immediately and the plain text is wiped).
+     */
+    public function setupSmtp(): ResponseInterface
+    {
+        $input = $this->input();
+
+        if (! $this->validateData($input, [
+            'smtp_email'    => 'required|valid_email|max_length[255]',
+            'smtp_password' => 'required|min_length[8]|max_length[100]',
+        ])) {
+            $errors = $this->validator->getErrors();
+            return $this->respondError(implode(' ', $errors), $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $smtpEmail    = trim((string) $input['smtp_email']);
+        $smtpPassword = str_replace(' ', '', (string) $input['smtp_password']); // strip spaces (Google app-password format)
+
+        // Validate the app-password format (16–64 printable ASCII chars without spaces)
+        if (! preg_match('/^[\x21-\x7E]{8,64}$/', $smtpPassword)) {
+            return $this->respondError(
+                'The app password doesn\'t look right. A Gmail app password is 16 letters (spaces are stripped automatically).',
+                ['smtp_password' => 'Invalid format.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        // Test-send before saving: if the credentials are wrong we want to know now
+        $mailer  = new Mailer();
+        $servers = config(PasswordReset::class)->smtpServers;
+        $domain  = strtolower((string) substr(strrchr($smtpEmail, '@') ?: '', 1));
+        $server  = $servers[$domain] ?? $servers['*'];
+
+        $testHtml = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">'
+            . '<h2 style="color:#0f3d3e;">SMTP Setup Verified</h2>'
+            . '<p style="color:#475569;">The system SMTP account for BSU Inventory has been configured successfully. '
+            . 'This address will be used to send password-reset codes to users.</p>'
+            . '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">'
+            . '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p></div>';
+
+        $failure = $mailer->sendFromOwnAccount($smtpEmail, $smtpPassword, $smtpEmail, 'SMTP Setup Confirmed – BSU Inventory', $testHtml);
+
+        if ($failure === Mailer::FAILED_SIGN_IN) {
+            $smtpPassword = '';
+            return $this->respondError(
+                'The email provider rejected this email address and app password. Double-check both and try again.',
+                ['smtp_password' => 'Rejected by the provider.'],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+        if ($failure === Mailer::FAILED_NETWORK) {
+            $smtpPassword = '';
+            return $this->respondError(
+                'The server could not reach the email provider. Check the internet connection and try again.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+        if ($failure !== null) {
+            $smtpPassword = '';
+            return $this->respondError('The test email could not be sent. Please try again later.', [], ResponseInterface::HTTP_BAD_GATEWAY);
+        }
+
+        // Credentials are valid — encrypt and persist, then wipe plaintext
+        $encryptedPassword = SmtpCrypto::encrypt($smtpPassword);
+        $smtpPassword      = '';
+
+        $db      = db_connect();
+        $userId  = $this->currentUserId();
+        $now     = date('Y-m-d H:i:s');
+        $existing = $db->table('smtp_settings')->limit(1)->get()->getRowArray();
+
+        if ($existing) {
+            $db->table('smtp_settings')->update([
+                'smtp_email'    => $smtpEmail,
+                'smtp_password' => $encryptedPassword,
+                'configured_by' => $userId,
+                'updated_at'    => $now,
+            ]);
+        } else {
+            $db->table('smtp_settings')->insert([
+                'smtp_email'    => $smtpEmail,
+                'smtp_password' => $encryptedPassword,
+                'configured_by' => $userId,
+                'created_at'    => $now,
+                'updated_at'    => $now,
+            ]);
+        }
+
+        // Clear the flag on the user row and in the session
+        (new UserModel())->update($userId, ['must_setup_smtp' => 0]);
+        session()->remove('must_setup_smtp');
+
+        AuditLog::record('auth.smtp_configured', 'user', $userId, "System SMTP account set to {$smtpEmail}");
+
+        return $this->respondSuccess(['pending_setup' => $this->pendingSetup()], 'System email account saved. A confirmation email was sent to ' . Privacy::maskEmail($smtpEmail) . '.');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  SETUP — RECOVERY EMAIL (all users)
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Save the user's personal recovery email address. A 6-digit OTP is sent to the
+     * supplied address from the system SMTP account to verify it belongs to the user.
+     *
+     * Step A: POST /api/auth/setup-recovery-email/request   { recovery_email }
+     * Step B: POST /api/auth/setup-recovery-email/confirm   { code }
+     */
+    public function requestRecoveryEmail(): ResponseInterface
+    {
+        $input = $this->input();
+        if (! $this->validateData($input, ['recovery_email' => 'required|valid_email|max_length[255]'])) {
+            return $this->respondError('Please enter a valid email address.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $email  = trim((string) $input['recovery_email']);
+        $userId = $this->currentUserId();
+        $limits = config(PasswordReset::class);
+
+        $code    = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $html    = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8fffd;border-radius:16px;">'
+            . '<h2 style="color:#0f3d3e;margin-bottom:16px;">Verify Your Recovery Email</h2>'
+            . '<p style="color:#475569;line-height:1.6;">Use the code below to confirm this email as the recovery address for your BSU Inventory account:</p>'
+            . '<div style="text-align:center;margin:28px 0;">'
+            . '<div style="display:inline-block;padding:18px 40px;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;border-radius:14px;font-size:32px;font-weight:700;letter-spacing:8px;">' . esc($code) . '</div>'
+            . '</div>'
+            . '<p style="color:#94a3b8;font-size:13px;">This code expires in ' . $limits->codeMinutes . ' minutes.</p>'
+            . '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">'
+            . '<p style="color:#cbd5e1;font-size:12px;">BSU Integrated Inventory Monitoring System</p></div>';
+
+        $failure = (new Mailer())->sendFromSystem($email, 'Verify Your Recovery Email – BSU Inventory', $html);
+
+        if ($failure === Mailer::FAILED_NO_ACCOUNT) {
+            return $this->respondError(
+                'The system email is not configured yet. Please ask your Technical Administrator.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+        if ($failure === Mailer::FAILED_SIGN_IN) {
+            return $this->respondError(
+                'The system email account credentials are invalid. Please ask your Technical Administrator to reconfigure SMTP settings.',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+        if ($failure === Mailer::FAILED_NETWORK) {
+            return $this->respondError('The server could not reach the email provider. Please try again later.', [], ResponseInterface::HTTP_SERVICE_UNAVAILABLE);
+        }
+        if ($failure !== null) {
+            return $this->respondError('The verification email could not be sent. Please try again later.', [], ResponseInterface::HTTP_BAD_GATEWAY);
+        }
+
+        // Store the pending verification in the session
+        $secret = (string) (config(\Config\Encryption::class)->key ?? '');
+        $hash   = $secret !== '' ? hash_hmac('sha256', $userId . '|recovery|' . mb_strtolower($email) . '|' . $code, $secret)
+                                 : hash('sha256', $userId . '|recovery|' . mb_strtolower($email) . '|' . $code);
+        session()->set('recovery_email_pending', [
+            'email'    => $email,
+            'hash'     => $hash,
+            'expires'  => time() + $limits->codeMinutes * 60,
+            'attempts' => 0,
+        ]);
+
+        return $this->respondSuccess(null, 'A 6-digit code was sent to ' . self::maskEmail($email) . '. Enter it to confirm your recovery email.');
+    }
+
+    /**
+     * Step B: verify the code and save the recovery email.
+     * POST /api/auth/setup-recovery-email/confirm   { code }
+     */
+    public function confirmRecoveryEmail(): ResponseInterface
+    {
+        $input = $this->input();
+        if (! $this->validateData($input, ['code' => 'required|exact_length[6]|numeric'])) {
+            return $this->respondError('Please enter the 6-digit code.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $userId  = $this->currentUserId();
+        $pending = session('recovery_email_pending');
+        $max     = config(PasswordReset::class)->maxCodeAttempts;
+
+        if (! is_array($pending) || (int) ($pending['expires'] ?? 0) < time()) {
+            session()->remove('recovery_email_pending');
+            return $this->respondError('The code has expired. Please request a new one.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $email  = (string) $pending['email'];
+        $secret = (string) (config(\Config\Encryption::class)->key ?? '');
+        $code   = trim((string) $input['code']);
+        $expect = $secret !== '' ? hash_hmac('sha256', $userId . '|recovery|' . mb_strtolower($email) . '|' . $code, $secret)
+                                 : hash('sha256', $userId . '|recovery|' . mb_strtolower($email) . '|' . $code);
+
+        if (! hash_equals((string) $pending['hash'], $expect)) {
+            $pending['attempts'] = (int) ($pending['attempts'] ?? 0) + 1;
+            if ($pending['attempts'] >= $max) {
+                session()->remove('recovery_email_pending');
+                return $this->respondError('Too many incorrect attempts. Please request a new code.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            session()->set('recovery_email_pending', $pending);
+            $left = $max - $pending['attempts'];
+            return $this->respondError("Incorrect code. {$left} " . ($left === 1 ? 'attempt' : 'attempts') . ' left.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        session()->remove('recovery_email_pending');
+
+        $model = new UserModel();
+        $model->update($userId, [
+            'recovery_email'            => $email,
+            'must_setup_recovery_email' => 0,
+        ]);
+        session()->remove('must_setup_recovery_email');
+
+        // Refresh the session user email
+        $sessionUser                   = (array) session('user');
+        $sessionUser['recovery_email'] = $email;
+        session()->set('user', $sessionUser);
+
+        AuditLog::record('auth.recovery_email_set', 'user', $userId, 'Recovery email set to ' . self::maskEmail($email));
+
+        return $this->respondSuccess(['pending_setup' => $this->pendingSetup()], 'Your recovery email has been saved.');
+    }
+
     /**
      * The first pending forced setup step for this session, or null.
      */
@@ -1106,7 +1347,10 @@ class AuthController extends BaseApiController
         foreach (self::SETUP_FLAGS as $flag) {
             if (session($flag)) {
                 return match ($flag) {
-                    'must_change_password' => 'change_password',
+                    'must_change_password'      => 'change_password',
+                    'must_setup_smtp'           => 'setup_smtp',
+                    'must_setup_recovery_email' => 'setup_recovery_email',
+                    default                     => null,
                 };
             }
         }

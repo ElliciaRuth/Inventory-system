@@ -11,9 +11,10 @@ class UserModel extends Model
     protected $returnType            = 'array';
     protected $allowedFields         = [
         'name', 'first_name', 'last_name', 'middle_name', 'suffix',
-        'username', 'password', 'email',
+        'username', 'password', 'email', 'recovery_email',
         'user_office_id', 'lvl_of_access_id',
         'user_activity_id', 'must_change_password',
+        'must_setup_smtp', 'must_setup_recovery_email',
         'password_reset_token', 'password_reset_expires',
     ];
     protected bool $allowEmptyInserts = false;

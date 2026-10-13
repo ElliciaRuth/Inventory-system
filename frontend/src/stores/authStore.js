@@ -8,7 +8,7 @@ export const useAuthStore = defineStore('auth', {
     user: null,
     isAuthenticated: false,
     // Forced first-login step still to complete:
-    // 'change_password' | null
+    // 'change_password' | 'setup_smtp' | 'setup_recovery_email' | null
     pendingSetup: null,
     loaded: false,
     loading: false,
