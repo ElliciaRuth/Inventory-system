@@ -6,17 +6,55 @@ use CodeIgniter\Email\Email;
 use Config\PasswordReset;
 
 /**
- * Sends email over SMTP with CodeIgniter's Email class, from a user's own account with an
- * app password they typed in (forgot password). There is no system email account.
+ * Sends email over SMTP. Two modes:
  *
- * The app password is only kept for the one send: never logged, returned or stored.
+ * • sendFromOwnAccount() – the user provides their own email + app-password at runtime
+ *   (used by the "change email" flow). The key is used for one send and dropped.
+ *
+ * • sendFromSystem() – reads the one system SMTP account stored (encrypted) in the
+ *   smtp_settings table and sends from there. Used by the "forgot password" OTP flow.
+ *
+ * App passwords are only ever kept in memory long enough to call send(); they are never
+ * logged, returned, or put into a session.
  */
 class Mailer
 {
     /** Why a send failed */
-    public const FAILED_SIGN_IN = 'sign_in';  // the provider rejected the address / app password
-    public const FAILED_NETWORK = 'network';  // the mail server couldn't be reached (no internet?)
-    public const FAILED_OTHER   = 'other';
+    public const FAILED_SIGN_IN    = 'sign_in';    // provider rejected the address / app password
+    public const FAILED_NETWORK    = 'network';    // mail server unreachable
+    public const FAILED_OTHER      = 'other';
+    public const FAILED_NO_ACCOUNT = 'no_account'; // smtp_settings has no row yet
+
+    /**
+     * Send via the system SMTP account stored in smtp_settings.
+     * Returns null on success, else one of the FAILED_* reasons.
+     */
+    public function sendFromSystem(
+        string $to,
+        string $subject,
+        string $html
+    ): ?string {
+        $row = db_connect()->table('smtp_settings')->limit(1)->get()->getRowArray();
+        if (! $row) {
+            return self::FAILED_NO_ACCOUNT;
+        }
+
+        try {
+            $password = SmtpCrypto::decrypt((string) $row['smtp_password']);
+        } catch (\Throwable) {
+            return self::FAILED_OTHER;
+        }
+
+        $account = (string) $row['smtp_email'];
+        $servers = config(PasswordReset::class)->smtpServers;
+        $domain  = strtolower((string) substr(strrchr($account, '@') ?: '', 1));
+        $server  = $servers[$domain] ?? $servers['*'];
+
+        $result   = $this->deliver($server, $account, $password, $to, $subject, $html);
+        $password = '';
+
+        return $result;
+    }
 
     /**
      * Send from the user's own account ($account signs in with $appPassword). The mail server is

@@ -34,6 +34,12 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         // ── Account setup & profile ─────────────────────────────────────────
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/update-profile', 'AuthController::updateProfile');
+        $routes->post('auth/email-change/request', 'AuthController::requestEmailChange');
+        $routes->post('auth/email-change/confirm', 'AuthController::confirmEmailChange');
+        // First-login setup steps (level-4 admin SMTP, then recovery email for all users)
+        $routes->post('auth/setup-smtp', 'AuthController::setupSmtp', ['filter' => 'level:4']);
+        $routes->post('auth/setup-recovery-email/request', 'AuthController::requestRecoveryEmail');
+        $routes->post('auth/setup-recovery-email/confirm', 'AuthController::confirmRecoveryEmail');
 
         // ── Dashboard, transaction log, notifications ────────────────────────
         $routes->get('dashboard', 'DashboardController::index', ['filter' => 'level:1']);

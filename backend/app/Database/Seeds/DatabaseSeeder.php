@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
                 'lvl_of_access_id'     => 4,
                 'user_activity_id'     => 1,
                 'must_change_password' => 1, // the password above is public
+                'must_setup_smtp'      => 1, // admin must configure system SMTP on first login
             ],
             [
                 'username'             => 'tech',

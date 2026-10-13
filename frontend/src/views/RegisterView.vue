@@ -29,6 +29,8 @@ const showConfirmPassword = ref(false)
 const loading = ref(false)
 const loadingOptions = ref(true)
 const errorMessage = ref('')
+const successMessage = ref('')
+const fieldErrors = ref({ username: '', email: '' })
 
 const levels = ref([])
 const userOffices = ref([])
@@ -101,6 +103,8 @@ async function fetchOptions() {
 async function handleRegister() {
   if (loading.value) return
   errorMessage.value = ''
+  successMessage.value = ''
+  fieldErrors.value = { username: '', email: '' }
 
   if (!form.value.first_name.trim() || !form.value.last_name.trim()) {
     errorMessage.value = 'Please provide both First Name and Last Name.'
@@ -165,6 +169,9 @@ async function handleRegister() {
     })
     router.push('/login')
   } catch (err) {
+    const errors = err.response?.data?.errors || {}
+    fieldErrors.value.username = errors.username || ''
+    fieldErrors.value.email = errors.email || ''
     errorMessage.value =
       err.response?.data?.message ||
       err.response?.data?.error ||
@@ -297,10 +304,13 @@ onMounted(() => {
                 v-model="form.username"
                 type="text"
                 class="login-field-input"
+                :class="{ 'is-invalid': fieldErrors.username }"
                 placeholder="Choose a unique username"
                 autocomplete="username"
                 required
+                @input="fieldErrors.username = ''"
               />
+              <small v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</small>
             </div>
 
             <!-- Email -->
@@ -310,10 +320,13 @@ onMounted(() => {
                 v-model="form.email"
                 type="email"
                 class="login-field-input"
+                :class="{ 'is-invalid': fieldErrors.email }"
                 placeholder="Enter email address"
                 autocomplete="email"
                 required
+                @input="fieldErrors.email = ''"
               />
+              <small v-if="fieldErrors.email" class="field-error">{{ fieldErrors.email }}</small>
             </div>
 
             <!-- Password with Eye Toggle -->
