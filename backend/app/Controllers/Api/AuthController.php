@@ -571,14 +571,14 @@ class AuthController extends BaseApiController
     // ════════════════════════════════════════════════════════════════
 
     /** Shown whether or not an account uses the address, so the reply reveals nothing */
-    private const RESET_SENT_MESSAGE = 'If an account uses this email address, a password reset code has been sent to the recovery email on file. Check your recovery email inbox (and the Spam folder).';
+    private const RESET_SENT_MESSAGE = 'If an account uses this email address, a password reset code has been sent to that account\'s email address. Check its inbox (and the Spam folder).';
 
     /**
      * POST /api/auth/forgot-password   { email }
      *
-     * Sends a 6-digit OTP to the user's recovery_email (or primary email if no recovery email
-     * is set) using the system SMTP account configured in smtp_settings. No app-password is
-     * ever asked from the end-user.
+     * The address typed may be an account's email or its recovery email; the 6-digit OTP is
+     * always sent to the account's own email, using the system SMTP account configured in
+     * smtp_settings. No app-password is ever asked from the end-user.
      */
     public function forgotPassword(): ResponseInterface
     {
@@ -642,8 +642,9 @@ class AuthController extends BaseApiController
         $sent[] = time();
         cache()->save($sentKey, $sent, 3600);
         if ($user) {
-            $this->storeResetCode($user, $code, $limits->codeMinutes, $email);
-            AuditLog::record('auth.reset_code_sent', 'user', (int) $user['user_id'], "Password reset code sent to recovery email of {$email}", [], $this->resetActor($user, $email));
+            $this->storeResetCode($user, $code, $limits->codeMinutes);
+            $via = strcasecmp($email, (string) $user['email']) === 0 ? '' : " (requested with the recovery email {$email})";
+            AuditLog::record('auth.reset_code_sent', 'user', (int) $user['user_id'], "Password reset code sent to the account email{$via}", [], $this->resetActor($user, $email));
         }
 
         return $this->respondSuccess(null, self::RESET_SENT_MESSAGE);
@@ -651,18 +652,14 @@ class AuthController extends BaseApiController
 
 
     /** Saves a new code (hashed) and makes the earlier one and its wrong guesses void. */
-    private function storeResetCode(array $user, string $code, int $minutes, string $typedEmail = ''): void
+    private function storeResetCode(array $user, string $code, int $minutes): void
     {
         (new UserModel())->update($user['user_id'], [
             'password_reset_token'   => $this->resetCodeHash($code, (int) $user['user_id']),
             'password_reset_expires' => date('Y-m-d H:i:s', strtotime("+{$minutes} minutes")),
         ]);
-        // Clear attempt counters for both the typed address (may be recovery email)
-        // and the account's primary email so either lookup is unblocked.
-        cache()->delete($this->resetAttemptsKey($typedEmail !== '' ? $typedEmail : (string) $user['email']));
-        if ($typedEmail !== '' && strtolower($typedEmail) !== strtolower((string) $user['email'])) {
-            cache()->delete($this->resetAttemptsKey((string) $user['email']));
-        }
+        // Wrong guesses are counted per account (checkResetCode), under its own email
+        cache()->delete($this->resetAttemptsKey((string) $user['email']));
     }
 
     /**
@@ -740,15 +737,18 @@ class AuthController extends BaseApiController
      */
     private function checkResetCode(string $email, string $code): array|string
     {
+        $model = new UserModel();
+        $user  = $model->findByEmailOrRecovery($email);
+
+        // Counted per account (its own email), so typing the recovery email instead
+        // doesn't give extra guesses at the same code
         $max      = config(PasswordReset::class)->maxCodeAttempts;
-        $key      = $this->resetAttemptsKey($email);
+        $key      = $this->resetAttemptsKey($user ? (string) $user['email'] : $email);
         $attempts = (int) cache($key);
         if ($attempts >= $max) {
             return 'Too many incorrect attempts. Please request a new code.';
         }
 
-        $model = new UserModel();
-        $user  = $model->findByEmailOrRecovery($email);
         if ($user
             && ! empty($user['password_reset_token'])
             && strtotime((string) $user['password_reset_expires']) > time()
@@ -809,7 +809,7 @@ class AuthController extends BaseApiController
             'password_reset_token'   => null,
             'password_reset_expires' => null,
         ]);
-        cache()->delete($this->resetAttemptsKey((string) $input['email']));
+        cache()->delete($this->resetAttemptsKey((string) $user['email']));
         AuditLog::record('auth.password_reset', 'user', (int) $user['user_id'], "Password reset by email code for \"{$user['username']}\"", [], [
             'id' => (int) $user['user_id'], 'username' => $user['username'], 'user_office_id' => (int) ($user['user_office_id'] ?? 0),
         ]);

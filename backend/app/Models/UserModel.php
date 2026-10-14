@@ -45,13 +45,21 @@ class UserModel extends Model
     /**
      * Find a user by their primary email OR their recovery email.
      * Used by the forgot-password flow so that entering either address works.
+     *
+     * A primary email always wins: the address may also be someone else's recovery email.
+     * A recovery email only counts when exactly one account has it, so a code is never
+     * sent to the wrong person.
      */
     public function findByEmailOrRecovery(string $email): ?array
     {
-        return $this->db->query(
-            'SELECT * FROM user_table WHERE email = ? OR recovery_email = ? LIMIT 1',
-            [$email, $email]
-        )->getRowArray() ?: null;
+        $user = $this->findByEmail($email);
+        if ($user) {
+            return $user;
+        }
+
+        $matches = $this->db->table('user_table')->where('recovery_email', $email)->get(2)->getResultArray();
+
+        return count($matches) === 1 ? $matches[0] : null;
     }
 
     /**

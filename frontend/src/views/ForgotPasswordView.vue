@@ -26,8 +26,8 @@ const info = ref('')
 
 const TITLES = { 1: 'Forgot Password', 2: 'Enter Verification Code', 3: 'Choose a New Password' }
 const SUBTITLES = {
-  1: 'Enter the email address on your account. A 6-digit code will be sent to that email.',
-  2: 'Enter the 6-digit code sent to your email address. It expires in 15 minutes.',
+  1: 'Enter the email address on your account. A 6-digit code will be sent to your account\'s email.',
+  2: 'Enter the 6-digit code sent to your account\'s email address. It expires in 15 minutes.',
   3: 'Your code is verified. Choose a new password for your account.',
 }
 
@@ -149,7 +149,8 @@ function startOver() {
               <input id="fp_email" v-model="email" type="email" class="login-field-input" autocomplete="email" required />
             </div>
             <p class="fp-hint">
-              Enter the email address you registered with. The reset code will be sent there.
+              Enter the email address you registered with (or your recovery email, if you set one).
+              The reset code is always sent to your account's email address.
             </p>
             <button type="submit" class="login-submit-button" :disabled="loading">
               {{ loading ? 'Sending…' : 'Send Code' }}
@@ -158,7 +159,7 @@ function startOver() {
 
           <!-- Step 2: code -->
           <form v-else-if="step === 2" class="login-form-body" @submit.prevent="verifyCode">
-            <p class="fp-sent-to">A code was sent to <strong>{{ email }}</strong>.</p>
+            <p class="fp-sent-to">If an account uses <strong>{{ email }}</strong>, a code was sent to that account's email address.</p>
             <div class="login-field-group">
               <label class="login-field-label" for="fp_code">6-Digit Code</label>
               <input
