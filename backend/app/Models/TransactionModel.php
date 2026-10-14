@@ -114,7 +114,9 @@ class TransactionModel extends Model
                 fund_cluster,
                 transaction_type,
                 product_id,
-                MAX(balance)               AS balance
+                -- The balance after the group's last entry (rows share a date, so the
+                -- highest transaction_id is the last one the running balance counted)
+                CAST(SUBSTRING_INDEX(GROUP_CONCAT(balance ORDER BY transaction_id DESC), ',', 1) AS DECIMAL(32,2)) AS balance
             FROM (
                 SELECT
                     t.transaction_id,
