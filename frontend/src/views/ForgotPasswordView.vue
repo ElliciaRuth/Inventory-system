@@ -26,8 +26,8 @@ const info = ref('')
 
 const TITLES = { 1: 'Forgot Password', 2: 'Enter Verification Code', 3: 'Choose a New Password' }
 const SUBTITLES = {
-  1: 'Enter the email address on your account. A 6-digit code will be sent to your recovery email.',
-  2: 'Enter the 6-digit code sent to your recovery email. It expires in 15 minutes.',
+  1: 'Enter the email address on your account. A 6-digit code will be sent to that email.',
+  2: 'Enter the 6-digit code sent to your email address. It expires in 15 minutes.',
   3: 'Your code is verified. Choose a new password for your account.',
 }
 
@@ -60,7 +60,7 @@ function requestNewCode() {
 async function verifyCode() {
   error.value = ''
   if (!codeComplete.value) {
-    error.value = 'Please enter the 6-digit code from your recovery email.'
+    error.value = 'Please enter the 6-digit code from your email.'
     return
   }
   loading.value = true
@@ -149,8 +149,7 @@ function startOver() {
               <input id="fp_email" v-model="email" type="email" class="login-field-input" autocomplete="email" required />
             </div>
             <p class="fp-hint">
-              The reset code will be sent to your recovery email address by the system.
-              If you haven't set a recovery email, it is sent to this address directly.
+              Enter the email address you registered with. The reset code will be sent there.
             </p>
             <button type="submit" class="login-submit-button" :disabled="loading">
               {{ loading ? 'Sending…' : 'Send Code' }}
@@ -159,7 +158,7 @@ function startOver() {
 
           <!-- Step 2: code -->
           <form v-else-if="step === 2" class="login-form-body" @submit.prevent="verifyCode">
-            <p class="fp-sent-to">A code was sent to the recovery email for <strong>{{ email }}</strong>.</p>
+            <p class="fp-sent-to">A code was sent to <strong>{{ email }}</strong>.</p>
             <div class="login-field-group">
               <label class="login-field-label" for="fp_code">6-Digit Code</label>
               <input
