@@ -46,6 +46,18 @@ export const settingsApi = {
     return response.data
   },
 
+  // Prepared by / Verified by / Noted by of the summary report, for the manager's office
+  async getSignatories() {
+    const response = await client.get('/settings/signatories')
+    return response.data
+  },
+
+  // signatories: [{ label, name, title } × 3]
+  async saveSignatories(signatories) {
+    const response = await client.post('/settings/signatories', { signatories })
+    return response.data
+  },
+
   async saveSystemSettings(expiryWarningDays, expiryDangerDays) {
     const response = await client.post('/settings/system', {
       expiry_warning_days: expiryWarningDays,

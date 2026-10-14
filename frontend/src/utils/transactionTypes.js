@@ -29,3 +29,11 @@ export const typeBadge = (type) => BADGES[String(type || '').toLowerCase()] || '
 
 // "+5" for stock coming in, "-5" for stock going out
 export const signedQty = (type, qty) => `${isStockIn(type) ? '+' : '-'}${qty}`
+
+// A stock card row can stand for several ledger entries (a stock-out taken from several
+// batches); edits and deletes must name all of them
+export const rowTransactionIds = (row) =>
+  String(row?.transaction_ids || row?.transaction_id || '')
+    .split(',')
+    .map(Number)
+    .filter((id) => id > 0)

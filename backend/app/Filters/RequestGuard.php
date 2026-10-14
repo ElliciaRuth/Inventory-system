@@ -66,8 +66,9 @@ class RequestGuard implements FilterInterface
         }
 
         // ── Size ──
-        $isUpload = in_array($route, $config->uploadRoutes, true);
-        $maxBytes = $isUpload ? $config->maxUploadBytes : $config->maxBodyBytes;
+        $isUpload  = in_array($route, $config->uploadRoutes, true);
+        $largeText = $config->largeTextRoutes[$route] ?? null;
+        $maxBytes  = $isUpload ? $config->maxUploadBytes : ($largeText['maxBytes'] ?? $config->maxBodyBytes);
         $declared = (int) $request->getHeaderLine('Content-Length');
 
         if ($declared > $maxBytes || $this->uploadedBytes() > $maxBytes) {
@@ -100,7 +101,7 @@ class RequestGuard implements FilterInterface
                 $data = $request->getPost();
             }
 
-            if (is_array($data) && ($problem = $this->shapeProblem($data, $config))) {
+            if (is_array($data) && ($problem = $this->shapeProblem($data, $config, $largeText['fields'] ?? []))) {
                 return $this->reject($route, 'too_complex', $problem, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
         }
@@ -137,8 +138,9 @@ class RequestGuard implements FilterInterface
 
     /**
      * Too many values, too deep, or a text value too long → a message; fine → null.
+     * $longFields: top-level fields allowed past $maxStringLength (Config\RequestLimits::$largeTextRoutes).
      */
-    private function shapeProblem(array $data, RequestLimits $config): ?string
+    private function shapeProblem(array $data, RequestLimits $config, array $longFields = []): ?string
     {
         $count = 0;
         $stack = [[$data, 1]];
@@ -157,6 +159,8 @@ class RequestGuard implements FilterInterface
                 }
                 if (is_array($value)) {
                     $stack[] = [$value, $depth + 1];
+                } elseif ($depth === 1 && in_array($key, $longFields, true)) {
+                    continue; // its own size is bounded by the route's maxBytes
                 } elseif (is_string($value) && mb_strlen($value) > $config->maxStringLength) {
                     return "A text value is too long (more than {$config->maxStringLength} characters).";
                 }

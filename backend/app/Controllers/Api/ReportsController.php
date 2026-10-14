@@ -15,7 +15,7 @@ class ReportsController extends BaseApiController
 
     /**
      * Monthly batch ledger summary.
-     * GET /api/reports/batchlist
+     * GET /api/reports/batchlist?search=&year=&month=&type_id=&entries=0|1
      */
     public function batchlist(): ResponseInterface
     {
@@ -24,7 +24,9 @@ class ReportsController extends BaseApiController
         $year         = (int) ($this->request->getGet('year') ?? date('Y'));
         $month        = str_pad((string) ($this->request->getGet('month') ?? date('m')), 2, '0', STR_PAD_LEFT);
         $typeId       = (int) ($this->request->getGet('type_id') ?? 0);
-        $report       = $this->reportModel->batchLedgerSummarized($search, $year, $month, $typeId, $userOfficeId);
+        // entries=1 (edit mode) adds the stock card entries behind every row
+        $withEntries  = (string) ($this->request->getGet('entries') ?? '0') === '1';
+        $report       = $this->reportModel->batchLedgerSummarized($search, $year, $month, $typeId, $userOfficeId, $withEntries);
 
         return $this->respondSuccess([
             ...$report,

@@ -18,6 +18,17 @@ export const exportApi = {
     return res.data
   },
 
+  // The report's styles for the editor, linked as a stylesheet (the server's CSP blocks inline styles)
+  summaryEditorStyleUrl() {
+    return `${client.defaults.baseURL}/export/summary/editor-style`
+  },
+
+  // The report pages and their styles, for editing before download
+  async previewSummary(payload) {
+    const res = await client.post('/export/summary', { ...payload, format: 'preview' })
+    return res.data
+  },
+
   async downloadSummary(payload) {
     const res = await client.post('/export/summary', payload, {
       responseType: 'blob',

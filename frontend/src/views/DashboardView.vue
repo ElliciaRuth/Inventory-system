@@ -332,7 +332,7 @@ onMounted(() => {
             <button type="button" class="btn btn-sm btn-secondary" @click="activeTab = null">✕ Close</button>
           </div>
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Product</th>
@@ -344,15 +344,15 @@ onMounted(() => {
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in pLowStock.items" :key="idx">
-                  <td><strong>{{ item.item }}</strong></td>
-                  <td><span class="badge badge-warning">{{ item.stock_left }}</span></td>
-                  <td>{{ item.re_order_point }}</td>
-                  <td>
+                  <td class="cell-title"><strong>{{ item.item }}</strong></td>
+                  <td data-label="Current Stock"><span class="badge badge-warning">{{ item.stock_left }}</span></td>
+                  <td data-label="Reorder Point">{{ item.re_order_point }}</td>
+                  <td data-label="Short By">
                     <span class="badge badge-danger">
                       {{ Math.max(0, Number(item.re_order_point) - Number(item.stock_left)) }}
                     </span>
                   </td>
-                  <td>
+                  <td class="cell-actions">
                     <router-link v-if="authStore.canManageStock" :to="productStockcard(item)" class="btn btn-sm btn-secondary">Open Stockcard</router-link>
                   </td>
                 </tr>
@@ -386,7 +386,7 @@ onMounted(() => {
             <button type="button" class="btn btn-sm btn-secondary" @click="activeTab = null">✕ Close</button>
           </div>
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Product</th>
@@ -397,10 +397,10 @@ onMounted(() => {
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in pOutOfStock.items" :key="idx">
-                  <td><strong>{{ item.item }}</strong></td>
-                  <td><span class="badge badge-danger">Unavailable</span></td>
-                  <td><span style="color: var(--color-danger); font-weight: 600;">Restock immediately</span></td>
-                  <td>
+                  <td class="cell-title"><strong>{{ item.item }}</strong></td>
+                  <td data-label="Status"><span class="badge badge-danger">Unavailable</span></td>
+                  <td data-label="Action Needed"><span style="color: var(--color-danger); font-weight: 600;">Restock immediately</span></td>
+                  <td class="cell-actions">
                     <router-link v-if="authStore.canManageStock" :to="productStockcard(item)" class="btn btn-sm btn-primary">Stock In</router-link>
                   </td>
                 </tr>
@@ -434,7 +434,7 @@ onMounted(() => {
             <button type="button" class="btn btn-sm btn-secondary" @click="activeTab = null">✕ Close</button>
           </div>
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Batch #</th>
@@ -446,15 +446,15 @@ onMounted(() => {
               </thead>
               <tbody>
                 <tr v-for="(batch, idx) in pExpiring.items" :key="idx">
-                  <td>#{{ batch.batch_id }}</td>
-                  <td><strong>{{ batch.item }}</strong></td>
-                  <td>{{ batch.expiration_date }}</td>
-                  <td>
+                  <td data-label="Batch #">#{{ batch.batch_id }}</td>
+                  <td class="cell-title"><strong>{{ batch.item }}</strong></td>
+                  <td data-label="Expiration Date">{{ batch.expiration_date }}</td>
+                  <td data-label="Days Left">
                     <span class="badge" :class="Number(batch.days_left) <= 7 ? 'badge-danger' : 'badge-warning'">
                       {{ batch.days_left }} days
                     </span>
                   </td>
-                  <td><strong>{{ batch.remaining_qty }}</strong></td>
+                  <td data-label="Qty Remaining"><strong>{{ batch.remaining_qty }}</strong></td>
                 </tr>
                 <tr v-if="!pExpiring.items.length">
                   <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">No expiring items detected.</td>
@@ -486,7 +486,7 @@ onMounted(() => {
             <button type="button" class="btn btn-sm btn-secondary" @click="activeTab = null">✕ Close</button>
           </div>
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Product</th>
@@ -499,12 +499,12 @@ onMounted(() => {
               </thead>
               <tbody>
                 <tr v-for="(b, idx) in pBorrowed.items" :key="idx">
-                  <td><strong>{{ b.item }}</strong></td>
-                  <td>{{ b.office || 'Unassigned' }}</td>
-                  <td>{{ b.total_borrowed }}</td>
-                  <td>{{ b.total_returned }}</td>
-                  <td><span class="badge badge-warning">{{ b.net_borrowed }}</span></td>
-                  <td>{{ b.last_borrowed }}</td>
+                  <td class="cell-title"><strong>{{ b.item }}</strong></td>
+                  <td data-label="Office / Unit">{{ b.office || 'Unassigned' }}</td>
+                  <td data-label="Borrowed">{{ b.total_borrowed }}</td>
+                  <td data-label="Returned">{{ b.total_returned }}</td>
+                  <td data-label="Still Out"><span class="badge badge-warning">{{ b.net_borrowed }}</span></td>
+                  <td data-label="Last Movement">{{ b.last_borrowed }}</td>
                 </tr>
                 <tr v-if="!pBorrowed.items.length">
                   <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active borrowed items.</td>
@@ -541,7 +541,7 @@ onMounted(() => {
         </div>
 
         <div class="table-responsive">
-          <table class="data-table">
+          <table class="data-table activity-table">
             <thead>
               <tr>
                 <th>Date / Time</th>
@@ -561,13 +561,13 @@ onMounted(() => {
                 @click="openActivity(tx)"
                 @keydown.enter="openActivity(tx)"
               >
-                <td style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">
+                <td class="act-date" style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">
                   {{ tx.date }}
                 </td>
-                <td>
+                <td class="act-item">
                   <strong>{{ tx.item }}</strong>
                 </td>
-                <td>
+                <td class="act-type">
                   <span
                     class="badge"
                     :class="typeBadge(tx.transaction_type)"
@@ -576,7 +576,7 @@ onMounted(() => {
                     {{ typeLabel(tx.transaction_type) }}
                   </span>
                 </td>
-                <td style="font-weight: 700;">
+                <td class="act-qty" style="font-weight: 700;">
                   <span :style="{ color: isStockIn(tx.transaction_type) ? 'var(--color-success)' : 'var(--text-main)' }">
                     {{ signedQty(tx.transaction_type, tx.transaction_qty) }}
                   </span>
@@ -748,6 +748,72 @@ html[data-theme='dark'] .summary-card.tone-expiry { --tone: #fb923c; --tone-bg: 
     margin-left: -20px;
     border-radius: 4px;
     background: var(--border-hover, var(--border-subtle));
+  }
+
+  /* Recent activity: product and quantity on top, movement and date below; no sideways scroll */
+  .activity-table thead {
+    display: none;
+  }
+
+  .activity-table,
+  .activity-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .activity-table tr.activity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'item qty'
+      'type date';
+    align-items: center;
+    gap: 6px 12px;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .activity-table tr.activity-row td {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .activity-table .act-item {
+    grid-area: item;
+    overflow-wrap: anywhere;
+  }
+
+  .activity-table .act-qty {
+    grid-area: qty;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .activity-table .act-type {
+    grid-area: type;
+  }
+
+  .activity-table .act-date {
+    grid-area: date;
+    text-align: right;
+    font-size: 0.72rem !important;
+    white-space: nowrap;
+  }
+
+  .activity-table tr:not(.activity-row) td {
+    display: block;
+  }
+
+  /* Detail cards: the sheet's header wraps its Close button, the card actions span the width */
+  .dash-details :deep(.panel-header) {
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .dash-details :deep(.data-table.stack-mobile td) {
+    overflow-wrap: anywhere;
   }
 
   /* Title and Close stay visible while the table scrolls */

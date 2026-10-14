@@ -26,6 +26,16 @@ class RequestLimits extends BaseConfig
         'backups/inspect',
     ];
 
+    /**
+     * Routes (after /api/) that carry one large text field: the field may be longer than
+     * $maxStringLength and the body larger than $maxBodyBytes, up to maxBytes.
+     * export/summary: the summary report edited in the browser (its HTML, with the logos
+     * inline), checked again by ExportController::MAX_EDITED_REPORT_BYTES.
+     */
+    public array $largeTextRoutes = [
+        'export/summary' => ['fields' => ['html'], 'maxBytes' => 8 * 1024 * 1024],
+    ];
+
     // ── Shape of the data ────────────────────────────────────────────────
 
     /** Most values (array items + fields, counted through every level) one request may carry. */

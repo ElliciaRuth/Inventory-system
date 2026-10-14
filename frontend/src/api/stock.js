@@ -26,6 +26,13 @@ export const stockApi = {
     return response.data
   },
 
+  // Inline edits from the Stock Card / Summary Report, saved all or nothing:
+  // { edits: [{ transaction_ids, qty?, unit_cost?, reference?, office?, date?, expiration_date?, type? }], deletes: [ids[]] }
+  async saveLedgerEdits(payload) {
+    const response = await client.post('/stock/ledger-edits', payload)
+    return response.data
+  },
+
   async editReportCost(transactionId, newCost) {
     const response = await client.post('/stock/edit-report-cost', {
       transaction_id: transactionId,

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Clock, UserCheck, Users, AlertTriangle } from 'lucide-vue-next'
+import { Clock, UserCheck, Users, AlertTriangle, PenLine } from 'lucide-vue-next'
 import { maskEmail } from '../utils/maskEmail'
 import { settingsApi } from '../api/settings'
 import { useAuthStore } from '../stores/authStore'
@@ -34,6 +34,8 @@ const busy = ref('')
 const openSection = ref('')
 const searches = reactive({})
 const thresholds = reactive({ expiry_warning_days: 30, expiry_danger_days: 7 })
+// Signature block at the bottom of the summary report (this office's)
+const signatories = ref([])
 
 // Add / edit modal
 const modal = reactive({ open: false, type: '', id: 0, values: {}, saving: false, error: '' })
@@ -108,6 +110,10 @@ async function load() {
     if (authStore.levelId >= 3) {
       const sys = await settingsApi.getSystemSettings()
       Object.assign(thresholds, sys.data || {})
+    }
+    if (authStore.levelId === 3) {
+      const sig = await settingsApi.getSignatories()
+      signatories.value = (sig.data?.signatories || []).map((s) => ({ ...s }))
     }
   } catch (err) {
     toast(errorMessage(err, 'Failed to load settings.'), 'error')
@@ -242,6 +248,17 @@ async function saveThresholds() {
   )
 }
 
+async function saveSignatories() {
+  const ok = await confirmDialog({
+    title: 'Save the report signatories?',
+    message: 'They are printed at the bottom of every page of the summary report.',
+    details: signatories.value.map((s) => [s.label, [s.name || '(blank line)', s.title].filter(Boolean).join(' — ')]),
+    confirmText: 'Save',
+  })
+  if (!ok) return
+  run('signatories', () => settingsApi.saveSignatories(signatories.value))
+}
+
 onMounted(load)
 </script>
 
@@ -275,6 +292,33 @@ onMounted(load)
             <input v-model.number="thresholds.expiry_danger_days" type="number" min="1" max="364" class="form-input" />
           </div>
           <button type="submit" class="btn btn-primary" :disabled="!!busy">Save</button>
+        </form>
+      </section>
+
+      <!-- Summary report signatories (managers, for their own office) -->
+      <section v-if="authStore.levelId === 3 && signatories.length" class="panel settings-section">
+        <button type="button" class="section-toggle" @click="toggle('signatories')">
+          <span style="display: inline-flex; align-items: center; gap: 8px;"><PenLine :size="16" /> Report Signatories</span><span>{{ openSection === 'signatories' ? '▴' : '▾' }}</span>
+        </button>
+        <form v-if="openSection === 'signatories'" class="section-body" @submit.prevent="saveSignatories">
+          <p class="signatory-hint">Printed at the bottom of every summary report page. Leave a name blank to print an empty line to sign on.</p>
+          <div class="signatory-grid">
+            <fieldset v-for="(s, i) in signatories" :key="i" class="signatory-card">
+              <div class="form-group">
+                <label class="form-label" :for="`sig-label-${i}`">Heading</label>
+                <input :id="`sig-label-${i}`" v-model="s.label" type="text" class="form-input" maxlength="40" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label" :for="`sig-name-${i}`">Name</label>
+                <input :id="`sig-name-${i}`" v-model="s.name" type="text" class="form-input" maxlength="80" placeholder="e.g. JUAN D. DELA CRUZ" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" :for="`sig-title-${i}`">Position</label>
+                <input :id="`sig-title-${i}`" v-model="s.title" type="text" class="form-input" maxlength="80" />
+              </div>
+            </fieldset>
+          </div>
+          <button type="submit" class="btn btn-primary" :disabled="!!busy" style="margin-top: 1rem;">Save</button>
         </form>
       </section>
 
@@ -443,6 +487,34 @@ onMounted(load)
 </template>
 
 <style scoped>
+.signatory-hint {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Prepared by / Verified by / Noted by side by side, stacked on phones */
+.signatory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.signatory-card {
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+
+@media (max-width: 900px) {
+  .signatory-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-section {
   margin-bottom: 1rem;
 }

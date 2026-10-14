@@ -54,6 +54,13 @@ class ReportModel extends Model
                 'copy_label'        => $row['copy_label'] ?? '',
                 'transaction_id'    => (int) ($row['transaction_id'] ?? 0),
                 'transaction_type'  => (int) ($row['transaction_type_id'] ?? 0),
+                'type_name'         => $row['transaction_type'] ?? '',
+                'date'              => $row['transaction_date'] ?? '',
+                'reference_id'      => (int) ($row['reference_id'] ?? 0),
+                'reference'         => $row['reference'] ?? '',
+                'office_id'         => (int) ($row['office_id'] ?? 0),
+                'office'            => $row['office'] ?? '',
+                'borrow_id'         => (int) ($row['borrow_id'] ?? 0),
                 'product_type'      => $row['product_type'] ?: 'Uncategorized',
                 'stock_no'          => $row['stock_no'],
                 'item'              => $row['product'],
@@ -88,8 +95,11 @@ class ReportModel extends Model
     /**
      * Summarized version of batchLedger — one row per product per copy (sub-product).
      * Each copy (price variant) gets its own line. This applies to both the web view and exported reports.
+     *
+     * $withEntries adds each row's stock card entries (`entries`), which the report's edit mode
+     * changes; entries a stock card row shows as one (a stock-out from several batches) stay together.
      */
-    public function batchLedgerSummarized(string $search, int $year, string $month, int $typeId, int $userOfficeId = 0): array
+    public function batchLedgerSummarized(string $search, int $year, string $month, int $typeId, int $userOfficeId = 0, bool $withEntries = false): array
     {
         $report = $this->batchLedger($search, $year, $month, $typeId, $userOfficeId);
         $rows   = $report['rows'] ?? [];
@@ -128,6 +138,10 @@ class ReportModel extends Model
                 ];
             }
 
+            if ($withEntries) {
+                $this->addEntry($products[$key], $row);
+            }
+
             // Accumulate transaction totals
             $products[$key]['purchase_qty']   += (float) $row['purchase_qty'];
             $products[$key]['purchase_total'] += (float) $row['purchase_total'];
@@ -149,6 +163,12 @@ class ReportModel extends Model
             $p['purchase_cost'] = $p['purchase_qty'] > 0 ? $p['purchase_total'] / $p['purchase_qty'] : 0.0;
             $p['used_cost']     = $p['used_qty']     > 0 ? $p['used_total']     / $p['used_qty']     : 0.0;
             $p['spoiled_cost']  = $p['spoiled_qty']  > 0 ? $p['spoiled_total']  / $p['spoiled_qty']  : 0.0;
+            if ($withEntries) {
+                $p['entries'] = array_values(array_map(static function (array $entry): array {
+                    $entry['cost'] = $entry['qty'] > 0 ? $entry['total'] / $entry['qty'] : 0.0;
+                    return $entry;
+                }, $p['entries'] ?? []));
+            }
             $summarized[] = $p;
         }
 
@@ -162,6 +182,39 @@ class ReportModel extends Model
             'rows'        => $summarized,
             'groupedRows' => $groupedRows,
         ];
+    }
+
+    /**
+     * One ledger row into its summary row's entries, under the column it is counted in
+     * (purchase, used or spoiled). Rows the stock card groups share one entry.
+     */
+    private function addEntry(array &$summary, array $row): void
+    {
+        foreach (['purchase', 'used', 'spoiled'] as $section) {
+            $qty = (float) $row[$section . '_qty'];
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $key = implode('|', [$row['date'], $row['type_name'], $row['office_id'], $row['reference_id'], $section]);
+            $summary['entries'][$key] ??= [
+                'transaction_ids' => [],
+                'section'         => $section,
+                'type'            => $row['type_name'],
+                'date'            => $row['date'],
+                'reference'       => $row['reference'],
+                'office'          => $row['office'],
+                'borrow'          => false,
+                'qty'             => 0.0,
+                'total'           => 0.0,
+            ];
+            $entry = &$summary['entries'][$key];
+            $entry['transaction_ids'][] = $row['transaction_id'];
+            $entry['qty']   += $qty;
+            $entry['total'] += (float) $row[$section . '_total'];
+            $entry['borrow'] = $entry['borrow'] || $row['borrow_id'] > 0;
+            unset($entry);
+        }
     }
 
     /**
@@ -239,6 +292,12 @@ class ReportModel extends Model
             'COALESCE(t.copy_id, b.copy_id) AS copy_id',
             'COALESCE(pc.unit_cost, 0) AS copy_unit_cost',
             'COALESCE(pc.label, "") AS copy_label',
+            't.transaction_date',
+            't.borrow_id',
+            'COALESCE(t.reference_id, 0) AS reference_id',
+            'COALESCE(r.reference, "") AS reference',
+            'COALESCE(t.office_id, 0) AS office_id',
+            'COALESCE(ot.office_name, "") AS office',
         ]);
         $builder->join('batch_table b', 't.batch_id = b.batch_id');
         $builder->join('product_table p', 'b.product_id = p.product_id');
@@ -246,6 +305,8 @@ class ReportModel extends Model
         $builder->join('unit_table ut', 'p.unit_id = ut.unit_id', 'left');
         $builder->join('type_of_product pt', 'p.type_id = pt.type_id', 'left');
         $builder->join('product_copy_table pc', 'COALESCE(t.copy_id, b.copy_id) = pc.copy_id', 'left');
+        $builder->join('reference_table r', 't.reference_id = r.reference_id', 'left');
+        $builder->join('office_table ot', 't.office_id = ot.office_id', 'left');
         $builder->where('t.transaction_date >=', $monthStart);
         $builder->where('t.transaction_date <', $nextMonth);
         $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return', 'adjust_in']);

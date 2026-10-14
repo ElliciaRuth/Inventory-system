@@ -1,19 +1,24 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Download, ArrowLeftRight, Pencil, FileSpreadsheet, AlertTriangle, AlertOctagon, Clock, Archive,
-  ArrowDownWideNarrow, ArrowUpNarrowWide, Search, ChevronLeft, ChevronRight, Loader2,
+  ArrowDownWideNarrow, ArrowUpNarrowWide, Search, ChevronLeft, ChevronRight, Loader2, PencilLine,
+  Trash2, Undo2,
 } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
-import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
+import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
+import { confirmDialog } from '../composables/useConfirm'
 import StockModal from '../components/StockModal.vue'
 import EditStockcardModal from '../components/EditStockcardModal.vue'
 import ImportStockcardsModal from '../components/ImportStockcardsModal.vue'
-import { toast } from '../composables/useToast'
+import UnsavedChangesBar from '../components/UnsavedChangesBar.vue'
+import { toast, errorMessage } from '../composables/useToast'
 import AppPagination from '../components/AppPagination.vue'
-import { typeLabel, typeBadge } from '../utils/transactionTypes'
+import { typeLabel, typeBadge, isStockIn, rowTransactionIds } from '../utils/transactionTypes'
+import '../styles/inline-edit.css'
 import { barcodesApi } from '../api/reports'
 import CameraScanButton from '../components/CameraScanButton.vue'
 
@@ -132,7 +137,25 @@ function itemMeta(item) {
   return [item.stock_no, stock].filter(Boolean).join(' · ')
 }
 
-function selectItem(item) {
+// Phones and narrow tablets show the navigator above the stock card: after choosing an item,
+// the page moves down to its card so the ledger is in view without scrolling
+const mainEl = ref(null)
+const infoEl = ref(null)
+let revealCardAfterLoad = false
+
+function revealCard() {
+  nextTick(() => (infoEl.value || mainEl.value)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+
+async function selectItem(item) {
+  const stacked = window.matchMedia('(max-width: 1024px)').matches
+  if (Number(item.product_id) === selectedItemId.value) {
+    if (stacked) revealCard()
+    return
+  }
+  if (!(await confirmDiscard('Open another item?', 'Discard and open'))) return
+  clearEdits()
+  revealCardAfterLoad = stacked
   selectedItemId.value = Number(item.product_id)
 }
 
@@ -204,7 +227,181 @@ function handleTransactionDeleted() {
   loadStockcard()
 }
 
+// ── Edit mode: the cells become inputs; every change is saved together from the bar ──
+// Custodians and managers only, like the Edit button and the backend route
+const canEdit = computed(() => authStore.levelId === 2 || authStore.levelId === 3)
+const editMode = ref(false)
+// Archived products keep their history read-only
+const editing = computed(() => editMode.value && canEdit.value && !itemInfo.value.archived_at)
+
+// The ledger shows as cards where its columns can't fit: phones and portrait tablets, and while
+// editing up to 1200px (the inputs need more room)
+const narrowScreen = ref(false)
+const mediumScreen = ref(false)
+const asCards = computed(() => narrowScreen.value || (editing.value && mediumScreen.value))
+const narrowQuery = window.matchMedia('(max-width: 900px)')
+const mediumQuery = window.matchMedia('(max-width: 1200px)')
+function updateScreen() {
+  narrowScreen.value = narrowQuery.matches
+  mediumScreen.value = mediumQuery.matches
+}
+updateScreen()
+narrowQuery.addEventListener('change', updateScreen)
+mediumQuery.addEventListener('change', updateScreen)
+onUnmounted(() => {
+  narrowQuery.removeEventListener('change', updateScreen)
+  mediumQuery.removeEventListener('change', updateScreen)
+})
+const drafts = reactive({})        // row key → { date, reference, office, qty, cost, expiry }
+const deleting = reactive(new Set()) // row keys marked for deletion
+const saving = ref(false)
+const saveError = ref('')
+const today = new Date().toISOString().slice(0, 10)
+
+const rowKey = (entry) => String(entry.transaction_ids || entry.transaction_id)
+const entryQty = (entry) => Number(isStockIn(entry.transaction_type) ? entry.receipt_qty : entry.issue_qty) || 0
+const isBorrowLinked = (entry) => Number(entry.borrow_id) > 0
+const hasExpiry = (entry) => ['receipt', 'return'].includes(entry.transaction_type)
+
+// The saved values, in the shape the inputs edit
+function savedValues(entry) {
+  return {
+    date: String(entry.date || '').slice(0, 10),
+    reference: entry.reference && entry.reference !== 'N/A' ? entry.reference : '',
+    office: entry.office && entry.office !== 'Direct' ? entry.office : '',
+    qty: entryQty(entry),
+    cost: Number(entry.transaction_unit_cost || entry.copy_unit_cost) || 0,
+    expiry: hasExpiry(entry) ? String(rowBatch(entry)?.expiration_date || '').slice(0, 10) : '',
+  }
+}
+
+const sameNumber = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005
+
+// Field → whether it differs from the saved value
+function changedFields(entry) {
+  const draft = drafts[rowKey(entry)]
+  if (!draft) return {}
+  const saved = savedValues(entry)
+  return {
+    date: draft.date !== saved.date,
+    reference: draft.reference.trim() !== saved.reference,
+    office: draft.office.trim() !== saved.office,
+    qty: !sameNumber(draft.qty, saved.qty),
+    cost: !sameNumber(draft.cost, saved.cost),
+    expiry: draft.expiry !== saved.expiry,
+  }
+}
+
+const isRowChanged = (entry) => Object.values(changedFields(entry)).some(Boolean)
+
+function invalidFields(entry) {
+  const draft = drafts[rowKey(entry)]
+  if (!draft) return {}
+  return {
+    date: !/^\d{4}-\d{2}-\d{2}$/.test(draft.date) || draft.date > today,
+    qty: !(Number(draft.qty) > 0),
+    cost: draft.cost === '' || !(Number(draft.cost) >= 0),
+  }
+}
+
+const changedRows = computed(() => stockcard.value.filter((entry) => !deleting.has(rowKey(entry)) && isRowChanged(entry)))
+const changeCount = computed(() => changedRows.value.length + deleting.size)
+
+// Inputs start from the saved values; rows already being edited keep their drafts
+function syncDrafts() {
+  for (const entry of stockcard.value) {
+    drafts[rowKey(entry)] ??= savedValues(entry)
+  }
+}
+
+function clearEdits() {
+  for (const key of Object.keys(drafts)) delete drafts[key]
+  deleting.clear()
+  saveError.value = ''
+}
+
+const { confirmDiscard } = useUnsavedChanges(() => changeCount.value > 0)
+
+async function toggleEditMode() {
+  if (editMode.value) {
+    if (!(await confirmDiscard('Leave edit mode?'))) return
+    clearEdits()
+    editMode.value = false
+    return
+  }
+  editMode.value = true
+  syncDrafts()
+}
+
+function revertRow(entry) {
+  drafts[rowKey(entry)] = savedValues(entry)
+  deleting.delete(rowKey(entry))
+}
+
+function toggleDelete(entry) {
+  const key = rowKey(entry)
+  if (deleting.has(key)) deleting.delete(key)
+  else deleting.add(key)
+}
+
+async function discardEdits() {
+  if (!(await confirmDiscard())) return
+  clearEdits()
+  syncDrafts()
+}
+
+async function saveEdits() {
+  saveError.value = ''
+  const bad = changedRows.value.find((entry) => Object.values(invalidFields(entry)).some(Boolean))
+  if (bad) {
+    const invalid = invalidFields(bad)
+    saveError.value = `Fix the ${invalid.date ? 'date' : invalid.qty ? 'quantity' : 'price'} of the ${String(bad.date).slice(0, 10)} row first.`
+    return
+  }
+
+  const edits = changedRows.value.map((entry) => {
+    const draft = drafts[rowKey(entry)]
+    const changed = changedFields(entry)
+    const edit = { transaction_ids: rowTransactionIds(entry) }
+    if (changed.date) edit.date = draft.date
+    if (changed.reference) edit.reference = draft.reference.trim()
+    if (changed.office) edit.office = draft.office.trim()
+    if (changed.qty) edit.qty = Number(draft.qty)
+    if (changed.cost) edit.unit_cost = Number(draft.cost)
+    if (changed.expiry) edit.expiration_date = draft.expiry
+    return edit
+  })
+  const deleteRows = stockcard.value.filter((entry) => deleting.has(rowKey(entry)))
+
+  if (deleteRows.length) {
+    const ok = await confirmDialog({
+      title: deleteRows.length === 1 ? 'Delete 1 entry?' : `Delete ${deleteRows.length} entries?`,
+      message: 'Deleted entries are removed from the stock card and their batch quantities are restored. This cannot be undone.',
+      details: deleteRows.map((entry) => [String(entry.date).slice(0, 10), `${typeLabel(entry.transaction_type)} ${entryQty(entry)} · ${entry.reference || 'N/A'}`]),
+      confirmText: edits.length ? 'Save and delete' : 'Delete',
+      variant: 'danger',
+    })
+    if (!ok) return
+  }
+
+  saving.value = true
+  try {
+    const res = await stockApi.saveLedgerEdits({ edits, deletes: deleteRows.map(rowTransactionIds) })
+    clearEdits()
+    toast(`${res.message || 'Saved'}. The Summary Report uses the new values.`)
+    // Reloads this card (and anything else on screen that shows stock)
+    triggerAutoReload('ledger-edit')
+  } catch (err) {
+    // Nothing was saved: the edits stay so they can be fixed
+    saveError.value = errorMessage(err, 'The changes could not be saved.')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function loadStockcard() {
+  // Unsaved edits keep their drafts; otherwise the inputs start again from the fresh values
+  const keepDrafts = changeCount.value > 0
   loading.value = true
   try {
     const res = await stockApi.getStockcard({
@@ -225,7 +422,13 @@ async function loadStockcard() {
       totalPages.value = res.data.totalPages || 1
       total.value = res.data.total || 0
       selectedItemId.value = res.data.itemId || 0
+      if (!keepDrafts) clearEdits()
+      if (editMode.value) syncDrafts()
       revealSelected()
+      if (revealCardAfterLoad) {
+        revealCardAfterLoad = false
+        revealCard()
+      }
     }
   } catch (err) {
     console.error('Failed to load stockcard', err)
@@ -235,11 +438,15 @@ async function loadStockcard() {
 }
 
 // Auto-reload on background interval, window focus, and when mutations occur
-useAutoReload(loadStockcard)
+// (not while there are unsaved edits: a reload would mix other people's changes into them)
+useAutoReload(() => (changeCount.value > 0 ? undefined : loadStockcard()))
 
 // A notification or link opened while already on this page switches the product
-watch(() => route.query.item_id, (id) => {
-  if (Number(id) > 0) selectedItemId.value = Number(id)
+watch(() => route.query.item_id, async (id) => {
+  if (!(Number(id) > 0) || Number(id) === selectedItemId.value) return
+  if (!(await confirmDiscard('Open another item?', 'Discard and open'))) return
+  clearEdits()
+  selectedItemId.value = Number(id)
 })
 
 watch(selectedItemId, () => {
@@ -252,12 +459,16 @@ watch([filterType, filterYear, filterMonth], () => {
   loadStockcard()
 })
 
-function handlePageChange(newPage) {
+async function handlePageChange(newPage) {
+  if (!(await confirmDiscard('Go to another page?', 'Discard and continue'))) return
+  clearEdits()
   currentPage.value = newPage
   loadStockcard()
 }
 
-function handleLimitChange(newLimit) {
+async function handleLimitChange(newLimit) {
+  if (!(await confirmDiscard('Change the page size?', 'Discard and continue'))) return
+  clearEdits()
   pageSize.value = newLimit
   currentPage.value = 1
   loadStockcard()
@@ -376,27 +587,27 @@ onMounted(() => {
       </aside>
 
       <!-- Right: the chosen item's stock card -->
-      <section class="panel sc-main">
+      <section ref="mainEl" class="panel sc-main">
         <!-- Header: title, then period and order -->
         <div class="sc-toolbar">
           <h2 class="sc-main-title">Stock Item</h2>
 
           <div class="sc-filters">
-            <div class="sc-field">
+            <div class="sc-field" :title="changeCount ? 'Save or discard your changes first' : undefined">
               <span class="sc-label">Period</span>
               <div class="sc-period">
-                <select v-model="filterMonth" class="form-select" aria-label="Month">
+                <select v-model="filterMonth" class="form-select" aria-label="Month" :disabled="changeCount > 0">
                   <option value="">All months</option>
                   <option v-for="(m, i) in MONTHS" :key="m" :value="String(i + 1).padStart(2, '0')">{{ m }}</option>
                 </select>
-                <select v-model.number="filterYear" class="form-select" aria-label="Year">
+                <select v-model.number="filterYear" class="form-select" aria-label="Year" :disabled="changeCount > 0">
                   <option :value="0">All years</option>
                   <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
                 </select>
               </div>
             </div>
 
-            <div class="sc-field">
+            <div class="sc-field" :title="changeCount ? 'Save or discard your changes first' : undefined">
               <span class="sc-label">Order</span>
               <div class="sc-segment" role="radiogroup" aria-label="Order">
                 <button
@@ -404,6 +615,7 @@ onMounted(() => {
                   role="radio"
                   :aria-checked="filterType === 'latest'"
                   :class="{ 'is-on': filterType === 'latest' }"
+                  :disabled="changeCount > 0"
                   @click="filterType = 'latest'"
                 >
                   <ArrowDownWideNarrow :size="15" /> Latest
@@ -413,17 +625,33 @@ onMounted(() => {
                   role="radio"
                   :aria-checked="filterType === 'oldest'"
                   :class="{ 'is-on': filterType === 'oldest' }"
+                  :disabled="changeCount > 0"
                   @click="filterType = 'oldest'"
                 >
                   <ArrowUpNarrowWide :size="15" /> Oldest
                 </button>
               </div>
             </div>
+
+            <div v-if="canEdit && selectedItemId && !itemInfo.archived_at" class="sc-field">
+              <span class="sc-label">Edit</span>
+              <button
+                type="button"
+                class="edit-toggle"
+                :class="{ 'is-on': editMode }"
+                :aria-pressed="editMode"
+                title="Edit the cells of this stock card directly"
+                @click="toggleEditMode"
+              >
+                <PencilLine :size="15" /> Edit Mode
+                <span class="edit-toggle-state">{{ editMode ? 'ON' : 'OFF' }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
       <!-- Item Profile Details Grid -->
-      <div v-if="itemInfo.item_name" style="padding: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; border-bottom: 1px solid var(--border-subtle);">
+      <div v-if="itemInfo.item_name" ref="infoEl" class="sc-info">
         <div>
           <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Item Name</span>
           <div style="font-weight: 800; font-size: 1.15rem; color: var(--text-main);">{{ itemInfo.item_name }}</div>
@@ -518,7 +746,7 @@ onMounted(() => {
 
       <!-- Ledger Table -->
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table ledger-table" :class="{ 'is-editing': editing, 'as-cards': asCards }">
           <thead>
             <tr>
               <th>Date</th>
@@ -530,36 +758,137 @@ onMounted(() => {
               <th style="text-align: right;">Price</th>
               <th>Expiry</th>
               <th>Action Type</th>
-              <th style="text-align: center; width: 95px;">Actions</th>
+              <th style="text-align: center;" :style="{ width: editing ? '112px' : '95px' }">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="entry in stockcard" :key="entry.transaction_id" :class="rowTone(entry)">
-              <td style="font-family: var(--font-mono); font-size: 0.825rem; color: var(--text-muted);">
+            <tr
+              v-for="entry in stockcard"
+              :key="entry.transaction_id"
+              class="ledger-row"
+              :class="[
+                rowTone(entry),
+                { 'row-changed': editing && isRowChanged(entry) && !deleting.has(rowKey(entry)), 'row-deleted': editing && deleting.has(rowKey(entry)) },
+              ]"
+            >
+              <!-- Edit mode: every stored cell is an input (Balance is worked out from the quantities) -->
+              <template v-if="editing && drafts[rowKey(entry)]">
+                <td class="lg-date" data-label="Date">
+                  <input
+                    v-model="drafts[rowKey(entry)].date"
+                    type="date"
+                    class="cell-input"
+                    :class="{ 'is-changed': changedFields(entry).date, 'is-invalid': invalidFields(entry).date }"
+                    :max="today"
+                    :disabled="isBorrowLinked(entry) || deleting.has(rowKey(entry))"
+                    :title="isBorrowLinked(entry) ? 'Part of a borrow record: its date cannot be changed here' : 'Date'"
+                    aria-label="Date"
+                  />
+                </td>
+                <td class="lg-ref" data-label="Reference">
+                  <input
+                    v-model="drafts[rowKey(entry)].reference"
+                    type="text"
+                    class="cell-input"
+                    :class="{ 'is-changed': changedFields(entry).reference }"
+                    maxlength="150"
+                    placeholder="N/A"
+                    :disabled="deleting.has(rowKey(entry))"
+                    aria-label="Reference / PO"
+                  />
+                </td>
+                <td class="lg-office" data-label="Office">
+                  <input
+                    v-model="drafts[rowKey(entry)].office"
+                    type="text"
+                    class="cell-input"
+                    :class="{ 'is-changed': changedFields(entry).office }"
+                    maxlength="150"
+                    placeholder="Direct"
+                    :disabled="deleting.has(rowKey(entry))"
+                    aria-label="Office / Source / Purpose"
+                  />
+                </td>
+                <td
+                  v-for="side in ['in', 'out']"
+                  :key="side"
+                  class="lg-qty"
+                  :class="{ 'is-empty': isStockIn(entry.transaction_type) !== (side === 'in') }"
+                  :data-label="side === 'in' ? 'Receipt Qty' : 'Issue Qty'"
+                  style="text-align: right;"
+                >
+                  <input
+                    v-if="isStockIn(entry.transaction_type) === (side === 'in')"
+                    v-model.number="drafts[rowKey(entry)].qty"
+                    type="number"
+                    step="any"
+                    min="0.01"
+                    class="cell-input cell-narrow"
+                    :class="{ 'is-changed': changedFields(entry).qty, 'is-invalid': invalidFields(entry).qty }"
+                    :disabled="isBorrowLinked(entry) || deleting.has(rowKey(entry))"
+                    :title="isBorrowLinked(entry) ? 'Part of a borrow record: record a Return instead of changing it' : side === 'in' ? 'Receipt quantity' : 'Issue quantity'"
+                    :aria-label="side === 'in' ? 'Receipt quantity' : 'Issue quantity'"
+                  />
+                  <span v-else style="color: var(--text-muted);">—</span>
+                </td>
+                <td class="lg-bal" data-label="Balance" style="text-align: right; font-family: var(--font-mono); font-weight: 800; font-size: 0.95rem;">
+                  {{ entry.balance }}
+                  <div v-if="changedFields(entry).qty || changedFields(entry).date" class="sc-recalc">updates on save</div>
+                </td>
+                <td class="lg-price" data-label="Price" style="text-align: right;">
+                  <input
+                    v-model.number="drafts[rowKey(entry)].cost"
+                    type="number"
+                    step="any"
+                    min="0"
+                    class="cell-input cell-narrow"
+                    :class="{ 'is-changed': changedFields(entry).cost, 'is-invalid': invalidFields(entry).cost }"
+                    :disabled="deleting.has(rowKey(entry))"
+                    :title="entry.copy_label ? 'Unit price (' + entry.copy_label + ')' : 'Unit price'"
+                    aria-label="Price"
+                  />
+                </td>
+                <td class="lg-exp" :class="{ 'is-empty': !hasExpiry(entry) }" data-label="Expiry">
+                  <input
+                    v-if="hasExpiry(entry)"
+                    v-model="drafts[rowKey(entry)].expiry"
+                    type="date"
+                    class="cell-input"
+                    :class="{ 'is-changed': changedFields(entry).expiry }"
+                    :disabled="deleting.has(rowKey(entry))"
+                    title="Expiry date of the batch this entry received"
+                    aria-label="Expiry"
+                  />
+                  <span v-else style="color: var(--text-muted);">—</span>
+                </td>
+              </template>
+
+              <template v-else>
+              <td class="lg-date" style="font-family: var(--font-mono); font-size: 0.825rem; color: var(--text-muted);">
                 {{ entry.date ? entry.date.split(' ')[0] : '—' }}
               </td>
-              <td>
+              <td class="lg-ref" data-label="Ref">
                 <span class="badge badge-neutral" style="font-family: var(--font-mono);">
                   {{ entry.reference || 'N/A' }}
                 </span>
               </td>
-              <td>
+              <td class="lg-office" data-label="Office">
                 <span style="font-weight: 500;">{{ entry.office || 'Direct' }}</span>
               </td>
-              <td style="text-align: right; font-weight: 700; color: var(--color-success);">
+              <td class="lg-qty" :class="{ 'is-empty': !(Number(entry.receipt_qty) > 0) }" style="text-align: right; font-weight: 700; color: var(--color-success);">
                 {{ Number(entry.receipt_qty) > 0 ? '+' + entry.receipt_qty : '—' }}
               </td>
-              <td style="text-align: right; font-weight: 700; color: var(--color-danger);">
+              <td class="lg-qty" :class="{ 'is-empty': !(Number(entry.issue_qty) > 0) }" style="text-align: right; font-weight: 700; color: var(--color-danger);">
                 {{ Number(entry.issue_qty) > 0 ? '-' + entry.issue_qty : '—' }}
               </td>
-              <td style="text-align: right; font-family: var(--font-mono); font-weight: 800; font-size: 0.95rem;">
+              <td class="lg-bal" data-label="Balance" style="text-align: right; font-family: var(--font-mono); font-weight: 800; font-size: 0.95rem;">
                 {{ entry.balance }}
               </td>
-              <td style="text-align: right; white-space: nowrap;">
+              <td class="lg-price" style="text-align: right; white-space: nowrap;">
                 ₱{{ peso(entry.transaction_unit_cost || entry.copy_unit_cost) }}
                 <div v-if="entry.copy_label" style="font-size: 0.75rem; color: var(--text-muted);">{{ entry.copy_label }}</div>
               </td>
-              <td class="ledger-expiry">
+              <td class="ledger-expiry lg-exp" :class="{ 'is-empty': !rowBatch(entry) }">
                 <template v-if="rowBatch(entry)">
                   <span class="ledger-expiry-date">{{ shortDate(rowBatch(entry).expiration_date) }}</span>
                   <span
@@ -573,7 +902,8 @@ onMounted(() => {
                 </template>
                 <span v-else style="color: var(--text-muted);">—</span>
               </td>
-              <td>
+              </template>
+              <td class="lg-type" data-label="Type">
                 <span
                   class="badge"
                   :class="typeBadge(entry.transaction_type)"
@@ -582,8 +912,9 @@ onMounted(() => {
                   {{ typeLabel(entry.transaction_type) }}
                 </span>
               </td>
-              <td style="text-align: center;">
+              <td class="lg-act" style="text-align: center;">
                 <button
+                  v-if="!editing"
                   type="button"
                   class="btn btn-sm btn-secondary"
                   style="padding: 4px 10px; font-size: 12px; gap: 5px;"
@@ -591,8 +922,42 @@ onMounted(() => {
                   @click="openEditModal(entry)"
                 >
                   <Pencil :size="13" />
-                  <span>Edit</span>
+                  <span class="lg-act-label">Edit</span>
                 </button>
+                <div v-else class="row-actions">
+                  <button
+                    type="button"
+                    class="row-action"
+                    title="More options: change Receipt / Issue, or edit in a form"
+                    aria-label="Edit entry in a form"
+                    @click="openEditModal(entry)"
+                  >
+                    <Pencil :size="14" />
+                  </button>
+                  <template v-if="editing">
+                    <button
+                      type="button"
+                      class="row-action is-danger"
+                      :class="{ 'is-on': deleting.has(rowKey(entry)) }"
+                      :disabled="isBorrowLinked(entry)"
+                      :title="isBorrowLinked(entry) ? 'Part of a borrow record: it cannot be deleted' : deleting.has(rowKey(entry)) ? 'Keep this entry' : 'Mark this entry for deletion (deleted when you save)'"
+                      :aria-label="deleting.has(rowKey(entry)) ? 'Keep entry' : 'Delete entry'"
+                      @click="toggleDelete(entry)"
+                    >
+                      <component :is="deleting.has(rowKey(entry)) ? Undo2 : Trash2" :size="14" />
+                    </button>
+                    <button
+                      v-if="isRowChanged(entry) && !deleting.has(rowKey(entry))"
+                      type="button"
+                      class="row-action"
+                      title="Undo the changes to this row"
+                      aria-label="Undo row changes"
+                      @click="revertRow(entry)"
+                    >
+                      <Undo2 :size="14" />
+                    </button>
+                  </template>
+                </div>
               </td>
             </tr>
 
@@ -624,6 +989,17 @@ onMounted(() => {
       />
       </section>
     </div>
+
+    <!-- Edit mode: Save stays on screen while scrolling the ledger -->
+    <UnsavedChangesBar
+      v-if="editing"
+      :count="changeCount"
+      :saving="saving"
+      :error="saveError"
+      hint="Saved changes also update the Summary Report."
+      @save="saveEdits"
+      @discard="discardEdits"
+    />
 
     <!-- Stock Movement Modal -->
     <StockModal
@@ -820,6 +1196,300 @@ onMounted(() => {
 
 .ledger-expiry {
   white-space: nowrap;
+}
+
+/* Wide screens: headings wrap so the ten ledger columns fit beside the item navigator */
+.ledger-table th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+@media (min-width: 901px) and (max-width: 1500px) {
+  .ledger-table:not(.is-editing) th,
+  .ledger-table:not(.is-editing) td {
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+}
+
+/* Item details: a grid that fits the panel */
+.sc-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  /* Room for the sticky navbar when the page jumps here */
+  scroll-margin-top: 84px;
+}
+
+.sc-main {
+  scroll-margin-top: 84px;
+}
+
+/* ── Phones and tablets in portrait: item details in two columns ── */
+@media (max-width: 900px) {
+  .sc-info {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+    padding: 1rem;
+  }
+
+  .sc-info > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .sc-info > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+}
+
+/* ── The ledger as cards (the view adds .as-cards: phones and portrait tablets, and while
+   editing up to 1200px where the inputs no longer fit in a row); nothing scrolls sideways ── */
+.ledger-table.as-cards thead {
+  display: none;
+}
+
+.ledger-table.as-cards,
+.ledger-table.as-cards tbody {
+  display: block;
+  width: 100%;
+}
+
+.ledger-table.as-cards tr.ledger-row td {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  white-space: normal;
+}
+
+.ledger-table.as-cards tr.ledger-row td.is-empty {
+  display: none;
+}
+
+/* Row colours sit on the card instead of each cell */
+.ledger-table.as-cards tr.ledger-row {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ledger-table.as-cards tr.ledger-row.ledger-row-expired,
+.ledger-table.as-cards tr.ledger-row.row-deleted {
+  background: var(--color-danger-bg);
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.ledger-table.as-cards tr.ledger-row.ledger-row-critical {
+  background: color-mix(in srgb, var(--color-danger-bg) 55%, transparent);
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.ledger-table.as-cards tr.ledger-row.ledger-row-warning {
+  background: color-mix(in srgb, var(--color-warning-bg) 60%, transparent);
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+.ledger-table.as-cards tr.ledger-row.row-changed {
+  background: color-mix(in srgb, var(--color-warning-bg) 55%, transparent);
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+/* Viewing: date and movement, quantity and balance, reference and price, office and expiry */
+.ledger-table.as-cards:not(.is-editing) tr.ledger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    'date type act'
+    'qty bal bal'
+    'ref price price'
+    'office exp exp';
+  align-items: center;
+  gap: 6px 12px;
+  padding: 0.8rem 0.9rem;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-date {
+  grid-area: date;
+  font-weight: 700;
+  color: var(--text-main) !important;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-type {
+  grid-area: type;
+  justify-self: end;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-qty {
+  grid-area: qty;
+  text-align: left !important;
+  font-size: 1.05rem;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-bal {
+  grid-area: bal;
+  text-align: right !important;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-ref {
+  grid-area: ref;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-office {
+  grid-area: office;
+  font-size: 0.8rem;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-price {
+  grid-area: price;
+  text-align: right !important;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-exp {
+  grid-area: exp;
+  text-align: right;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-act {
+  grid-area: act;
+  text-align: right !important;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-act .btn {
+  min-height: 32px;
+  padding: 4px 10px !important;
+}
+
+.ledger-table.as-cards:not(.is-editing) .lg-ref .badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-table.as-cards:not(.is-editing) td[data-label]:not(.lg-type)::before {
+  content: attr(data-label) ' ';
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Editing: one labelled input per line */
+.ledger-table.as-cards.is-editing tr.ledger-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0.9rem;
+  border-bottom: 2px solid var(--border-hover);
+}
+
+.ledger-table.as-cards.is-editing tr.ledger-row td {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 0.75rem;
+  text-align: right !important;
+}
+
+.ledger-table.as-cards.is-editing tr.ledger-row td[data-label]::before {
+  content: attr(data-label);
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ledger-table.as-cards.is-editing tr.ledger-row td .cell-input {
+  margin-left: auto;
+  flex: 0 1 62%;
+  width: 62%;
+  min-width: 0;
+  max-width: 62%;
+}
+
+.ledger-table.as-cards.is-editing tr.ledger-row td.is-empty {
+  display: none;
+}
+
+.ledger-table.as-cards.is-editing tr.ledger-row td.lg-act {
+  justify-content: flex-end;
+}
+
+.ledger-table.as-cards.is-editing .sc-recalc {
+  flex-basis: 100%;
+  text-align: right;
+}
+
+/* Editing on wide screens: the table with compact inputs */
+.ledger-table.is-editing:not(.as-cards) th,
+.ledger-table.is-editing:not(.as-cards) td {
+  padding: 0.5rem 0.4rem;
+}
+
+.ledger-table.is-editing:not(.as-cards) .cell-input {
+  min-width: 0;
+}
+
+.ledger-table.is-editing:not(.as-cards) .cell-narrow {
+  min-width: 64px;
+  max-width: 84px;
+}
+
+.ledger-table.is-editing:not(.as-cards) .cell-input[type='date'] {
+  width: 128px;
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  .ledger-table:not(.as-cards) th,
+  .ledger-table:not(.as-cards) td {
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+    font-size: 0.8rem;
+  }
+
+  /* The row's Edit button keeps only its pencil (the label stays as its tooltip) */
+  .ledger-table:not(.as-cards) th:last-child {
+    width: auto !important;
+  }
+
+  /* Long references break onto a second line instead of widening the table */
+  .ledger-table:not(.as-cards) .lg-ref .badge {
+    white-space: normal;
+    word-break: break-all;
+    text-align: left;
+  }
+
+  .ledger-table:not(.as-cards) .lg-act-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
+
+/* Balance note while a quantity or date is being changed */
+.sc-recalc {
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-warning);
+  white-space: nowrap;
+}
+
+.sc-segment button:disabled,
+.sc-toolbar .form-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .ledger-expiry-date {

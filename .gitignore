@@ -63,6 +63,9 @@ Vagrantfile
 /backend/writable/debugbar/*
 !/backend/writable/debugbar/index.html
 
+# Fonts the summary PDF registers from the PC (Microsoft's fonts: not ours to share)
+/backend/writable/dompdf-fonts/
+
 # Excel import previews waiting to be confirmed
 /backend/writable/imports/
 

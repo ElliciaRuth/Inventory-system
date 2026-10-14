@@ -743,7 +743,7 @@ class InventoryService
         return $parsed !== false && $parsed->format('Y-m-d') === $date;
     }
 
-    private function resolveReferenceId(array $payload): ?int
+    public function resolveReferenceId(array $payload): ?int
     {
         $userOfficeId = (int) ($payload['user_office_id'] ?? 0);
 
@@ -781,7 +781,7 @@ class InventoryService
 
         return (int) $this->db->insertID();
     }
-    private function resolveOfficeId(array $payload): ?int
+    public function resolveOfficeId(array $payload): ?int
     {
         $userOfficeId = (int) ($payload['user_office_id'] ?? 0);
 

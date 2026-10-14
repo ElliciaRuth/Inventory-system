@@ -65,6 +65,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('stock/edit-transaction', 'StockController::editTransaction', ['filter' => 'level:2']);
         $routes->post('stock/delete-transaction', 'StockController::deleteTransaction', ['filter' => 'level:2']);
         $routes->post('stock/edit-report-cost', 'StockController::editReportCost', ['filter' => 'level:2']);
+        $routes->post('stock/ledger-edits', 'StockController::ledgerEdits', ['filter' => 'level:2']);
         $routes->get('stock/batch-plan', 'StockController::batchPlan', ['filter' => 'level:2']);
         $routes->get('stock/borrows', 'StockController::borrows', ['filter' => 'level:2']);
         $routes->post('stock/count', 'StockController::count', ['filter' => 'level:2']);
@@ -89,6 +90,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('export/stockcard/options', 'ExportController::stockcardOptions', ['filter' => 'level:2']);
         $routes->match(['get', 'post'], 'export/stockcard', 'ExportController::stockcardDownload', ['filter' => 'level:2']);
         $routes->get('export/summary/options', 'ExportController::summaryOptions', ['filter' => 'level:2']);
+        $routes->get('export/summary/editor-style', 'ExportController::summaryEditorStyle', ['filter' => 'level:2']);
         $routes->post('export/summary', 'ExportController::summaryDownload', ['filter' => 'level:2']);
 
         // ── Settings ("Office Settings"): managers; technical staff for users & user offices ──
@@ -96,6 +98,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->get('settings', 'SettingsController::index', ['filter' => 'level:3']);
         $routes->get('settings/system', 'SettingsController::systemSettings', ['filter' => 'level:2']);
         $routes->post('settings/system', 'SettingsController::saveSystemSettings', ['filter' => 'level:3']);
+        $routes->get('settings/signatories', 'SettingsController::signatories', ['filter' => 'level:3']);
+        $routes->post('settings/signatories', 'SettingsController::saveSignatories', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/activate', 'SettingsController::activate/$1', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/deactivate', 'SettingsController::deactivate/$1', ['filter' => 'level:3']);
         $routes->post('settings/users/(:num)/decline', 'SettingsController::decline/$1', ['filter' => 'level:3']);

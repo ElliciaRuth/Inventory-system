@@ -1,8 +1,11 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
 import { exportApi, triggerBlobDownload } from '../api/export'
 import { toast, errorMessage } from '../composables/useToast'
-import { ArrowLeft, ArrowRight, AlertTriangle, File, FileText } from 'lucide-vue-next'
+import { confirmDialog } from '../composables/useConfirm'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
+import { useThemeStore } from '../stores/themeStore'
+import { ArrowLeft, ArrowRight, AlertTriangle, Check, File, FileText, PencilLine, RefreshCw, Save, X } from 'lucide-vue-next'
 
 const thisMonth = new Date().toISOString().slice(0, 7)
 
@@ -10,6 +13,142 @@ const form = reactive({ month_from: thisMonth, month_to: thisMonth, type_id: 0, 
 const productTypes = ref([])
 const downloading = ref('')
 const formError = ref('')
+
+// ── Edit before export (TinyMCE) ──────────────────────────────────────────
+// Downloaded only when the editor is first opened
+const ReportEditor = defineAsyncComponent(() => import('../components/ReportEditor.vue'))
+const themeStore = useThemeStore()
+
+const editing = ref(false)      // downloads use the edited report while true
+const loadingPreview = ref(false)
+const reportHtml = ref('')      // what the editor shows, changing as the user types
+const savedHtml = ref('')       // the version downloads use, set by Save Changes
+const savedAt = ref(null)
+const editorReady = ref(false)
+const edited = ref(false)
+const previewFor = ref('')      // the selection the editor's report was built from
+
+const selectionKey = computed(() => `${form.month_from}|${form.month_to}|${form.type_id}`)
+const previewStale = computed(() => editing.value && previewFor.value !== selectionKey.value)
+
+watch(reportHtml, () => {
+  if (editorReady.value) edited.value = true
+})
+
+const unsaved = computed(() => editing.value && reportHtml.value !== savedHtml.value)
+
+// Edits live only on this page until downloaded, so leaving asks first (saved or not)
+useUnsavedChanges(() => editing.value && edited.value, {
+  message: 'Your edits to the report are kept only on this page. Download the report first if you need them.',
+})
+
+function saveEdits(quiet = false) {
+  savedHtml.value = reportHtml.value
+  savedAt.value = new Date()
+  if (!quiet) toast('Changes saved. PDF Print and MS Word use this version.')
+}
+
+const savedLabel = computed(() =>
+  savedAt.value ? `Saved at ${savedAt.value.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet'
+)
+
+// Pictures are kept inside the report (data: URIs) so the PDF needs no files
+function pickImage(callback) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg,image/gif'
+  input.onchange = () => {
+    const file = input.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => callback(reader.result, { alt: file.name })
+    reader.readAsDataURL(file)
+  }
+  input.click()
+}
+
+const editorInit = computed(() => ({
+  height: 680,
+  menubar: 'edit view insert format table',
+  plugins: 'advlist lists link image table charmap searchreplace visualblocks code fullscreen pagebreak',
+  toolbar:
+    'undo redo | blocks fontsize | bold italic underline | forecolor backcolor | ' +
+    'alignleft aligncenter alignright | bullist numlist | table image pagebreak | removeformat | code fullscreen',
+  font_size_formats: '6pt 7pt 7.5pt 8pt 9pt 10pt 11pt 12pt 14pt 18pt',
+  // The report's own styles (the page stays white: it is what gets printed), as a stylesheet
+  // the server serves: inline styles are blocked by its Content-Security-Policy
+  content_css: [exportApi.summaryEditorStyleUrl()],
+  // No dashed guides around the borderless heading and signature tables: the page looks as printed
+  // (View → Visual aids shows them again)
+  visual: false,
+  pagebreak_separator: '<div style="page-break-before:always;"></div>',
+  invalid_elements: 'script,iframe,object,embed,form',
+  convert_urls: false,
+  paste_data_images: true,
+  automatic_uploads: false,
+  images_file_types: 'png,jpg,jpeg,gif',
+  file_picker_types: 'image',
+  file_picker_callback: (callback) => pickImage(callback),
+  promotion: false,
+  branding: false,
+  // Ctrl+S inside the editor saves the report instead of the browser's "save page"
+  setup: (editor) => editor.addShortcut('meta+s', 'Save changes', () => saveEdits()),
+}))
+
+function validateRange() {
+  formError.value = ''
+  if (!form.month_from || !form.month_to) {
+    formError.value = 'Please select a date range.'
+    return false
+  }
+  if (form.month_from > form.month_to) {
+    formError.value = 'From Month must be before To Month.'
+    return false
+  }
+  return true
+}
+
+async function confirmDropEdits(title, confirmText) {
+  if (!edited.value) return true
+  return confirmDialog({
+    title,
+    message: 'The changes you made to the report will be lost.',
+    confirmText,
+    variant: 'warning',
+  })
+}
+
+async function openEditor() {
+  if (!validateRange()) return
+  if (editing.value && !(await confirmDropEdits('Rebuild the report?', 'Rebuild'))) return
+
+  loadingPreview.value = true
+  try {
+    const res = await exportApi.previewSummary(form)
+    reportHtml.value = res.data?.html || ''
+    savedHtml.value = reportHtml.value
+    savedAt.value = null
+    previewFor.value = selectionKey.value
+    editing.value = true
+    // A rebuilt report is not an edit
+    await nextTick()
+    edited.value = false
+  } catch (err) {
+    formError.value = errorMessage(err, 'Failed to load the report.')
+  } finally {
+    loadingPreview.value = false
+  }
+}
+
+async function closeEditor() {
+  if (!(await confirmDropEdits('Discard your edits?', 'Discard'))) return
+  editing.value = false
+  editorReady.value = false
+  edited.value = false
+  reportHtml.value = ''
+  savedHtml.value = ''
+  savedAt.value = null
+}
 
 const FORMATS = [
   ['pdf', 'PDF Print', 'pdf'],
@@ -33,19 +172,26 @@ async function loadOptions() {
 }
 
 async function download(format, ext) {
-  formError.value = ''
-  if (!form.month_from || !form.month_to) {
-    formError.value = 'Please select a date range.'
-    return
-  }
-  if (form.month_from > form.month_to) {
-    formError.value = 'From Month must be before To Month.'
-    return
+  if (!validateRange()) return
+
+  // Exports use the saved version: unsaved edits would silently be left out
+  if (unsaved.value) {
+    const ok = await confirmDialog({
+      title: 'Save your changes before exporting',
+      message: 'The report has changes that are not saved yet. Exports use the saved version, so save first to include them.',
+      confirmText: 'Save and export',
+      cancelText: 'Keep editing',
+      variant: 'warning',
+    })
+    if (!ok) return
+    saveEdits(true)
   }
 
   downloading.value = format
   try {
-    const res = await exportApi.downloadSummary({ ...form, format })
+    const payload = { ...form, format }
+    if (editing.value) payload.html = savedHtml.value
+    const res = await exportApi.downloadSummary(payload)
     let filename = `SummaryReport_${form.month_from}_to_${form.month_to}.${ext}`
     const match = (res.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
     if (match) filename = match[1]
@@ -94,6 +240,15 @@ onMounted(loadOptions)
               <option v-for="t in productTypes" :key="t.type_id" :value="Number(t.type_id)">{{ t.type }}</option>
             </select>
           </div>
+
+          <div class="form-group">
+            <span class="form-label">Edit Before Download <small class="es-hint">(optional)</small></span>
+            <button type="button" class="btn btn-secondary es-edit-btn" :disabled="loadingPreview || !!downloading" @click="openEditor">
+              <component :is="editing ? RefreshCw : PencilLine" :size="15" />
+              {{ loadingPreview ? 'Loading report…' : editing ? 'Rebuild Report from Data' : 'Preview & Edit Report' }}
+            </button>
+            <small class="es-hint">Fix wording, add remarks or signatories, then download the edited copy.</small>
+          </div>
         </div>
 
         <!-- Right: how it is printed and downloaded -->
@@ -129,9 +284,43 @@ onMounted(loadOptions)
                 {{ downloading === format ? 'Generating…' : label }}
               </button>
             </div>
+            <small v-if="editing" class="es-hint" :class="{ 'es-hint-warn': unsaved }">
+              {{ unsaved ? 'You have unsaved changes: save them to include them in the download.' : 'Downloads use the saved version of your edited report.' }}
+            </small>
           </div>
         </div>
       </div>
+    </section>
+
+    <section v-if="editing" class="panel es-card es-editor-card">
+      <div class="es-editor-head">
+        <div>
+          <h2 class="es-editor-title"><PencilLine :size="17" /> Edit Report</h2>
+          <p class="es-hint">Each dashed line marks a new page. Use the page-break button to start one yourself.</p>
+        </div>
+        <div class="es-editor-actions">
+          <span class="es-save-state" :class="{ 'is-unsaved': unsaved }" aria-live="polite">
+            <component :is="unsaved ? AlertTriangle : Check" :size="14" />
+            {{ unsaved ? 'Unsaved changes' : savedLabel }}
+          </span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="closeEditor"><X :size="14" /> Discard Edits</button>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="!unsaved" title="Save changes (Ctrl+S)" @click="saveEdits()">
+            <Save :size="14" /> Save Changes
+          </button>
+        </div>
+      </div>
+
+      <div v-if="previewStale" class="es-stale">
+        <AlertTriangle :size="15" />
+        <span>The period or product type changed since this report was built. Downloads still use the report below. Click <strong>Rebuild Report from Data</strong> to start over with the new selection.</span>
+      </div>
+
+      <ReportEditor
+        v-model="reportHtml"
+        :dark="themeStore.current === 'dark'"
+        :init="editorInit"
+        @init="editorReady = true"
+      />
     </section>
   </div>
 </template>
@@ -282,6 +471,77 @@ onMounted(loadOptions)
   justify-content: center;
   min-height: 48px;
   font-weight: 700;
+}
+
+.es-edit-btn {
+  justify-content: center;
+}
+
+/* Editor below the form */
+.es-editor-card {
+  margin-top: 1.5rem;
+}
+
+.es-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.es-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.es-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.es-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+.es-save-state.is-unsaved {
+  color: var(--color-warning);
+}
+
+.es-hint-warn {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.es-stale {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 1rem;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 0.85rem;
+}
+
+.es-stale svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 @media (max-width: 900px) {

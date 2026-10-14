@@ -1,13 +1,13 @@
 # BSU Integrated Inventory Monitoring System
 
-[![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Version](https://img.shields.io/badge/version-2.3.1-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![Release](https://img.shields.io/badge/release-October%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![CodeIgniter](https://img.shields.io/badge/CodeIgniter-4.7-EF4423.svg?logo=codeigniter&logoColor=white)](https://codeigniter.com/)
 [![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 
-> **Current Version:** `v2.2.1` (Production Release — October 2026)
+> **Current Version:** `v2.3.1` (Production Release — October 2026)
 
 An integrated inventory, stock-card, and stock-out monitoring system engineered specifically for Benguet State University (BSU) production and operating units, including the **Bakery Project**, the **Food Processing Center (FPC)**, and administrative offices.
 
@@ -17,7 +17,7 @@ The application is structured as a decoupled web application comprising a **Code
 BSU_Inventory_System/
 ├── backend/          CodeIgniter 4 JSON REST API (all endpoints under /api)
 │   ├── app/          Controllers, Models, Services, Libraries, Config, Filters, Database
-│   ├── public/       Front controller (index.php), generated barcode SVGs (/barcodes)
+│   ├── public/       Front controller (index.php), generated barcode SVGs (/barcodes), summary report logos (/report-logos)
 │   ├── writable/     Cache, logs, session data, safety backup archives
 │   └── spark         CodeIgniter CLI tool (migrations, seeds, password reset CLI)
 ├── frontend/         Vue 3.5 + Vite single-page application
@@ -88,6 +88,7 @@ The system enforces strict Role-Based Access Control (RBAC) partitioned by offic
 | **Approve / Reject Stock-Out Requests** | No | Yes | Yes | No |
 | **Stockcard Ledger (View)** | No | Yes | Yes | No |
 | **Stockcard Ledger (Stock In / Issue / Adjust)** | No | Yes | Yes | No |
+| **Edit Mode: correct Stock Card & Summary Report cells** | No | Yes | Yes | No |
 | **Inter-Unit Borrowing & Returns** | No | Yes | Yes | No |
 | **Physical Inventory Count & Reconciliation** | No | Yes | Yes | No |
 | **Reports (Batch Inventory, Summary)** | No | Yes | Yes | No |
@@ -98,6 +99,7 @@ The system enforces strict Role-Based Access Control (RBAC) partitioned by offic
 | **Office Settings (Entities, Units, Types)** | No | No | Yes | No |
 | **Office User Management (Activate/Deactivate)** | No | No | Yes (Office Users) | Yes (Global Users) |
 | **System Settings (Expiry Thresholds)** | No | View Only | Yes | No |
+| **Report Signatories (Prepared / Verified / Noted by)** | No | No | Yes (own office) | No |
 | **Data Backup & Restore** | No | Auto-Backup on Login | Full Create / Restore | No |
 | **Audit Trail (Audit Log)** | No | No | Office Scope | Global Scope (All Offices) |
 | **System Administration & Office Setup** | No | No | No | Yes |
@@ -467,6 +469,12 @@ The notification system computes dynamic alerts across 7 operational categories:
 - **Display Formatting:** Trailing zeros are trimmed dynamically ($2.50 \rightarrow 2.5$, $3.00 \rightarrow 3$).
 - **Currency Calculations:** Unit costs and transaction totals are calculated with standard 2-decimal financial rounding.
 - **Report Unit Cost Override:** Custodians can update transaction unit costs via `POST /api/stock/edit-report-cost` without altering physical inventory quantities. Each adjustment is logged to the audit log capturing the old and new cost.
+- **Inline Editing (Stock Card & Summary Report):** Both pages have an **Edit Mode**. On the Stock Card the date, reference, office, quantity, price and batch expiry cells become inputs and rows can be marked for deletion; on the Summary Report the Purchase, Used and Spoiled quantities and costs can be changed, because each is a stock card entry (`GET api/reports/batchlist?entries=1` lists them). Both save through `POST /api/stock/ledger-edits` ([`LedgerEditService`](backend/app/Services/LedgerEditService.php)), so a change made on one page shows on the other:
+  - One request, one database transaction: every change is saved, or none is.
+  - A stock card row that stands for several entries (a stock-out taken from several batches) is edited as a whole. A smaller quantity comes off its last entries; a larger stock-out quantity is taken from its batch and then from the product's other batches first-in-first-out, as extra entries of the same row.
+  - Refused: a batch going below 0, a running balance going below 0 at any date (e.g. moving a receipt after the issues it supplied), future dates, and quantity or date changes on borrow-linked entries.
+  - Each changed row is written to the audit log with its before and after values.
+  - The Save button lives in a bar that stays at the bottom of the screen (Ctrl+S also saves); the page asks before leaving or switching items with unsaved changes, and auto-refresh pauses until they are saved or discarded.
 
 ---
 
@@ -480,9 +488,12 @@ The notification system computes dynamic alerts across 7 operational categories:
 ### 2.17 Multi-Format Export Engine & CSV Formula Injection Protection
 **Location:** [`backend/app/Controllers/Api/ExportController.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Controllers/Api/ExportController.php)
 
-- **Supported Formats:** PDF (rendered via Dompdf), Microsoft Word (`.doc` HTML tables), and CSV/Excel.
+- **Supported Formats:** PDF (rendered via Dompdf), Microsoft Word (`.doc`; the summary report is a single-file web page so its logos travel with it), and CSV/Excel.
 - **Paper Sizing:** Configurable for A4, Philippine Long Bond (Folio 8.5" $\times$ 13"), and Short Letter (8.5" $\times$ 11").
 - **CSV Formula Injection Sanitization:** To prevent spreadsheet formula injection attacks, cells containing leading characters `=, +, -, @, \t, \r` are automatically escaped with a leading apostrophe (`'`).
+- **Summary Report Template:** Every page of the summary report (PDF, Word and the editor) carries the University Business Affairs Office heading: the logos from [`backend/public/report-logos/`](backend/public/report-logos/) (`bagong-pilipinas.png` and `bsu-seal.png` on the left, `bsu-food-products.png` on the right; a missing file is left out), *Republic of the Philippines / Benguet State University / La Trinidad, 2601 Benguet / University Business Affairs Office*, the project (`BAKERY PROJECT` or `FOOD PROCESSING CENTER`, from the user's office), *Inventory for the month of …* and the product type, then the table with a CODE (stock no.) column and, under it, the *Prepared by / Verified by / Noted by* signatures. Managers set the signatories of their office in **Settings → Report Signatories** (`GET/POST api/settings/signatories`, stored per office in `system_settings`); the Bakery starts with its form's names, other offices with blank lines to sign on. The heading uses the *Old English Text MT* and *Monotype Corsiva* fonts that Microsoft Office installs; the PDF takes them from the Windows font folder (registered once into `writable/dompdf-fonts`) and falls back to a serif font where they are missing. The Word download is a single-file web page (MHTML) so its logos show in Word.
+- **Edit Summary Report Before Export:** *Export Summary → Preview & Edit Report* loads the generated report into a TinyMCE editor so users can fix wording or add remarks, signatories and pictures, then download the edited copy as PDF or Word. The edited HTML is sanitized on the server (allow-listed tags and attributes only; pictures must be inline PNG/JPEG/GIF) before Dompdf renders it. TinyMCE is self-hosted: it is bundled from the `tinymce` npm package into its own chunk; its skin and the report's styles are linked as stylesheets (`GET api/export/summary/editor-style`), never injected as `<style>` blocks, which the server's Content-Security-Policy (`style-src 'self'`) blocks ([`ReportEditor.vue`](frontend/src/components/ReportEditor.vue)), loaded only when the editor is opened, so it works offline and needs no API key. It runs under TinyMCE's GPL v2+ license (`license_key: 'gpl'`).
+- **Save Before Export:** edits in the editor are kept as a draft until **Save Changes** (or Ctrl+S inside the editor); PDF Print and MS Word use the last saved version. Exporting with unsaved changes asks first (*Save and export* or *Keep editing*), and leaving the page with edits asks too, because edits live only on that page until downloaded. The edited report is sent back as one large text field, which the request guard allows on this route only (section 5.1).
 
 ---
 
@@ -679,7 +690,18 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
    - **Keep existing data:** Appends new lines while skipping existing rows via SHA-256 fingerprints.
    - **Delete existing inventory first:** Prompts for Manager password, creates pre-wipe safety backup, and replaces office records.
 
-### 4.7 Disaster Recovery: Backup & Restore
+### 4.7 Correcting Entries in Edit Mode (Stock Card & Summary Report)
+1. **Stock Card:** open the item, turn on **Edit Mode** and change the date, reference, office, quantity, price or expiry right in the ledger. The trash button marks a row for deletion; the undo button puts a row back. The pencil opens the full form (also used to switch a single entry between Receipt and Issue).
+2. **Summary Report:** choose the month, turn on **Edit Mode** and change a Purchase, Used or Spoiled quantity or cost. A product with several entries in the month shows one line per entry under it.
+3. Click **Save changes** in the bar at the bottom of the screen (or press Ctrl+S). Everything is saved together; if one change is not possible (stock would go below 0, a future date, a borrow-linked quantity), nothing is saved and the bar says why. The other page shows the change at once.
+
+### 4.8 Exporting the Summary Report
+1. Managers set the names once in **Settings → Report Signatories** (Prepared by, Verified by, Noted by).
+2. Open **Export Summary**, choose the months, product type and paper size.
+3. To download as is, click **PDF Print** or **MS Word**.
+4. To change the report first, click **Preview & Edit Report**, edit it, click **Save Changes**, then download. Exporting with unsaved changes asks to save first.
+
+### 4.9 Disaster Recovery: Backup & Restore
 1. Open **Office Settings $\rightarrow$ Data Backup & Restore**.
 2. Click **Create Backup**. Choose desired modules (Office Setup, Inventory Records, Users, System Settings) and optional encryption password. Download `.zip` or `.bsubackup`.
 3. To restore: Click **Restore Backup**, upload archive, inspect manifest and row counts, enter decryption password if required, and confirm. The system generates an automatic pre-restore safety snapshot before applying changes.
@@ -694,6 +716,7 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 Every incoming HTTP request is evaluated prior to reaching API controllers:
 - **Payload Size Limits:** Max 1 MB for standard JSON/form payloads; max 40 MB for upload routes (`import/stockcards/preview`, `backups/restore`, `backups/inspect`).
 - **Data Complexity Bounds:** Max 5,000 array elements/fields, max 10 levels of nesting, and max 10,000 characters per text value.
+- **Large Text Routes:** `RequestLimits::$largeTextRoutes` lets named fields of named routes be longer, up to the route's own body limit. Only `export/summary` → `html` (the edited summary report, logos inline) uses it, up to 8 MB; every other field and route keeps the limits above.
 - **Archive Extraction Guard (Zip Bomb Protection):** Max 64 MB per uncompressed file, max 160 MB total uncompressed archive size, max 20,000 archive entries.
 - **Rate Limiting:**
   - Standard API traffic: 600 requests per minute per IP.
@@ -811,6 +834,7 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `POST api/stock/edit-transaction` | Level 2 | Corrects transaction quantity, reference, or office with audit diff logging. |
 | | `POST api/stock/delete-transaction`| Level 2 | Reverses and deletes transaction if batch stock has not been depleted. |
 | | `POST api/stock/edit-report-cost` | Level 2 | Overrides unit cost on transaction for reporting purposes. |
+| | `POST api/stock/ledger-edits` | Level 2 | Saves Edit Mode changes from the Stock Card / Summary Report (qty, cost, reference, office, date, expiry, type, deletions) for whole stock card rows, all or nothing. |
 | | `GET api/stock/batch-plan` | Level 2 | Previews simulated FIFO batch allocations before confirming stock-out. |
 | | `GET api/stock/borrows` | Level 2 | Retrieves inter-unit loan records (`open`, `outstanding`, `partial`, `returned`). |
 | | `POST api/stock/count` | Level 2 | Submits physical count figures; auto-generates adjusting shortage/overage lines. |
@@ -820,17 +844,20 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `POST api/import/stockcards/revise`| Level 2 | Applies manual cell corrections to parsed import plan. |
 | | `POST api/import/stockcards/commit`| Level 2 | Commits import plan into database (replace mode requires manager password). |
 | **Reports & Barcodes**| `GET api/reports/batches` | Level 2 | Lists batches with remaining stock, mfg/exp dates, and barcode download SVGs. |
-| | `GET api/reports/batchlist` | Level 2 | Inventory summary overview report. |
+| | `GET api/reports/batchlist` | Level 2 | Inventory summary overview report; `entries=1` adds the stock card entries behind each row (Edit Mode). |
 | | `GET api/barcode/product/{id}` | Level 2 | Streams Code 39 SVG barcode for product. |
 | | `GET api/barcode/batch/{id}` | Level 2 | Streams Code 128 SVG barcode for batch. |
 | | `GET api/barcode/lookup` | Level 1 | Resolves product or batch details from hardware scanner value. |
 | **Exports** | `GET/POST api/export/stockcard` | Level 2 | Generates stockcard export in PDF, Microsoft Word, or CSV/Excel format. |
 | | `GET api/export/stockcard/options`| Level 2 | Product dropdowns and date range options for export. |
-| | `POST api/export/summary` | Level 2 | Streams inventory summary report in PDF or Word. |
+| | `POST api/export/summary` | Level 2 | Streams inventory summary report in PDF or Word (or the edited `html`); `format: preview` returns the report pages for the editor. |
 | | `GET api/export/summary/options` | Level 2 | Options for summary report export. |
+| | `GET api/export/summary/editor-style` | Level 2 | The summary report's styles as a stylesheet, linked by the report editor. |
 | **Office Settings** | `GET api/settings` | Level 3 | Lists auxiliary records (entities, units, references, categories, users). |
 | | `GET api/settings/system` | Level 2 | Retrieves system-wide batch expiry warning and danger threshold settings. |
 | | `POST api/settings/system` | Level 3 | Updates system-wide batch expiry threshold defaults. |
+| | `GET api/settings/signatories` | Level 3 | Prepared by / Verified by / Noted by of the summary report, for the manager's office. |
+| | `POST api/settings/signatories` | Level 3 | Saves the three signatories (heading, name, position) of the manager's office. |
 | | `POST api/settings/users/{id}/activate` | Level 3 | Activates pending user registration. |
 | | `POST api/settings/users/{id}/deactivate` | Level 3 | Deactivates active user account. |
 | | `POST api/settings/users/{id}/decline` | Level 3 | Declines and removes pending registration. |
@@ -898,7 +925,9 @@ The CLI generates a secure temporary password. Log in using the temporary passwo
 
 | Version | Release Date | Summary of Major Changes |
 |---|---|---|
-| **`v2.2.1`** *(Current)* | October 2026 | **Fixes & Password-Reset Changes:**<br>**Changes:**<br>• The recovery-email setup step was removed from first login. Forgot Password accepts the account's email or a recovery email already on file and always sends the code to the account's own email.<br>• The Windows installer's shortcuts and Server Manager open the system at the PC's LAN address (localhost when LAN access is off or the address doesn't answer).<br>**Fixes:**<br>• Stockcard: a stock-out taken from several batches now shows the balance after the whole movement (it showed the balance after the first batch only, e.g. 574 instead of 0). Stockcard exports were not affected.<br>• Windows installer: the administrator account created by the setup wizard is now asked for the system SMTP account on first login, so password reset emails can be set up on new installations.<br>• Forgot Password: an address that is one account's email and another's recovery email finds the account it belongs to; the page no longer names an address the code wasn't sent to; wrong code guesses are counted per account.<br>• Account setup: Sign out no longer fails with a missing `confirmDialog` import. |
+| **`v2.3.1`** *(Current)* | October 2026 | **Fix:**<br>• Export Summary: *Preview & Edit Report* showed an empty editor on servers set up by the Windows installer or the XAMPP setup (exports were fine). The server's Content-Security-Policy (`style-src 'self'`) blocked the editor's inline styles; the editor now links its skin and the report's styles as stylesheets (`GET api/export/summary/editor-style`) instead. No server configuration change is needed. |
+| **`v2.3.0`** | October 2026 | **Inline Editing, Official Summary Report & Mobile Layouts:**<br>**Stock Card & Summary Report:**<br>• **Edit Mode** on the Stock Card: date, reference, office, quantity, price and batch expiry are edited in the ledger; rows can be marked for deletion. All changes save together from a bar that stays at the bottom of the screen (Ctrl+S too), all or nothing.<br>• **Edit Mode** on the Summary Report: Purchase, Used and Spoiled quantities and costs are the stock card entries behind them, so a change made in the report shows on the Stock Card (and the other way round).<br>• Safeguards: no batch or running balance below 0, no future dates, borrow-linked quantities stay locked, every change in the audit log; the page asks before leaving or switching items with unsaved edits and pauses auto-refresh until they are saved.<br>**Summary Report export:**<br>• The office's printed template on every page: Bagong Pilipinas, BSU and BSU Food Products logos, the University Business Affairs Office heading (Old English / Corsiva), project name, *Inventory for the month of …*, product type, a CODE column and the *Prepared by / Verified by / Noted by* block.<br>• **Settings → Report Signatories** for managers (per office).<br>• **Preview & Edit Report**: the report in a built-in editor (TinyMCE, bundled, works offline) with **Save Changes** and a reminder to save before exporting.<br>• The MS Word download now carries the logos and keeps one report page per Word page.<br>**Mobile:**<br>• Dashboard: the recent activity and the detail sheets fit the screen (no sideways scrolling).<br>• Stock Card: the ledger shows as cards on phones and tablets, and fits beside the item navigator on desktops; choosing an item on a phone jumps to its ledger.<br>**Fixes:**<br>• Stock Card: the ledger failed to load (an apostrophe in an SQL comment broke the query's parameters).<br>• Stock Card edit form: a stock-out taken from several batches was saved onto its first batch entry only (the row's total), and Delete removed only that entry; the whole row is now changed.<br>• Export Summary: edited reports were refused as "A text value is too long".<br>**Installer:** no new database migrations; update over 2.2.x with the new `BSU-Inventory-Setup.exe`. |
+| **`v2.2.1`** | October 2026 | **Fixes & Password-Reset Changes:**<br>**Changes:**<br>• The recovery-email setup step was removed from first login. Forgot Password accepts the account's email or a recovery email already on file and always sends the code to the account's own email.<br>• The Windows installer's shortcuts and Server Manager open the system at the PC's LAN address (localhost when LAN access is off or the address doesn't answer).<br>**Fixes:**<br>• Stockcard: a stock-out taken from several batches now shows the balance after the whole movement (it showed the balance after the first batch only, e.g. 574 instead of 0). Stockcard exports were not affected.<br>• Windows installer: the administrator account created by the setup wizard is now asked for the system SMTP account on first login, so password reset emails can be set up on new installations.<br>• Forgot Password: an address that is one account's email and another's recovery email finds the account it belongs to; the page no longer names an address the code wasn't sent to; wrong code guesses are counted per account.<br>• Account setup: Sign out no longer fails with a missing `confirmDialog` import. |
 | **`v2.2.0`** | October 2026 | **Full Business Logic Hardening & Enterprise Security Release:**<br>• System SMTP account (app password encrypted via AES-256-GCM) sending self-service password-reset codes to each account's email.<br>• Account setup wizard for first-login mandatory password change and (Technical Staff) SMTP setup.<br>• First-In, First-Out (FIFO) stock issuance (unexpired batches, oldest received first) and real-time Batch Plan simulation.<br>• Appendix 58 Excel workbook parser with spell-check correction, multi-card detection, and idempotent commit.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) capturing JSON before/after diffs.<br>• Modular `.zip` and AES-256-GCM encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical count reconciliation engine with automated shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• `RequestGuard` DoS/zip-bomb protection, CSRF header checks, and three-tier brute-force account lockout.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning. |
 | **`v2.1.0`** | September 2026 | **Administrative & Operational Hardening:**<br>• Unified Profile management portal (`/profile`) replacing legacy password views.<br>• Protected technical staff administrator accounts against deletion and deactivation.<br>• Uniform Lucide icon set and responsive mobile mega-menu navigation.<br>• Cross-platform deployment and server launcher scripts (`setup.bat`, `setup.ps1`, `setup.sh`).<br>• Decimal quantity precision and custom per-product expiration alert thresholds. |
 | **`v2.0.0`** | July 2026 | **Decoupled Architecture Modernization:**<br>• Decoupled system into `backend/` (CodeIgniter 4 REST JSON API) and `frontend/` (Vue 3 + Vite SPA).<br>• Single-command containerized local Docker stack (`docker-compose.yml`).<br>• Responsive smartphone and tablet views with optimized card layouts.<br>• Office-level multi-tenant data segregation. |
@@ -906,4 +935,4 @@ The CLI generates a secure temporary password. Log in using the temporary passwo
 
 ---
 
-*Benguet State University Integrated Inventory Monitoring System v2.2.1 · Engineered for BSU Operating & Production Units.*
+*Benguet State University Integrated Inventory Monitoring System v2.3.1 · Engineered for BSU Operating & Production Units.*

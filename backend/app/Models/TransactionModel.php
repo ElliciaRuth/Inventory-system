@@ -94,6 +94,10 @@ class TransactionModel extends Model
         $rows = $this->db->query(
             "SELECT
                 MIN(transaction_id)        AS transaction_id,
+                -- Every entry this row stands for, so an edit can change all of them
+                -- (no apostrophes in these comments: the query binder reads them as quotes)
+                GROUP_CONCAT(transaction_id ORDER BY transaction_id) AS transaction_ids,
+                MAX(borrow_id)             AS borrow_id,
                 MIN(batch_id)              AS batch_id,
                 date,
                 SUM(receipt_qty)           AS receipt_qty,
@@ -114,13 +118,14 @@ class TransactionModel extends Model
                 fund_cluster,
                 transaction_type,
                 product_id,
-                -- The balance after the group's last entry (rows share a date, so the
+                -- The balance after the last entry of the group (rows share a date, so the
                 -- highest transaction_id is the last one the running balance counted)
                 CAST(SUBSTRING_INDEX(GROUP_CONCAT(balance ORDER BY transaction_id DESC), ',', 1) AS DECIMAL(32,2)) AS balance
             FROM (
                 SELECT
                     t.transaction_id,
                     t.batch_id,
+                    t.borrow_id,
                     t.transaction_date                                          AS date,
                     CASE WHEN tt.transaction_type IN ('receipt', 'return', 'adjust_in')
                          THEN t.transaction_qty ELSE 0 END                     AS receipt_qty,

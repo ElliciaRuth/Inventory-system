@@ -220,6 +220,7 @@ export const TOPICS = [
     ],
     tips: [
       'To fix a mistake, use the edit button on the ledger row. Every edit and deletion is kept in the audit log with the before and after values.',
+      'To fix several rows at once, turn on "Edit Mode": the date, reference, office, quantity, price and expiry cells become editable, and the trash button marks a row for deletion. Click "Save changes" in the bar at the bottom of the screen (or press Ctrl+S). Everything is saved together, or nothing is if a change is not possible.',
     ],
     to: '/stockcard',
   },
@@ -326,6 +327,10 @@ export const TOPICS = [
     steps: [
       'Open Menu → Summary Report and choose the month.',
       'To download it, click "Export Summary" and pick a range of months.',
+      'To change the report first (wording, remarks, signatories), click "Preview & Edit Report", edit it, then click PDF Print or MS Word.',
+    ],
+    tips: [
+      'To correct the figures, turn on "Edit Mode": the Purchase, Used and Spoiled quantities and costs become editable. Each one is a stock card entry, so "Save changes" updates the Stock Card too.',
     ],
     to: '/reports/summary',
   },

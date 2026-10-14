@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { ArrowDownToLine, ArrowUpFromLine, Info, Trash2, AlertCircle, Check, X } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { confirmDialog } from '../composables/useConfirm'
-import { typeLabel } from '../utils/transactionTypes'
+import { typeLabel, rowTransactionIds } from '../utils/transactionTypes'
 
 const props = defineProps({
   isOpen: {
@@ -72,6 +72,12 @@ const qtyDifference = computed(() => {
   return Number(quantity.value) - originalQty.value
 })
 
+// Every ledger entry this stock card row stands for (a stock-out from several batches has one per batch)
+const transactionIds = computed(() => rowTransactionIds(props.transaction))
+const isSplitRow = computed(() => transactionIds.value.length > 1)
+const originalReference = computed(() => (props.transaction?.reference && props.transaction.reference !== 'N/A' ? props.transaction.reference : ''))
+const originalOffice = computed(() => (props.transaction?.office && props.transaction.office !== 'Direct' ? props.transaction.office : ''))
+
 async function handleSave() {
   if (!props.transaction) return
   errorMessage.value = ''
@@ -83,6 +89,20 @@ async function handleSave() {
   }
   if (Number(unitCost.value) < 0) {
     errorMessage.value = 'Unit cost cannot be negative.'
+    return
+  }
+
+  // Only what changed is sent, for all the row's entries in one all-or-nothing save
+  const edit = { transaction_ids: transactionIds.value }
+  if (Math.abs(Number(quantity.value) - originalQty.value) >= 0.000001) edit.qty = Number(quantity.value)
+  if (Math.abs(Number(unitCost.value) - originalUnitCost.value) >= 0.005) edit.unit_cost = Number(unitCost.value)
+  if (reference.value.trim() !== originalReference.value) edit.reference = reference.value.trim()
+  if (office.value.trim() !== originalOffice.value) edit.office = office.value.trim()
+  if (originalTypeId.value !== null && Number(typeId.value) !== originalTypeId.value) {
+    edit.type = Number(typeId.value) === 1 ? 'receipt' : 'issue'
+  }
+  if (Object.keys(edit).length === 1) {
+    errorMessage.value = 'Nothing was changed.'
     return
   }
 
@@ -103,23 +123,8 @@ async function handleSave() {
 
   isSubmitting.value = true
 
-  const payload = {
-    transaction_id: props.transaction.transaction_id,
-    new_qty: Number(quantity.value),
-    new_reference: reference.value.trim(),
-    new_office: office.value.trim(),
-  }
-
-  // Only switch the type when the user changed it (receipt ↔ issue)
-  if (originalTypeId.value !== null && Number(typeId.value) !== originalTypeId.value) {
-    payload.new_type = Number(typeId.value)
-  }
-
   try {
-    const res = await stockApi.editTransaction(payload)
-    if ((res.status || res.ok) && Math.abs(Number(unitCost.value) - originalUnitCost.value) >= 0.005) {
-      await stockApi.editReportCost(props.transaction.transaction_id, Number(unitCost.value))
-    }
+    const res = await stockApi.saveLedgerEdits({ edits: [edit] })
     if (res.status || res.ok) {
       successMessage.value = 'Transaction updated successfully.'
       setTimeout(() => {
@@ -164,9 +169,7 @@ async function handleDelete() {
   isDeleting.value = true
 
   try {
-    const res = await stockApi.deleteTransaction({
-      transaction_id: props.transaction.transaction_id,
-    })
+    const res = await stockApi.saveLedgerEdits({ deletes: [transactionIds.value] })
     if (res.status || res.ok) {
       successMessage.value = 'Transaction deleted and inventory restored.'
       setTimeout(() => {
@@ -226,7 +229,12 @@ async function handleDelete() {
 
         <form @submit.prevent="handleSave" class="edit-form-grid">
           <!-- Transaction Type (receipt / issue entries only) -->
-          <div v-if="originalTypeId !== null" class="form-group">
+          <p v-if="isSplitRow" class="edit-split-note">
+            This row combines {{ transactionIds.length }} entries: the stock was taken from {{ transactionIds.length }} batches.
+            Changes apply to all of them.
+          </p>
+
+          <div v-if="originalTypeId !== null && !isSplitRow" class="form-group">
             <label class="form-label">Transaction Direction / Action Type</label>
             <div class="type-radio-toggle">
               <label class="type-radio-card" :class="{ 'is-active': typeId === 1 }">
@@ -494,6 +502,16 @@ async function handleDelete() {
   border: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.edit-split-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 12.5px;
   line-height: 1.45;
 }
 

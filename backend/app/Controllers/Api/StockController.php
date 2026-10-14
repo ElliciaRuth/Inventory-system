@@ -10,6 +10,7 @@ use App\Models\ProductModel;
 use App\Models\ReferenceModel;
 use App\Models\TransactionModel;
 use App\Services\InventoryService;
+use App\Services\LedgerEditService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DomainException;
 use Throwable;
@@ -471,6 +472,41 @@ class StockController extends BaseApiController
             'transaction_id' => $transactionId,
             'new_cost'       => $newCost,
         ], 'Unit cost updated');
+    }
+
+    /**
+     * Save the cells edited on the Stock Card or the Summary Report, all or nothing.
+     * POST /api/stock/ledger-edits
+     *   { edits: [{ transaction_ids: int[], qty?, unit_cost?, reference?, office?, date?, expiration_date?, type? }],
+     *     deletes: [int[], ...] }
+     * Only the fields sent are changed. transaction_ids are all the entries one stock card row stands for.
+     */
+    public function ledgerEdits(): ResponseInterface
+    {
+        $input   = $this->input();
+        $edits   = is_array($input['edits'] ?? null) ? array_values(array_filter($input['edits'], 'is_array')) : [];
+        $deletes = is_array($input['deletes'] ?? null) ? array_values($input['deletes']) : [];
+        $officeId = $this->currentOfficeId();
+
+        try {
+            $result = (new LedgerEditService(db_connect()))->apply($edits, $deletes, $officeId);
+        } catch (DomainException $e) {
+            return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (Throwable $e) {
+            log_message('error', 'Ledger edits failed: ' . $e->getMessage());
+
+            return $this->respondError('The changes could not be saved. Nothing was changed; the details were written to the server log.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $stock = [];
+        foreach ($result['products'] as $productId) {
+            $stock[$productId] = $this->transactionModel->currentStock($productId, $officeId);
+        }
+
+        return $this->respondSuccess([
+            'saved' => $result['saved'],
+            'stock' => $stock,
+        ], $result['saved'] === 1 ? '1 row saved' : $result['saved'] . ' rows saved');
     }
 
     /**

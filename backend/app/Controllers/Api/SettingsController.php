@@ -3,10 +3,12 @@
 namespace App\Controllers\Api;
 
 use App\Libraries\AuditLog;
+use App\Libraries\ReportSignatories;
 use App\Models\SettingsModel;
 use App\Models\UserModel;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\ResponseInterface;
+use DomainException;
 
 /**
  * Reference data (entities, units, references, product types, offices),
@@ -286,6 +288,39 @@ class SettingsController extends BaseApiController
             'expiry_warning_days' => $warningDays,
             'expiry_danger_days'  => $dangerDays,
         ], 'Inventory settings saved.');
+    }
+
+    /**
+     * Prepared by / Verified by / Noted by of the summary report, for the manager's office.
+     * GET /api/settings/signatories
+     */
+    public function signatories(): ResponseInterface
+    {
+        return $this->respondSuccess([
+            'signatories' => ReportSignatories::forOffice($this->currentOfficeId()),
+        ], 'Report signatories retrieved');
+    }
+
+    /**
+     * POST /api/settings/signatories   { signatories: [{ label, name, title } × 3] }
+     */
+    public function saveSignatories(): ResponseInterface
+    {
+        $officeId = $this->currentOfficeId();
+        $before   = ReportSignatories::forOffice($officeId);
+
+        try {
+            $after = ReportSignatories::save($officeId, $this->input()['signatories'] ?? null);
+        } catch (DomainException $e) {
+            return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        AuditLog::record('settings.report_signatories', 'system_settings', null,
+            'Summary report signatories set to ' . implode(', ', array_map(static fn($s) => trim($s['name']) !== '' ? $s['name'] : '(blank)', $after)),
+            ['before' => $before, 'after' => $after]
+        );
+
+        return $this->respondSuccess(['signatories' => $after], 'Report signatories saved.');
     }
 
     /**

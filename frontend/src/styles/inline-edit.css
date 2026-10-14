@@ -1,0 +1,162 @@
+/* Inputs that replace table cells in the Stock Card and Summary Report edit modes */
+.cell-input {
+  width: 100%;
+  min-width: 72px;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.82rem;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.cell-input[type='number'] {
+  text-align: right;
+  font-family: var(--font-mono);
+  appearance: textfield;
+}
+
+/* No spinner arrows: they hide digits in a narrow cell */
+.cell-input[type='number']::-webkit-inner-spin-button,
+.cell-input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.cell-input:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.cell-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--color-primary-glow);
+}
+
+.cell-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* A value that differs from what is saved */
+.cell-input.is-changed {
+  border-color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.cell-input.is-invalid {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+/* Quantities and prices: room for 8 digits and the spinner */
+.cell-narrow {
+  min-width: 92px;
+  max-width: 120px;
+}
+
+/* Rows with unsaved changes / marked for deletion */
+tr.row-changed td {
+  background: color-mix(in srgb, var(--color-warning-bg) 55%, transparent);
+}
+
+tr.row-changed td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+tr.row-deleted td {
+  background: var(--color-danger-bg);
+  color: var(--text-muted);
+}
+
+tr.row-deleted td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+tr.row-deleted td .cell-input {
+  text-decoration: line-through;
+}
+
+/* "Edit mode" switch in a toolbar */
+.edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.edit-toggle:hover {
+  border-color: var(--color-primary);
+}
+
+.edit-toggle.is-on {
+  border-color: var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.edit-toggle-state {
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+}
+
+.edit-toggle.is-on .edit-toggle-state {
+  background: var(--color-warning);
+  color: #fff;
+}
+
+/* Small icon buttons in an Actions cell */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.row-action:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.row-action.is-danger:hover,
+.row-action.is-danger.is-on {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.row-action:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
