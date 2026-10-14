@@ -42,7 +42,7 @@ BSU_Inventory_System/
   - [Importing Appendix 58 Stock Cards from Excel](#importing-appendix-58-stock-cards-from-excel)
   - [Physical Inventory Count & Reconciliation](#physical-inventory-count--reconciliation)
   - [Inter-Unit Borrowing & Returns](#inter-unit-borrowing--returns)
-  - [FEFO Stock Issuance & Batch Tracking](#fefo-stock-issuance--batch-tracking)
+  - [FIFO Stock Issuance & Batch Tracking](#FIFO-stock-issuance--batch-tracking)
   - [Product Catalog Archiving & Restoration](#product-catalog-archiving--restoration)
   - [Barcode Generation & Scanning](#barcode-generation--scanning)
 - [Security & Architecture Guardrails](#security--architecture-guardrails)
@@ -82,8 +82,8 @@ The system enforces strict role-based access control (RBAC) segregated by office
 - **Append-only integrity:** Database triggers prevent any `UPDATE` or `DELETE` operations on the `audit_log` table.
 - Accessible via Menu → Management → Audit Log (Managers view their office; Technical Staff view all offices) with category filters, date ranges, and text search.
 
-### 2. FEFO Automated Stock Issuance (FR-04)
-- Outgoing stock movements (issues, approved staff stock-out requests, and lending) automatically adhere to **First-Expired, First-Out (FEFO)** ordering.
+### 2. FIFO Automated Stock Issuance (FR-04)
+- Outgoing stock movements (issues, approved staff stock-out requests, and lending) automatically adhere to **First-Expired, First-Out (FIFO)** ordering.
 - Deductions automatically consume the earliest unexpired batch first; non-dated batches are consumed last.
 - Expired batches are blocked from standard issuance and must be settled via **Adjust Out** with reason "Expired".
 - The stock entry form features a real-time **Batch Plan** preview displaying which batches will be depleted prior to confirming.
@@ -330,7 +330,7 @@ Managers configure and trigger backups under **Menu → Management → Office Se
 2. Monitor outstanding loans under **Menu → Inventory & Stock → Borrowed Items** (`/stock/borrows`). Overdue items are flagged with warning indicators.
 3. When items are returned, click **Return** directly on the borrow record. Enter the quantity returned and any condition notes. The return is recorded as a linked `Return` transaction on the ledger, replenishing available stock and updating the open borrow balance.
 
-### FEFO Stock Issuance & Batch Tracking
+### FIFO Stock Issuance & Batch Tracking
 
 - All stock deductions (stock-outs, issues, and lending) automatically prioritize batches expiring soonest.
 - Under **Products & Catalog → Batch Barcodes** (`/reports/batches`), custodians can:
@@ -458,7 +458,7 @@ In production setups (such as the Docker Nginx container or XAMPP Apache):
 
 | Version | Release Date | Key Enhancements & Changes |
 |---|---|---|
-| **`v2.2.0`** *(Current)* | October 2026 | **Full Functional Requirements & Security Hardening Release:**<br>• Appendix 58 Excel workbook importer with interactive preview and spell-check auto-correction.<br>• Automated First-Expired, First-Out (FEFO) stock issuance and real-time batch planning.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) with before/after diffs.<br>• Modular `.zip` and AES-256 encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical inventory count reconciler with automatic shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• Removal of stored plaintext SMTP credentials; user self-service ephemeral app-key resets.<br>• `RequestGuard` DoS/zip-bomb protection and IP/user rate-limiting.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning. |
+| **`v2.2.0`** *(Current)* | October 2026 | **Full Functional Requirements & Security Hardening Release:**<br>• Appendix 58 Excel workbook importer with interactive preview and spell-check auto-correction.<br>• Automated First-Expired, First-Out (FIFO) stock issuance and real-time batch planning.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) with before/after diffs.<br>• Modular `.zip` and AES-256 encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical inventory count reconciler with automatic shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• Removal of stored plaintext SMTP credentials; user self-service ephemeral app-key resets.<br>• `RequestGuard` DoS/zip-bomb protection and IP/user rate-limiting.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning. |
 | **`v2.1.0`** | September 2026 | **Administrative & Operational Hardening:**<br>• Unified Profile management portal (`/profile`) replacing legacy password views.<br>• Protected technical staff administrator accounts against deletion and deactivation.<br>• Uniform Lucide icon set and responsive mobile mega-menu navigation.<br>• Cross-platform deployment and server launcher scripts (`setup.bat`, `setup.ps1`, `setup.sh`).<br>• Decimal quantity precision and custom per-product expiration alert thresholds. |
 | **`v2.0.0`** | July 2026 | **Decoupled Architecture Modernization:**<br>• Decoupled system into `backend/` (CodeIgniter 4 REST JSON API) and `frontend/` (Vue 3 + Vite SPA).<br>• Single-command containerized local Docker stack (`docker-compose.yml`).<br>• Responsive smartphone and tablet views with optimized card layouts.<br>• Office-level multi-tenant data segregation. |
 | **`v1.0.0`** | June 2026 | **Initial Baseline:**<br>• Monolithic CodeIgniter server-rendered inventory and stock-out prototype. |
@@ -484,7 +484,7 @@ Authentication is managed via HTTP cookies (`ci_session`).
 | **Account** | `POST api/auth/update-profile`<br>`POST api/auth/change-password` | Authenticated | Updates name, email, and password. Updating sensitive fields requires `current_password`. |
 | **Dashboard** | `GET api/dashboard`<br>`GET api/transactions`<br>`GET api/notifications` | Level 1 (Staff) | Returns overview statistics, transaction histories, and user notification feeds. |
 | **Products** | `GET api/products`<br>`GET api/products/meta`<br>`GET api/products/{id}`<br>`POST api/products`<br>`PUT/PATCH api/products/{id}`<br>`DELETE api/products/{id}`<br>`POST api/products/{id}/archive`<br>`POST api/products/{id}/restore`<br>`GET api/products/barcodes`<br>`POST api/products/barcodes/generate` | Level 1 (Read)<br>Level 2 (Write) | Product catalog management. `GET api/products?archived=1` returns archived catalog items. |
-| **Stockcard & Stock** | `GET api/stockcard`<br>`GET api/stock/options`<br>`POST api/stock/add`<br>`POST api/stock/edit-transaction`<br>`POST api/stock/delete-transaction`<br>`POST api/stock/edit-report-cost`<br>`GET api/stock/batch-plan`<br>`GET api/stock/borrows`<br>`POST api/stock/count`<br>`GET api/stock/copies/{id}` | Level 2 (Custodian) | Core ledger transactions (receipts, issues, lends, returns, adjust in/out), FEFO batch depletion planning, physical counts, and inter-unit borrows. |
+| **Stockcard & Stock** | `GET api/stockcard`<br>`GET api/stock/options`<br>`POST api/stock/add`<br>`POST api/stock/edit-transaction`<br>`POST api/stock/delete-transaction`<br>`POST api/stock/edit-report-cost`<br>`GET api/stock/batch-plan`<br>`GET api/stock/borrows`<br>`POST api/stock/count`<br>`GET api/stock/copies/{id}` | Level 2 (Custodian) | Core ledger transactions (receipts, issues, lends, returns, adjust in/out), FIFO batch depletion planning, physical counts, and inter-unit borrows. |
 | **Excel Import** | `POST api/import/stockcards/preview`<br>`GET api/import/stockcards/card`<br>`POST api/import/stockcards/revise`<br>`POST api/import/stockcards/commit` | Level 2 (Custodian) | Uploads and processes Appendix 58 `.xlsx` workbooks. Commit mode `replace` requires manager password verification. |
 | **Audit Trail** | `GET api/audit-logs` | Level 3 (Manager) | Immutable audit log records. Managers query their office; Technical Staff query all university offices. |
 | **Reports & Barcodes**| `GET api/reports/batches`<br>`GET api/reports/batchlist`<br>`GET api/barcode/product/{id}`<br>`GET api/barcode/batch/{id}`<br>`GET api/barcode/lookup` | Level 2 (Reports)<br>Level 1 (Lookup) | Batch summaries and Code 128 barcode lookups. |
