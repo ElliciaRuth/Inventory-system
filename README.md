@@ -259,15 +259,11 @@ When initializing an empty database, the seeder provisions the following startin
 | Username | Initial Password | Role | Assigned Office |
 |---|---|---|---|
 | `admin_tech` | `admin123` | Technical Staff (Level 4) | Global (System Admin) |
-| `tech` | `Tech123` | Technical Staff (Level 4) | Global (System Admin) |
-| `manager_bakery` | `Manager123` | Manager (Level 3) | BAKERY |
-| `manager_fpc` | `Manager123` | Manager (Level 3) | FPC |
-| `custodian_bakery` | `Custodian123` | Custodian (Level 2) | BAKERY |
-| `custodian_fpc` | `Custodian123` | Custodian (Level 2) | FPC |
-| `staff_bakery` | `Staff123` | Staff (Level 1) | BAKERY |
-| `staff_fpc` | `Staff123` | Staff (Level 1) | FPC |
 
 > **Security Warning:** The passwords listed above are public default credentials. Upon initial sign-in, all seeded accounts are required to change their password before accessing the system. You should deactivate or delete demo accounts not needed for active operations.
+> SMTP was used for sending OTPs for forgetting passwords
+> SMTP Credentials will be asked upon login of the admin_tech
+> Google App Password for SMTP will be stored in hash in database
 
 ---
 
