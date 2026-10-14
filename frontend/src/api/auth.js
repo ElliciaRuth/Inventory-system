@@ -41,9 +41,25 @@ export const authApi = {
     return response.data
   },
 
-  // appKey: the app password of the user's own email account; sent once over HTTPS, never kept
-  async forgotPassword(email, appKey = '') {
-    const response = await client.post('/auth/forgot-password', { email, app_key: appKey })
+  // Changing the email: a code is sent from the new address to itself (appKey is that
+  // account's app password, sent once and never kept), then confirmed with the code
+  async requestEmailChange(email, appKey, currentPassword) {
+    const response = await client.post('/auth/email-change/request', {
+      email,
+      app_key: appKey,
+      current_password: currentPassword,
+    })
+    return response.data
+  },
+
+  async confirmEmailChange(code) {
+    const response = await client.post('/auth/email-change/confirm', { code })
+    return response.data
+  },
+
+  // ── Forgot password: the system SMTP account sends the OTP — no app-key needed ──
+  async forgotPassword(email) {
+    const response = await client.post('/auth/forgot-password', { email })
     return response.data
   },
 
@@ -54,6 +70,28 @@ export const authApi = {
 
   async resetPassword(payload) {
     const response = await client.post('/auth/reset-password', payload)
+    return response.data
+  },
+
+  // ── First-login setup: SMTP account (admin_tech only) ──
+  async setupSmtp(smtpEmail, smtpPassword) {
+    const response = await client.post('/auth/setup-smtp', {
+      smtp_email: smtpEmail,
+      smtp_password: smtpPassword,
+    })
+    return response.data
+  },
+
+  // ── First-login setup: recovery email (all users) ──
+  async requestRecoveryEmail(recoveryEmail) {
+    const response = await client.post('/auth/setup-recovery-email/request', {
+      recovery_email: recoveryEmail,
+    })
+    return response.data
+  },
+
+  async confirmRecoveryEmail(code) {
+    const response = await client.post('/auth/setup-recovery-email/confirm', { code })
     return response.data
   },
 }

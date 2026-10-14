@@ -8,6 +8,8 @@ class RestructureAllTables extends Migration
 {
     public function up()
     {
+        $this->db->resetDataCache();
+
         // ── Drop all old tables in FK-safe order ──
         $this->forge->dropTable('transaction_backup', true);
         $this->forge->dropTable('temp_stockout_item', true);

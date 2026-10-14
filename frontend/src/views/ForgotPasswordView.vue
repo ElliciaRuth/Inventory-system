@@ -7,19 +7,14 @@ import { toast, errorMessage } from '../composables/useToast'
 import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 import { AlertTriangle, Eye, EyeOff } from 'lucide-vue-next'
 
-// Step 1: email + the app password of that email account → the code is sent from the
-//         user's own account to itself (the server never stores the app password).
-// Step 2: enter the 6-digit code; it is verified before moving on.
-// Step 3: choose the new password.
+// Step 1: enter registered email → system SMTP sends OTP to recovery email
+// Step 2: enter the 6-digit code
+// Step 3: choose the new password
 const router = useRouter()
 
 const STEPS = ['Email', 'Code', 'New password']
 const step = ref(1)
 const email = ref('')
-// Lives only in this field until it is sent; cleared on submit, never stored anywhere
-const appKey = ref('')
-const showAppKey = ref(false)
-const showAppKeyHelp = ref(false)
 const code = ref('')
 const password = ref('')
 const confirmPassword = ref('')
@@ -31,8 +26,8 @@ const info = ref('')
 
 const TITLES = { 1: 'Forgot Password', 2: 'Enter Verification Code', 3: 'Choose a New Password' }
 const SUBTITLES = {
-  1: 'Enter the email address on your account. A 6-digit code is sent to it from your own email account.',
-  2: 'Enter the 6-digit code from the email. It expires in 15 minutes.',
+  1: 'Enter the email address on your account. A 6-digit code will be sent to your recovery email.',
+  2: 'Enter the 6-digit code sent to your recovery email. It expires in 15 minutes.',
   3: 'Your code is verified. Choose a new password for your account.',
 }
 
@@ -41,13 +36,9 @@ const codeComplete = computed(() => /^\d{6}$/.test(code.value))
 async function requestCode() {
   error.value = ''
   info.value = ''
-  // Take the key out of the form before sending: it is never shown again
-  const key = appKey.value.trim()
-  appKey.value = ''
-  showAppKey.value = false
   loading.value = true
   try {
-    const res = await authApi.forgotPassword(email.value.trim(), key)
+    const res = await authApi.forgotPassword(email.value.trim())
     info.value = res.message
     code.value = ''
     step.value = 2
@@ -58,7 +49,7 @@ async function requestCode() {
   }
 }
 
-// A new code needs the app password again, so go back to the first step (email kept)
+// A new code just needs re-submitting the email
 function requestNewCode() {
   step.value = 1
   error.value = ''
@@ -69,7 +60,7 @@ function requestNewCode() {
 async function verifyCode() {
   error.value = ''
   if (!codeComplete.value) {
-    error.value = 'Please enter the 6-digit code from your email.'
+    error.value = 'Please enter the 6-digit code from your recovery email.'
     return
   }
   loading.value = true
@@ -151,50 +142,16 @@ function startOver() {
           <div v-if="error" class="login-error-banner"><span><AlertTriangle :size="15" /> {{ error }}</span></div>
           <div v-else-if="info && step === 2" class="login-success-banner"><span>{{ info }}</span></div>
 
-          <!-- Step 1: email -->
+          <!-- Step 1: email only -->
           <form v-if="step === 1" class="login-form-body" @submit.prevent="requestCode">
             <div class="login-field-group">
               <label class="login-field-label" for="fp_email">Email Address</label>
               <input id="fp_email" v-model="email" type="email" class="login-field-input" autocomplete="email" required />
             </div>
-            <div class="login-field-group">
-              <label class="login-field-label" for="fp_app_key">Email App Password</label>
-              <div class="login-password-wrapper">
-                <input
-                  id="fp_app_key"
-                  v-model="appKey"
-                  :type="showAppKey ? 'text' : 'password'"
-                  class="login-field-input"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  spellcheck="false"
-                  placeholder="e.g. abcd efgh ijkl mnop"
-                  aria-describedby="fp_app_key_hint"
-                  required
-                />
-                <button
-                  type="button"
-                  class="login-password-toggle"
-                  :title="showAppKey ? 'Hide app password' : 'Show app password'"
-                  :aria-label="showAppKey ? 'Hide app password' : 'Show app password'"
-                  @click="showAppKey = !showAppKey"
-                >
-                  <component :is="showAppKey ? EyeOff : Eye" :size="19" />
-                </button>
-              </div>
-              <p id="fp_app_key_hint" class="fp-hint">
-                Used once to send the reset email from your own email account to itself. It is
-                not your normal email password, and it is not saved anywhere.
-                <button type="button" class="fp-help-toggle" @click="showAppKeyHelp = !showAppKeyHelp">
-                  {{ showAppKeyHelp ? 'Hide help' : 'How do I get one?' }}
-                </button>
-              </p>
-              <div v-if="showAppKeyHelp" class="fp-help">
-                <strong>Gmail or a BSU (Google) account:</strong> open your Google Account →
-                Security → turn on 2-Step Verification → App passwords → create one (any name),
-                and copy the 16 letters here. You can delete it in the same place afterwards.
-              </div>
-            </div>
+            <p class="fp-hint">
+              The reset code will be sent to your recovery email address by the system.
+              If you haven't set a recovery email, it is sent to this address directly.
+            </p>
             <button type="submit" class="login-submit-button" :disabled="loading">
               {{ loading ? 'Sending…' : 'Send Code' }}
             </button>
@@ -202,7 +159,7 @@ function startOver() {
 
           <!-- Step 2: code -->
           <form v-else-if="step === 2" class="login-form-body" @submit.prevent="verifyCode">
-            <p class="fp-sent-to">If an account uses <strong>{{ email }}</strong>, the code was sent there.</p>
+            <p class="fp-sent-to">A code was sent to the recovery email for <strong>{{ email }}</strong>.</p>
             <div class="login-field-group">
               <label class="login-field-label" for="fp_code">6-Digit Code</label>
               <input
@@ -362,31 +319,9 @@ function startOver() {
 }
 
 .fp-hint {
-  margin: 6px 0 0;
+  margin: 6px 0 12px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--text-muted);
-}
-
-.fp-help-toggle {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-primary);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.fp-help {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-subtle);
-  font-size: 12.5px;
-  line-height: 1.55;
   color: var(--text-muted);
 }
 
