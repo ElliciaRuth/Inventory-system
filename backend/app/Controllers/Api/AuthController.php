@@ -28,7 +28,7 @@ class AuthController extends BaseApiController
     private const DUMMY_HASH = '$2y$10$OTpRNC5L1qHghgpmJxF5aeoLl9CsmPJpapckTIr0gRIEdl9enhXA6';
 
     /** Session flags for the forced first-login steps, in the order they happen. */
-    private const SETUP_FLAGS = ['must_change_password', 'must_setup_smtp', 'must_setup_recovery_email'];
+    private const SETUP_FLAGS = ['must_change_password', 'must_setup_smtp'];
 
     /**
      * Authenticate user credentials and start session.
@@ -172,15 +172,6 @@ class AuthController extends BaseApiController
         // ── Admin only: must configure the system SMTP account before use ──
         if ((int) ($user['must_setup_smtp'] ?? 0) === 1) {
             session()->set('must_setup_smtp', true);
-        }
-
-        // ── All users: must set a recovery e-mail (if not already done) ──
-        $hasRecovery = ($user['recovery_email'] ?? '') !== '';
-        if ((int) ($user['must_setup_recovery_email'] ?? 0) === 1 || ! $hasRecovery) {
-            // Only block users who still have this flag or truly have no recovery e-mail
-            if ((int) ($user['must_setup_recovery_email'] ?? 0) === 1) {
-                session()->set('must_setup_recovery_email', true);
-            }
         }
 
         return $this->respondSuccess([
@@ -450,17 +441,6 @@ class AuthController extends BaseApiController
         session()->remove('must_change_password');
         AuditLog::record('auth.password_changed', 'user', $userId, ($isFirstLogin ? 'First-login password set' : 'Password changed'));
 
-        // After the first-login password change, queue the recovery-email step for users who
-        // have not set one yet, and also clear the smtp step flag if it was not set.
-        if ($isFirstLogin) {
-            $freshUser  = $userModel->find($userId);
-            $hasRecovery = ($freshUser['recovery_email'] ?? '') !== '';
-            if (! $hasRecovery && ! (bool) session('must_setup_recovery_email')) {
-                session()->set('must_setup_recovery_email', true);
-                $userModel->update($userId, ['must_setup_recovery_email' => 1]);
-            }
-        }
-
         return $this->respondSuccess(['pending_setup' => $this->pendingSetup()], 'Password changed successfully.');
     }
 
@@ -621,13 +601,12 @@ class AuthController extends BaseApiController
         }
 
         $model   = new UserModel();
-        $user    = $model->findByEmail($email);
+        // Search by primary email OR recovery email so either address works
+        $user    = $model->findByEmailOrRecovery($email);
         $code    = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
-        // Destination: prefer recovery_email; fall back to primary email
-        $destination = ($user && ($user['recovery_email'] ?? '') !== '')
-            ? (string) $user['recovery_email']
-            : $email;
+        // OTP always goes to the user's own registered email
+        $destination = $user ? (string) $user['email'] : $email;
 
         $failure = (new Mailer())->sendFromSystem(
             $destination,
@@ -663,7 +642,7 @@ class AuthController extends BaseApiController
         $sent[] = time();
         cache()->save($sentKey, $sent, 3600);
         if ($user) {
-            $this->storeResetCode($user, $code, $limits->codeMinutes);
+            $this->storeResetCode($user, $code, $limits->codeMinutes, $email);
             AuditLog::record('auth.reset_code_sent', 'user', (int) $user['user_id'], "Password reset code sent to recovery email of {$email}", [], $this->resetActor($user, $email));
         }
 
@@ -672,13 +651,18 @@ class AuthController extends BaseApiController
 
 
     /** Saves a new code (hashed) and makes the earlier one and its wrong guesses void. */
-    private function storeResetCode(array $user, string $code, int $minutes): void
+    private function storeResetCode(array $user, string $code, int $minutes, string $typedEmail = ''): void
     {
         (new UserModel())->update($user['user_id'], [
             'password_reset_token'   => $this->resetCodeHash($code, (int) $user['user_id']),
             'password_reset_expires' => date('Y-m-d H:i:s', strtotime("+{$minutes} minutes")),
         ]);
-        cache()->delete($this->resetAttemptsKey((string) $user['email']));
+        // Clear attempt counters for both the typed address (may be recovery email)
+        // and the account's primary email so either lookup is unblocked.
+        cache()->delete($this->resetAttemptsKey($typedEmail !== '' ? $typedEmail : (string) $user['email']));
+        if ($typedEmail !== '' && strtolower($typedEmail) !== strtolower((string) $user['email'])) {
+            cache()->delete($this->resetAttemptsKey((string) $user['email']));
+        }
     }
 
     /**
@@ -764,7 +748,7 @@ class AuthController extends BaseApiController
         }
 
         $model = new UserModel();
-        $user  = $model->findByEmail($email);
+        $user  = $model->findByEmailOrRecovery($email);
         if ($user
             && ! empty($user['password_reset_token'])
             && strtotime((string) $user['password_reset_expires']) > time()
@@ -1139,10 +1123,9 @@ class AuthController extends BaseApiController
         foreach (self::SETUP_FLAGS as $flag) {
             if (session($flag)) {
                 return match ($flag) {
-                    'must_change_password'      => 'change_password',
-                    'must_setup_smtp'           => 'setup_smtp',
-                    'must_setup_recovery_email' => 'setup_recovery_email',
-                    default                     => null,
+                    'must_change_password' => 'change_password',
+                    'must_setup_smtp'      => 'setup_smtp',
+                    default                => null,
                 };
             }
         }

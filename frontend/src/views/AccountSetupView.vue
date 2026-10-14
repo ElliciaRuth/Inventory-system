@@ -9,9 +9,8 @@ import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 
 /**
  * Forced first-login steps, driven by authStore.pendingSetup:
- *   1. change_password      — all users
- *   2. setup_smtp           — admin_tech (level 4) only
- *   3. setup_recovery_email — all users (two sub-steps: request + confirm)
+ *   1. change_password — all users
+ *   2. setup_smtp      — admin_tech (level 4) only
  */
 const router = useRouter()
 const authStore = useAuthStore()
@@ -32,18 +31,6 @@ const smtpPassword = ref('')
 const showSmtpPassword = ref(false)
 const showSmtpHelp = ref(false)
 
-// ── setup_recovery_email ──────────────────────────────────────────────────────
-// sub-step: 'enter_email' | 'enter_code'
-const recoverySubStep = ref('enter_email')
-const recoveryEmail = ref('')
-const recoveryCode = ref('')
-const recoveryCodeComplete = computed(() => /^\d{6}$/.test(recoveryCode.value))
-
-function onRecoveryCodeInput(e) {
-  recoveryCode.value = e.target.value.replace(/\D/g, '').slice(0, 6)
-  e.target.value = recoveryCode.value
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 const step = computed(() => authStore.pendingSetup)
@@ -58,11 +45,6 @@ const copy = {
     subtitle:
       'Set the Gmail account that will send password-reset codes to all users. ' +
       'A confirmation email is sent to verify the credentials before saving.',
-  },
-  setup_recovery_email: {
-    title: 'Set Your Recovery Email',
-    subtitle:
-      'Add a recovery email address. Password reset codes will be sent here instead of your main account email.',
   },
 }
 
@@ -104,44 +86,6 @@ async function submitSetupSmtp() {
   } finally {
     loading.value = false
   }
-}
-
-async function submitRequestRecoveryEmail() {
-  loading.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const res = await authApi.requestRecoveryEmail(recoveryEmail.value.trim())
-    successMessage.value = res.message
-    recoverySubStep.value = 'enter_code'
-  } catch (err) {
-    errorMessage.value = err.response?.data?.message || 'Something went wrong. Please try again.'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function submitConfirmRecoveryEmail() {
-  loading.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const res = await authApi.confirmRecoveryEmail(recoveryCode.value)
-    authStore.pendingSetup = res.data?.pending_setup ?? null
-    successMessage.value = res.message
-    if (!authStore.pendingSetup) router.push('/')
-  } catch (err) {
-    errorMessage.value = err.response?.data?.message || 'Something went wrong. Please try again.'
-  } finally {
-    loading.value = false
-  }
-}
-
-function resendRecoveryCode() {
-  recoverySubStep.value = 'enter_email'
-  recoveryCode.value = ''
-  errorMessage.value = ''
-  successMessage.value = ''
 }
 
 async function handleLogout() {
@@ -285,63 +229,6 @@ async function handleLogout() {
               {{ loading ? 'Verifying & Saving…' : 'Save System Email' }}
             </button>
           </form>
-
-          <!-- ── Step: setup_recovery_email ────────────────────────────── -->
-          <template v-else-if="step === 'setup_recovery_email'">
-            <!-- Sub-step A: enter the recovery address -->
-            <form v-if="recoverySubStep === 'enter_email'" class="login-form-body" @submit.prevent="submitRequestRecoveryEmail">
-              <div class="login-field-group">
-                <label class="login-field-label" for="recovery_email">Recovery Email Address</label>
-                <input
-                  id="recovery_email"
-                  v-model="recoveryEmail"
-                  type="email"
-                  class="login-field-input"
-                  autocomplete="email"
-                  placeholder="A personal email you always have access to"
-                  required
-                />
-              </div>
-              <p class="setup-hint">
-                Password reset codes will be sent to this address. Use a personal email
-                that is different from your institutional account.
-              </p>
-              <button type="submit" class="login-submit-button" :disabled="loading">
-                {{ loading ? 'Sending code…' : 'Send Verification Code' }}
-              </button>
-            </form>
-
-            <!-- Sub-step B: enter the OTP sent to recovery address -->
-            <form v-else class="login-form-body" @submit.prevent="submitConfirmRecoveryEmail">
-              <p class="setup-sent-to">
-                A 6-digit code was sent to <strong>{{ recoveryEmail }}</strong>. Enter it below.
-              </p>
-              <div class="login-field-group">
-                <label class="login-field-label" for="recovery_code">Verification Code</label>
-                <input
-                  id="recovery_code"
-                  :value="recoveryCode"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="6"
-                  class="login-field-input setup-code-input"
-                  placeholder="••••••"
-                  autocomplete="one-time-code"
-                  autofocus
-                  required
-                  @input="onRecoveryCodeInput"
-                />
-              </div>
-              <button type="submit" class="login-submit-button" :disabled="loading || !recoveryCodeComplete">
-                {{ loading ? 'Verifying…' : 'Confirm Recovery Email' }}
-              </button>
-              <div class="login-inline-actions" style="margin-top: 8px;">
-                <button type="button" class="login-secondary-pill" :disabled="loading" @click="resendRecoveryCode">
-                  Use a different address
-                </button>
-              </div>
-            </form>
-          </template>
 
           <div class="login-inline-actions">
             <button type="button" class="login-secondary-pill" @click="handleLogout">
