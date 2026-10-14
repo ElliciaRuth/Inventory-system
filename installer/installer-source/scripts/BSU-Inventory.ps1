@@ -28,7 +28,6 @@ try {
     $settings = Read-InstallSettings $paths
     $httpsPort = 443
     if ($settings) { $httpsPort = [int]$settings.httpsPort }
-    $url = "https://localhost$(Get-HttpsSuffix $httpsPort)/"
 
     $stopped = @(@($script:DbService, $script:WebService) | Where-Object { $s = Get-BsuService $_; -not $s -or $s.Status -ne 'Running' })
     if ($stopped.Count -gt 0) {
@@ -45,7 +44,7 @@ try {
         Show-Problem "The BSU Inventory server is running but does not answer yet:`n$problem"
         exit 1
     }
-    Start-Process $url
+    Start-Process (Get-AppUrl $httpsPort $settings)
     exit 0
 } catch {
     Show-Problem $_.Exception.Message

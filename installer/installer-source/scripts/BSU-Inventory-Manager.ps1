@@ -156,9 +156,7 @@ function Add-Button([string]$Text, [scriptblock]$Action) {
     $panel.Controls.Add($b)
 }
 
-$url = { "https://localhost$(Get-HttpsSuffix $script:status.HttpsPort)/" }
-
-Add-Button 'Open BSU Inventory' { Start-Process (& $url) }
+Add-Button 'Open BSU Inventory' { Start-Process (Get-AppUrl $script:status.HttpsPort $script:status.Settings) }
 Add-Button 'Copy LAN address' {
     $a = @($script:status.Addresses)
     if ($a.Count -eq 0) { Show-Info 'No LAN address found.' 'Warning'; return }

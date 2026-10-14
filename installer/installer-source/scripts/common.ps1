@@ -324,6 +324,18 @@ function Test-AppHealth([int]$HttpsPort, [string]$HostName = 'localhost') {
     }
 }
 
+# The address to open the system at on this PC: its LAN IP (the same address other computers
+# use, and the app's baseURL), or localhost when LAN access is off, there is no LAN address,
+# or the IP does not answer with a trusted certificate (e.g. DHCP gave a new one; Repair fixes)
+function Get-AppUrl([int]$HttpsPort, $Settings) {
+    $suffix = Get-HttpsSuffix $HttpsPort
+    if (-not $Settings -or $Settings.lanAccess) {
+        $lan = @(Get-LanAddresses)
+        if ($lan.Count -gt 0 -and -not (Test-AppHealth $HttpsPort $lan[0].IP)) { return "https://$($lan[0].IP)$suffix/" }
+    }
+    return "https://localhost$suffix/"
+}
+
 function Wait-AppHealthy([int]$HttpsPort, [int]$Seconds = 60) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     $reason = 'not checked'
