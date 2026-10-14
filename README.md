@@ -47,7 +47,7 @@ BSU_Inventory_System/
    - [2.8 Modular & Cryptographically Encrypted Backup System](#28-modular--cryptographically-encrypted-backup-system)
    - [2.9 Barcode Generation, Code 128 / Code 39 Formatting & Scanner Integration](#29-barcode-generation-code-128--code-39-formatting--scanner-integration)
    - [2.10 Authentication, Session Security & Brute-Force Lockout Engine](#210-authentication-session-security--brute-force-lockout-engine)
-   - [2.11 Self-Service Password Reset via System SMTP & Recovery Email OTP](#211-self-service-password-reset-via-system-smtp--recovery-email-otp)
+   - [2.11 Self-Service Password Reset via System SMTP & Email OTP](#211-self-service-password-reset-via-system-smtp--email-otp)
    - [2.12 Tamper-Evident Append-Only Audit Trail & Database Triggers](#212-tamper-evident-append-only-audit-trail--database-triggers)
    - [2.13 Product Catalog Archiving, Validation Guardrails & Restoration](#213-product-catalog-archiving-validation-guardrails--restoration)
    - [2.14 Real-Time Notification & Expiration Alert Engine](#214-real-time-notification--expiration-alert-engine)
@@ -108,7 +108,7 @@ The system enforces strict Role-Based Access Control (RBAC) partitioned by offic
 ### Account Lifecycle & Authentication Safeguards
 - **Self-Registration:** New users register with their requested role and office. Accounts are held in `user_activity_id = 3` (Pending) until approved by an Office Manager or Technical Staff.
 - **Administrative Protection:** Technical Staff (Level 4) accounts are permanently protected by backend filters: they **cannot be deactivated, declined, or deleted** via any API endpoint or UI action.
-- **First-Login Wizard (`/account-setup`):** Accounts flagged with `must_change_password`, `must_setup_smtp`, or `must_setup_recovery_email` are strictly prevented from visiting any operational inventory routes until the required setup steps are fully completed.
+- **First-Login Wizard (`/account-setup`):** Accounts flagged with `must_change_password` or `must_setup_smtp` (Technical Staff) are strictly prevented from visiting any operational inventory routes until the required setup steps are fully completed.
 
 ---
 
@@ -390,7 +390,7 @@ Before executing any restore operation:
 
 ---
 
-### 2.11 Self-Service Password Reset via System SMTP & Recovery Email OTP
+### 2.11 Self-Service Password Reset via System SMTP & Email OTP
 **Location:** [`backend/app/Controllers/Api/AuthController.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Controllers/Api/AuthController.php), [`backend/app/Libraries/SmtpCrypto.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Libraries/SmtpCrypto.php)
 
 - **System SMTP Account:** One system email account sends every code. Technical Staff enter its address and app password (e.g., a Google App Password) on the first-login setup step (`POST /api/auth/setup-smtp`).
@@ -398,14 +398,15 @@ Before executing any restore operation:
   - The mail server follows the address's domain (`Config\PasswordReset::$smtpServers`): `smtp.gmail.com:587` (TLS) by default, `smtp.mail.yahoo.com:465` (SSL) for `yahoo.com`.
   - The app password is stored in `smtp_settings` **encrypted** (reversible, not hashed, because the app must sign in with it) using **AES-256-GCM** with a key derived via PBKDF2-SHA256 (100,000 iterations) from `encryption.key` in `backend/.env`. A copy of the database alone does not reveal it.
   - Accounts created by the seeder or the installer are flagged `must_setup_smtp`; existing Technical Staff accounts are flagged by the migration that adds SMTP. The setup page is currently only shown during first-login setup.
-- **Recovery Email Verification:** After their first password change, every user sets a recovery email (`setup-recovery-email/request` and `/confirm`). The system account sends a code to that address, and the user confirms it.
 - **Forgot-Password OTP Dispatch:**
-  - Users enter their registered email address. The system sends a 6-digit OTP from the system account to the user's `recovery_email` (or primary email if none is set).
+  - Users enter their account's email address or, if one is on file, their `recovery_email`. Either finds the account (`UserModel::findByEmailOrRecovery`).
+  - The system sends a 6-digit OTP from the system account to the account's **primary email**, whichever address was typed.
   - Unknown addresses get the same response; a "no account" email is sent instead of a code, so the form cannot be used to discover accounts.
   - Rate limiting: 1-minute cooldown per address; max 5 code requests per address per hour.
   - Codes are stored as keyed HMAC-SHA256 hashes (`resetCodeHash($code, $userId)`) with a 15-minute expiration.
   - Max 5 incorrect attempts allowed before a new code is needed.
   - If no system SMTP account is configured yet, the request fails with a message to contact the Technical Administrator.
+- **Recovery Email:** Users are no longer asked to set a recovery email during first-login setup. The `recovery_email` column and the `setup-recovery-email/request` and `/confirm` endpoints remain, but the app no longer calls them; an address already on file only serves as an alternative to type on the Forgot Password page.
 - **Email Address Change:** Changing the primary email (`email-change/request` and `/confirm`) sends a code from the new address to itself using that account's own app password, which is used for that one send and never stored.
 
 ---
@@ -647,7 +648,7 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 2. System intercepts session and routes user to `/account-setup`.
 3. **Step 1 (Change Password):** User establishes a compliant 8+ character password.
 4. **Step 2 (Technical Staff SMTP Setup):** Administrator enters the system email address and its app password (e.g., a Gmail address and Google App Password); the system sends a test email to that address, then stores the app password encrypted (AES-256-GCM).
-5. **Step 3 (Recovery Email Setup):** User enters personal recovery email; system dispatches 6-digit verification OTP; user confirms code to activate self-service password recovery.
+5. Once these steps are done, the user reaches the dashboard. Password resets later use the account's own email address (section 2.11).
 
 ### 4.2 Recording Stock In & Issuances
 - **Stock In (Receipt):** Custodian opens Stockcard $\rightarrow$ **Record Stock**. Selects *Stock In*. Specifies delivery date (can be backdated), quantity, unit cost, and optional expiration/manufacturing dates. System creates a price variant copy if needed, generates a unique batch code and SVG barcode, and updates ledger balances.
@@ -747,7 +748,7 @@ erDiagram
 ```
 
 ### Table Definitions Summary
-- `user_table`: User credentials, bcrypt password hash, name, role, office assignment, `recovery_email`, setup flags (`must_change_password`, `must_setup_smtp`, `must_setup_recovery_email`).
+- `user_table`: User credentials, bcrypt password hash, name, role, office assignment, `recovery_email`, setup flags (`must_change_password`, `must_setup_smtp`; `must_setup_recovery_email` is no longer used).
 - `level_of_access`: RBAC levels (1 = Staff, 2 = Custodian, 3 = Manager, 4 = Technical Staff).
 - `user_office_table`: Operating units (BAKERY, FPC, administrative units).
 - `product_table`: Master catalog items, product number, stock number, unit, entity, reorder point, alert thresholds (`expiry_warning_days`, `expiry_danger_days`), archiving flags (`archived_at`, `archived_by`, `archive_reason`).
@@ -781,7 +782,7 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `POST api/auth/logout` | Public | Terminates active session and records logout to audit trail. |
 | | `GET api/auth/register-options` | Public | Retrieves eligible roles (1–3) and offices for user registration. |
 | | `POST api/auth/register` | Public | Registers pending user account; validates password strength & unique email. |
-| | `POST api/auth/forgot-password` | Public | Sends 6-digit verification OTP to user recovery email via system SMTP. |
+| | `POST api/auth/forgot-password` | Public | Accepts the account's email or recovery email; sends a 6-digit OTP to the account's primary email via system SMTP. |
 | | `POST api/auth/verify-reset-code` | Public | Verifies emailed 6-digit OTP before allowing password entry. |
 | | `POST api/auth/reset-password` | Public | Sets new password with verified OTP; invalidates active sessions. |
 | **Account Setup** | `POST api/auth/change-password` | Authenticated | Updates account password; satisfies `must_change_password` flag. |
@@ -789,8 +790,8 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `POST api/auth/email-change/request` | Authenticated | Sends a code from the new email address to itself using that account's app password (not stored). |
 | | `POST api/auth/email-change/confirm` | Authenticated | Confirms the code and changes the account's email address. |
 | | `POST api/auth/setup-smtp` | Level 4 | Saves system SMTP credentials with AES-256-GCM encryption. |
-| | `POST api/auth/setup-recovery-email/request` | Authenticated | Dispatches 6-digit verification code to candidate recovery email. |
-| | `POST api/auth/setup-recovery-email/confirm` | Authenticated | Confirms OTP and binds recovery email to user account. |
+| | `POST api/auth/setup-recovery-email/request` | Authenticated | Sends a verification code to a candidate recovery email. Not called by the app since the recovery-email setup step was removed. |
+| | `POST api/auth/setup-recovery-email/confirm` | Authenticated | Confirms the code and saves the recovery email. Not called by the app. |
 | **Dashboard** | `GET api/dashboard` | Level 1 | Returns role-specific KPI metrics, stock totals, and low stock summaries. |
 | | `GET api/transactions` | Level 1 | Retrieves paginated recent inventory transaction history. |
 | | `GET api/notifications` | Level 1 | Aggregates real-time alerts across all 7 notification channels. |
@@ -897,7 +898,7 @@ The CLI generates a secure temporary password. Log in using the temporary passwo
 
 | Version | Release Date | Summary of Major Changes |
 |---|---|---|
-| **`v2.2.0`** *(Current)* | October 2026 | **Full Business Logic Hardening & Enterprise Security Release:**<br>• System SMTP credentials encrypted via AES-256-GCM with recovery email OTP self-service reset.<br>• Account setup wizard for first-login mandatory password change, SMTP setup, and recovery email binding.<br>• First-In, First-Out (FIFO) stock issuance (unexpired batches, oldest received first) and real-time Batch Plan simulation.<br>• Appendix 58 Excel workbook parser with spell-check correction, multi-card detection, and idempotent commit.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) capturing JSON before/after diffs.<br>• Modular `.zip` and AES-256-GCM encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical count reconciliation engine with automated shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• `RequestGuard` DoS/zip-bomb protection, CSRF header checks, and three-tier brute-force account lockout.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning.<br>**Fixes:**<br>• Stockcard: a stock-out taken from several batches now shows the balance after the whole movement (it showed the balance after the first batch only, e.g. 574 instead of 0). Stockcard exports were not affected.<br>• Windows installer: the administrator account created by the setup wizard is now asked for the system SMTP account on first login, so password reset emails can be set up on new installations. |
+| **`v2.2.0`** *(Current)* | October 2026 | **Full Business Logic Hardening & Enterprise Security Release:**<br>• System SMTP account (app password encrypted via AES-256-GCM) sending self-service password-reset codes to each account's email.<br>• Account setup wizard for first-login mandatory password change and (Technical Staff) SMTP setup.<br>• First-In, First-Out (FIFO) stock issuance (unexpired batches, oldest received first) and real-time Batch Plan simulation.<br>• Appendix 58 Excel workbook parser with spell-check correction, multi-card detection, and idempotent commit.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) capturing JSON before/after diffs.<br>• Modular `.zip` and AES-256-GCM encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical count reconciliation engine with automated shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• `RequestGuard` DoS/zip-bomb protection, CSRF header checks, and three-tier brute-force account lockout.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning.<br>**Fixes:**<br>• Stockcard: a stock-out taken from several batches now shows the balance after the whole movement (it showed the balance after the first batch only, e.g. 574 instead of 0). Stockcard exports were not affected.<br>• Windows installer: the administrator account created by the setup wizard is now asked for the system SMTP account on first login, so password reset emails can be set up on new installations.<br>**Changes:**<br>• The recovery-email setup step was removed from first login. Forgot Password accepts the account's email or a recovery email already on file and always sends the code to the account's own email. |
 | **`v2.1.0`** | September 2026 | **Administrative & Operational Hardening:**<br>• Unified Profile management portal (`/profile`) replacing legacy password views.<br>• Protected technical staff administrator accounts against deletion and deactivation.<br>• Uniform Lucide icon set and responsive mobile mega-menu navigation.<br>• Cross-platform deployment and server launcher scripts (`setup.bat`, `setup.ps1`, `setup.sh`).<br>• Decimal quantity precision and custom per-product expiration alert thresholds. |
 | **`v2.0.0`** | July 2026 | **Decoupled Architecture Modernization:**<br>• Decoupled system into `backend/` (CodeIgniter 4 REST JSON API) and `frontend/` (Vue 3 + Vite SPA).<br>• Single-command containerized local Docker stack (`docker-compose.yml`).<br>• Responsive smartphone and tablet views with optimized card layouts.<br>• Office-level multi-tenant data segregation. |
 | **`v1.0.0`** | June 2026 | **Initial Baseline:**<br>• Monolithic CodeIgniter server-rendered inventory and stock-out prototype. |
