@@ -26,6 +26,8 @@ class EnsureStockImportColumns extends Migration
 
     public function up()
     {
+        $this->db->resetDataCache();
+
         foreach (self::COLUMNS as $name => $definition) {
             if (! $this->db->fieldExists($name, 'transaction_table')) {
                 $this->forge->addColumn('transaction_table', [$name => $definition]);
@@ -42,6 +44,7 @@ class EnsureStockImportColumns extends Migration
 
     public function down()
     {
+        $this->db->resetDataCache();
         foreach (['uq_stock_import_fingerprint', 'idx_transaction_stock_import_order'] as $index) {
             if ($this->indexExists($index)) {
                 $this->db->query("ALTER TABLE transaction_table DROP INDEX {$index}");
