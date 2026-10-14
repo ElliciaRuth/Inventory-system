@@ -59,7 +59,19 @@ async function run(key, action, successFallback) {
   }
 }
 
-function approve(item) {
+async function approve(item) {
+  const ok = await confirmDialog({
+    title: 'Approve this item?',
+    message: `${Number(item.quantity)} ${item.unit || ''} of ${item.item_name} will be approved and deducted from stock.`,
+    details: [
+      ['Item', item.item_name],
+      ['Sub-product', item.copy_label],
+      ['Quantity', `${Number(item.quantity)} ${item.unit || ''}`],
+      ['In stock', item.current_stock],
+    ],
+    confirmText: 'Approve',
+  })
+  if (!ok) return
   run(`approve-${itemId(item)}`, () => stockoutApi.approveItem(itemId(item)), 'Item approved.')
 }
 
@@ -92,6 +104,20 @@ async function confirmReject() {
     return
   }
   const item = rejecting.value.item
+  const ok = await confirmDialog({
+    title: 'Reject this item?',
+    message: `${item.item_name} will be rejected. The requester will see your reason.`,
+    details: [
+      ['Request', `#${rejecting.value.request?.temp_stockout_id}`],
+      ['Item', item.item_name],
+      ['Quantity', `${Number(item.quantity)} ${item.unit || ''}`],
+      ['Requested by', rejecting.value.request?.requester_name],
+      ['Reason', reason],
+    ],
+    confirmText: 'Reject',
+    variant: 'danger',
+  })
+  if (!ok) return
   busy.value = `reject-${itemId(item)}`
   try {
     const res = await stockoutApi.rejectItem(itemId(item), reason)
@@ -110,6 +136,12 @@ async function approveAll(request) {
   const ok = await confirmDialog({
     title: 'Approve all items?',
     message: `Every item in request #${request.temp_stockout_id} will be approved and deducted from stock.`,
+    details: [
+      ['Request', `#${request.temp_stockout_id}`],
+      ['Requested by', request.requester_name],
+      ['Office', request.office_name],
+      ['Items', request.items?.length],
+    ],
     confirmText: 'Approve all',
   })
   if (!ok) return
@@ -121,7 +153,7 @@ function startEdit(item) {
   editQty.value = Number(item.quantity)
 }
 
-function saveEdit(item) {
+async function saveEdit(item) {
   const qty = Number(editQty.value)
   const stock = Number(item.current_stock || 0)
   if (!(qty >= 1) || !Number.isInteger(qty)) {
@@ -132,6 +164,17 @@ function saveEdit(item) {
     toast(`Cannot exceed available stock (${stock}).`, 'error')
     return
   }
+  const ok = await confirmDialog({
+    title: 'Change the quantity?',
+    message: `${item.item_name} will be changed from ${Number(item.quantity)} to ${qty} ${item.unit || ''}.`,
+    details: [
+      ['Item', item.item_name],
+      ['Sub-product', item.copy_label],
+      ['Quantity', `${Number(item.quantity)} → ${qty} ${item.unit || ''}`],
+    ],
+    confirmText: 'Save',
+  })
+  if (!ok) return
   run(`edit-${itemId(item)}`, async () => {
     const res = await stockoutApi.editPendingItem(itemId(item), qty)
     editingId.value = 0

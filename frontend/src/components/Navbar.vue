@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useAutoReload } from '../composables/useAutoReload'
+import { confirmDialog } from '../composables/useConfirm'
 import { backupsApi } from '../api/backups'
 import { maskEmail } from '../utils/maskEmail'
 import bsuLogo from '../assets/images/bsu-logo.png'
@@ -26,6 +27,7 @@ import {
   Lock,
   LogOut,
   Bell,
+  Home,
   Menu,
   X,
   ChevronDown,
@@ -377,7 +379,7 @@ const menuColumns = computed(() => {
               color: '#64748b',
               items: [
                 {
-                  label: 'Others Management',
+                  label: 'Office Settings',
                   to: '/settings',
                   icon: Settings,
                   badge: notificationStore.counts.pendingUsers || 0,
@@ -393,7 +395,7 @@ const menuColumns = computed(() => {
 
 const totalMenuBadges = computed(() => {
   if (isAdminAccount.value) return 0
-  // Pending applicants are handled in Others Management, which only managers have
+  // Pending applicants are handled in Office Settings, which only managers have
   return (notificationStore.counts.stockoutRequests || 0) +
          (authStore.levelId === 3 ? notificationStore.counts.pendingUsers || 0 : 0)
 })
@@ -412,6 +414,17 @@ const themeLabel = computed(() => {
 
 async function handleLogout() {
   closeMegaMenu()
+  closeDropdown()
+  const ok = await confirmDialog({
+    title: 'Sign out?',
+    message: 'You will need to sign in again to use the system.',
+    details: [
+      ['Signed in as', authStore.user?.username],
+      ['Office', authStore.user?.office_name],
+    ],
+    confirmText: 'Sign out',
+  })
+  if (!ok) return
   await authStore.logout()
   router.push('/login')
 }
@@ -507,6 +520,17 @@ onUnmounted(() => {
 
       <!-- Right: Unified, Symmetrical Action Controls (Desktop & Mobile) -->
       <div class="nav-actions">
+        <!-- Home: back to the dashboard from anywhere -->
+        <router-link
+          to="/"
+          class="theme-btn nav-home-btn"
+          :class="{ 'is-active': route.path === '/' }"
+          title="Home"
+          aria-label="Go to the home page"
+        >
+          <Home :size="18" />
+        </router-link>
+
         <!-- Notification Bell with Flyout Dropdown (not shown to the admin account) -->
         <div v-if="!isAdminAccount" ref="dropdownRef" class="notif-wrapper">
           <button
@@ -617,17 +641,6 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-
-        <!-- Quick Theme Toggle (Desktop only shortcut) -->
-        <button
-          type="button"
-          class="theme-btn desktop-only"
-          @click="themeStore.cycleTheme()"
-          :title="`Current theme: ${themeLabel}. Click to switch.`"
-          aria-label="Switch color theme"
-        >
-          <component :is="themeIconComponent" :size="18" />
-        </button>
 
         <!-- Help & User Guide (phones: in the menu card) -->
         <router-link
@@ -776,7 +789,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Quick Theme Switcher Pill -->
+            <!-- Theme switcher (the only place to change the theme) -->
             <button
               type="button"
               class="feature-theme-strip"
@@ -1996,6 +2009,7 @@ html[data-theme='bsu'] .feature-btn-primary {
   }
 
   .theme-btn.notif-bell-btn,
+  .theme-btn.nav-home-btn,
   .nav-menu-btn {
     width: 36px;
     height: 36px;
@@ -2017,12 +2031,14 @@ html[data-theme='bsu'] .feature-btn-primary {
   }
 
   .theme-btn.notif-bell-btn:hover,
+  .theme-btn.nav-home-btn:hover,
   .nav-menu-btn:hover {
     background: rgba(255, 255, 255, 0.24);
     transform: none;
   }
 
   .theme-btn.notif-bell-btn.is-active,
+  .theme-btn.nav-home-btn.is-active,
   .nav-menu-btn.is-active {
     background: rgba(255, 255, 255, 0.35);
     border-color: #ffffff;

@@ -24,18 +24,12 @@ const isDownloadingWord = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
-// Initialize default dates (previous month and current month)
+// Initialize default dates (current month for both From and To)
 function initDefaultDates() {
   const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
-  monthTo.value = `${currentYear}-${currentMonth}`
-
-  // Previous month
-  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const prevYear = prevDate.getFullYear()
-  const prevMonth = String(prevDate.getMonth() + 1).padStart(2, '0')
-  monthFrom.value = `${prevYear}-${prevMonth}`
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  monthFrom.value = currentMonth
+  monthTo.value = currentMonth
 }
 
 async function loadOptions() {

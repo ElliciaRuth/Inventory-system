@@ -88,7 +88,7 @@ class ProductController extends BaseApiController
 
         $payload = array_merge($this->productFields($input), [
             'product_no'     => $productNo,
-            'entity_id'      => $this->resolveEntityId($input, $officeId) ?: 1,
+            'entity_id'      => $this->resolveEntityId($input, $officeId) ?: $this->entityModel->defaultFor($officeId),
             'unit_id'        => $this->resolveUnitId($input, $officeId) ?: 1,
             'type_id'        => $this->resolveTypeId($input, $officeId) ?: 1,
             'user_office_id' => $officeId,

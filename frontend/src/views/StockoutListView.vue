@@ -51,6 +51,17 @@ async function saveEdit(item) {
     toast(`Cannot exceed available stock (${stock}).`, 'error')
     return
   }
+  const ok = await confirmDialog({
+    title: 'Change the quantity?',
+    message: `${item.item_name || 'This item'} will be changed from ${Number(item.quantity)} to ${qty} ${item.unit || ''}.`,
+    details: [
+      ['Item', item.item_name],
+      ['Sub-product', item.copy_label],
+      ['Quantity', `${Number(item.quantity)} → ${qty} ${item.unit || ''}`],
+    ],
+    confirmText: 'Save',
+  })
+  if (!ok) return
   busyId.value = editingId.value
   try {
     await stockoutApi.editDraftItem(item.temp_stockout_item_id, {
@@ -72,6 +83,11 @@ async function remove(item) {
   const ok = await confirmDialog({
     title: 'Remove item?',
     message: `"${item.item_name || 'This item'}" will be removed from your stock-out list.`,
+    details: [
+      ['Item', item.item_name],
+      ['Sub-product', item.copy_label],
+      ['Quantity', `${Number(item.quantity)} ${item.unit || ''}`],
+    ],
     confirmText: 'Remove',
     variant: 'danger',
   })
@@ -92,6 +108,7 @@ async function submit() {
   const ok = await confirmDialog({
     title: 'Submit for approval?',
     message: "You won't be able to edit this list after it is submitted.",
+    details: [['Items on the list', items.value.length]],
     confirmText: 'Submit',
   })
   if (!ok) return

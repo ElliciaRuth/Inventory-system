@@ -68,6 +68,7 @@ const ACTION_LABELS = {
   'settings.expiry_thresholds': 'Expiry settings',
   'user.activated': 'User activated',
   'user.deactivated': 'User deactivated',
+  'user.declined': 'Sign-up declined',
   'backup.created': 'Backup created',
   'backup.restored': 'Backup restored',
   'backup.settings_saved': 'Backup settings saved',
@@ -79,7 +80,7 @@ const ACTION_LABELS = {
 
 // Colour per kind of action
 function tone(action) {
-  if (/failed|locked|blocked|deleted|replace|reset|rejected|override|restored|security\./.test(action)) return 'danger'
+  if (/failed|locked|blocked|deleted|declined|replace|reset|rejected|override|restored|security\./.test(action)) return 'danger'
   if (/edited|updated|changed|adjust|reconciled|deactivated/.test(action)) return 'warning'
   if (action.startsWith('auth.')) return 'info'
   return 'success'
@@ -144,11 +145,6 @@ function when(value) {
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
-
-// The server's own address means the request came from the computer running the system
-function ipLabel(ip) {
-  return ['::1', '127.0.0.1'].includes(ip) ? `This computer (${ip})` : ip
-}
 </script>
 
 <template>
@@ -171,7 +167,7 @@ function ipLabel(ip) {
       <div class="panel-header audit-toolbar">
         <div class="audit-search">
           <Search :size="15" />
-          <input v-model="search" type="search" class="form-input" placeholder="Search user, action, item or IP…" aria-label="Search the audit log" />
+          <input v-model="search" type="search" class="form-input" placeholder="Search user, action or item…" aria-label="Search the audit log" />
         </div>
         <select v-model="group" class="form-select audit-select" aria-label="Kind of activity">
           <option v-for="g in ACTION_GROUPS" :key="g.key" :value="g.key">{{ g.label }}</option>
@@ -201,7 +197,7 @@ function ipLabel(ip) {
               <th>User</th>
               <th>Action</th>
               <th>What happened</th>
-              <th>IP address</th>
+              <th>Username</th>
             </tr>
           </thead>
           <tbody>
@@ -212,18 +208,18 @@ function ipLabel(ip) {
                 </td>
                 <td data-label="When" class="audit-when">{{ when(log.created_at) }}</td>
                 <td data-label="User">
-                  <strong>{{ log.username || '—' }}</strong>
+                  <strong>{{ log.user_full_name || log.username || '—' }}</strong>
                   <span v-if="log.office_name" class="audit-muted">{{ log.office_name }}</span>
                 </td>
                 <td data-label="Action">
                   <span class="audit-tag" :class="`is-${tone(log.action)}`">{{ ACTION_LABELS[log.action] || log.action }}</span>
                 </td>
                 <td data-label="What happened" class="audit-summary">{{ log.summary }}</td>
-                <td data-label="IP address" class="audit-ip" :title="log.ip_address">{{ log.ip_address ? ipLabel(log.ip_address) : '—' }}</td>
+                <td data-label="Username" class="audit-username">{{ log.username || '—' }}</td>
               </tr>
               <tr v-if="expanded.has(log.audit_id)" class="audit-details-row">
                 <td colspan="6">
-                  <AuditDetails :log="log" :tone="tone(log.action)" :when="when" :ip-label="ipLabel" />
+                  <AuditDetails :log="log" :tone="tone(log.action)" :when="when" />
                 </td>
               </tr>
             </template>
@@ -365,9 +361,9 @@ function ipLabel(ip) {
   min-width: 260px;
 }
 
-.audit-ip {
+.audit-username {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
   white-space: nowrap;
 }

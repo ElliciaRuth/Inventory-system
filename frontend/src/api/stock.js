@@ -39,7 +39,7 @@ export const stockApi = {
     return response.data
   },
 
-  // Which batches a stock-out would use: { product_id, copy_id, quantity, type, reason_id }
+  // Which batches a stock-out would use: { product_id, copy_id, quantity, type }
   async getBatchPlan(params) {
     const response = await client.get('/stock/batch-plan', { params })
     return response.data

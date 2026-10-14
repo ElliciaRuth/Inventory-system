@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { TriangleAlert, PackageX, CalendarClock, Package, Handshake } from 'lucide-vue-next'
 import { dashboardApi } from '../api/dashboard'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
@@ -211,12 +212,14 @@ onMounted(() => {
         <!-- 1. Total Products (Button card that redirects to products) -->
         <button
           type="button"
-          class="summary-card summary-card-action"
+          class="summary-card summary-card-action has-tone tone-primary"
+          :class="{ 'has-alert': Number(dashboard.summary.totalItems) > 0 }"
           @click="router.push('/products')"
           title="Click to view all products"
         >
           <div class="summary-card-header">
             <span class="card-label">TOTAL PRODUCTS</span>
+            <span class="card-tone-icon" aria-hidden="true"><Package :size="17" /></span>
           </div>
           <strong class="card-value">{{ dashboard.summary.totalItems }}</strong>
           <small class="card-hint">Click to view products →</small>
@@ -225,14 +228,15 @@ onMounted(() => {
         <!-- 2. Low Stock Alerts (Clickable button card with active highlight) -->
         <button
           type="button"
-          class="summary-card summary-card-action"
-          :class="{ 'is-active': activeTab === 'low-stock' }"
+          class="summary-card summary-card-action has-tone tone-warning"
+          :class="{ 'is-active': activeTab === 'low-stock', 'has-alert': Number(dashboard.summary.lowStockCount) > 0 }"
           :disabled="!dashboard.lowStock.length"
           @click="toggleTab('low-stock')"
         >
           <div class="summary-card-header">
             <span class="card-label">LOW STOCK ALERTS</span>
             <span v-if="activeTab === 'low-stock'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
+            <span v-else class="card-tone-icon" aria-hidden="true"><TriangleAlert :size="17" /></span>
           </div>
           <strong class="card-value">{{ dashboard.summary.lowStockCount }}</strong>
           <small class="card-hint">
@@ -245,14 +249,15 @@ onMounted(() => {
         <!-- 3. Out of Stock (Clickable button card with active highlight) -->
         <button
           type="button"
-          class="summary-card summary-card-action"
-          :class="{ 'is-active': activeTab === 'out-of-stock' }"
+          class="summary-card summary-card-action has-tone tone-danger"
+          :class="{ 'is-active': activeTab === 'out-of-stock', 'has-alert': Number(dashboard.summary.outOfStockCount || dashboard.outOfStock.length) > 0 }"
           :disabled="!dashboard.outOfStock.length"
           @click="toggleTab('out-of-stock')"
         >
           <div class="summary-card-header">
             <span class="card-label">OUT OF STOCK</span>
             <span v-if="activeTab === 'out-of-stock'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
+            <span v-else class="card-tone-icon" aria-hidden="true"><PackageX :size="17" /></span>
           </div>
           <strong class="card-value">{{ dashboard.summary.outOfStockCount || dashboard.outOfStock.length }}</strong>
           <small class="card-hint">
@@ -265,14 +270,15 @@ onMounted(() => {
         <!-- 4. Expiring Soon (Clickable button card with active highlight) -->
         <button
           type="button"
-          class="summary-card summary-card-action"
-          :class="{ 'is-active': activeTab === 'expiring' }"
+          class="summary-card summary-card-action has-tone tone-expiry"
+          :class="{ 'is-active': activeTab === 'expiring', 'has-alert': Number(dashboard.summary.expiringCount) > 0 }"
           :disabled="!dashboard.expiring.length"
           @click="toggleTab('expiring')"
         >
           <div class="summary-card-header">
             <span class="card-label">EXPIRING SOON</span>
             <span v-if="activeTab === 'expiring'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
+            <span v-else class="card-tone-icon" aria-hidden="true"><CalendarClock :size="17" /></span>
           </div>
           <strong class="card-value">{{ dashboard.summary.expiringCount }}</strong>
           <small class="card-hint">
@@ -285,14 +291,15 @@ onMounted(() => {
         <!-- 5. Items Out Borrowed (Clickable button card with active highlight) -->
         <button
           type="button"
-          class="summary-card summary-card-action"
-          :class="{ 'is-active': activeTab === 'borrowed' }"
+          class="summary-card summary-card-action has-tone tone-info"
+          :class="{ 'is-active': activeTab === 'borrowed', 'has-alert': Number(dashboard.summary.activeBorrowCount || borrowedOutTotal) > 0 }"
           :disabled="!dashboard.activeBorrows.length && !borrowedOutTotal"
           @click="toggleTab('borrowed')"
         >
           <div class="summary-card-header">
             <span class="card-label">ITEMS OUT (BORROWED)</span>
             <span v-if="activeTab === 'borrowed'" class="card-active-pill"><span class="pill-dot" aria-hidden="true"></span>Active</span>
+            <span v-else class="card-tone-icon" aria-hidden="true"><Handshake :size="17" /></span>
           </div>
           <strong class="card-value">{{ dashboard.summary.activeBorrowCount || borrowedOutTotal }}</strong>
           <small class="card-hint">
@@ -601,6 +608,53 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* ── Summary cards: each has its own colour and icon ──
+   green (products), amber (low stock), red (out of stock), orange (expiring), blue (borrowed).
+   With something to show, the icon turns solid, the number takes the colour and a soft glow
+   of the colour sits in the top corner; at 0 they stay plain. */
+.summary-card.tone-primary { --tone: var(--color-primary); --tone-bg: var(--color-primary-light); }
+.summary-card.tone-info { --tone: var(--color-info); --tone-bg: var(--color-info-bg); }
+.summary-card.tone-warning { --tone: var(--color-warning); --tone-bg: var(--color-warning-bg); }
+.summary-card.tone-danger { --tone: var(--color-danger); --tone-bg: var(--color-danger-bg); }
+.summary-card.tone-expiry { --tone: #c2410c; --tone-bg: #fff7ed; }
+html[data-theme='dark'] .summary-card.tone-expiry { --tone: #fb923c; --tone-bg: rgba(251, 146, 60, 0.12); }
+
+.card-tone-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  color: var(--text-subtle);
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.summary-card.has-tone.has-alert .card-tone-icon {
+  background: var(--tone);
+  color: #fff;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--tone) 30%, transparent);
+}
+
+.summary-card.has-tone.has-alert strong.card-value {
+  color: var(--tone);
+}
+
+.summary-card.has-tone.has-alert:not(.is-active) {
+  background-image: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--tone) 11%, transparent) 0%, transparent 58%);
+}
+
+.summary-card-header {
+  gap: 0.75rem;
+  min-height: 34px;
+}
+
+.summary-card.has-tone.has-alert:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+}
+
 .dash-details {
   animation: slideUp 0.25s ease;
   margin-bottom: 24px;

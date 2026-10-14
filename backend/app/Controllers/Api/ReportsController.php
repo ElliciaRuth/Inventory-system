@@ -59,10 +59,12 @@ class ReportsController extends BaseApiController
                 p.product_id,
                 p.product,
                 p.stock_no,
-                COALESCE(ut.unit, "pcs") AS unit_name
+                COALESCE(ut.unit, "pcs") AS unit_name,
+                COALESCE(tp.type, "") AS product_type
             ')
             ->join('product_table p', 'b.product_id = p.product_id')
-            ->join('unit_table ut', 'p.unit_id = ut.unit_id', 'left');
+            ->join('unit_table ut', 'p.unit_id = ut.unit_id', 'left')
+            ->join('type_of_product tp', 'p.type_id = tp.type_id', 'left');
 
         if (! $showEmpty) {
             $builder->where('b.current_qty >', 0);

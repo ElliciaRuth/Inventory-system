@@ -8,6 +8,8 @@ import {
 import { backupsApi } from '../api/backups'
 import { triggerBlobDownload } from '../api/export'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
+import AppPagination from './AppPagination.vue'
 
 const INTERVALS = [
   [1, 'Every 1 hour'], [2, 'Every 2 hours'], [4, 'Every 4 hours'], [6, 'Every 6 hours'],
@@ -144,6 +146,16 @@ function toggleSection(key) {
 
 async function createBackup() {
   if (!canCreate.value) return
+  const ok = await confirmDialog({
+    title: 'Create a backup now?',
+    message: `A new backup package will be made${protect.value ? ', protected with your password' : ''}.`,
+    details: [
+      ['Sections', sections.value.filter((s) => selectedSections.value.includes(s.key)).map((s) => s.title).join(', ')],
+      ['Password protected', protect.value ? 'Yes' : 'No'],
+    ],
+    confirmText: 'Create backup',
+  })
+  if (!ok) return
   busy.value = 'create'
   created.value = null
   try {
@@ -176,6 +188,16 @@ async function download(backup) {
 
 const fileInput = ref(null)
 const dragging = ref(false)
+// ── Archive list paging (same bar as the other lists) ──
+const archivePage = ref(1)
+const archivePageSize = ref(5)
+const archiveTotalPages = computed(() => Math.max(1, Math.ceil(backups.value.length / archivePageSize.value)))
+const pagedBackups = computed(() => {
+  const page = Math.min(archivePage.value, archiveTotalPages.value)
+  const start = (page - 1) * archivePageSize.value
+  return backups.value.slice(start, start + archivePageSize.value)
+})
+
 const source = ref(null)
 const restorePassword = ref('')
 const needsPassword = ref(false)
@@ -308,6 +330,18 @@ async function inspect() {
 
 async function restore() {
   if (!canRestore.value) return
+  const ok = await confirmDialog({
+    title: 'Restore this backup?',
+    message: 'The chosen records will be replaced with the ones in the backup.',
+    details: [
+      ['Backup file', source.value?.name],
+      ['From office', info.value?.office?.name],
+      ['Sections', info.value?.legacy ? 'Everything (older backup)' : (info.value?.sections || []).filter((s) => restoreSections.value.includes(s.key)).map((s) => s.title).join(', ')],
+    ],
+    confirmText: 'Restore',
+    variant: 'warning',
+  })
+  if (!ok) return
   busy.value = 'restore'
   restoreError.value = ''
   try {
@@ -325,6 +359,17 @@ async function restore() {
 // ── Schedule ─────────────────────────────────────────────────────────────
 
 async function saveConfig() {
+  const ok = await confirmDialog({
+    title: 'Save the backup schedule?',
+    message: 'Automatic backups will follow the new settings.',
+    details: [
+      ['Schedule', scheduleLabel.value],
+      ['Save to', config.backup_dir],
+      ['Mirror copy', config.backup_dir_2 || 'None'],
+    ],
+    confirmText: 'Save',
+  })
+  if (!ok) return
   busy.value = 'config'
   try {
     const res = await backupsApi.saveConfig({ ...config })
@@ -632,7 +677,7 @@ const VIEWS = computed(() => [
         <p class="bk-muted" style="margin-bottom: 1rem;">The newest 10 backups are kept in the backup folder. Download any you want to keep on a USB drive.</p>
         <p v-if="!backups.length" class="bk-empty">No backups yet. Use "Back up" to make the first one.</p>
         <ul class="bk-list">
-          <li v-for="b in backups" :key="b.backup_id">
+          <li v-for="b in pagedBackups" :key="b.backup_id">
             <div class="bk-date">
               <span class="bk-date-month">{{ dateParts(b.created_at).month }}</span>
               <span class="bk-date-day">{{ dateParts(b.created_at).day }}</span>
@@ -659,6 +704,18 @@ const VIEWS = computed(() => [
             </div>
           </li>
         </ul>
+        <AppPagination
+          v-if="backups.length > 0"
+          class="bk-pagination"
+          :current-page="Math.min(archivePage, archiveTotalPages)"
+          :total-pages="archiveTotalPages"
+          :total-items="backups.length"
+          :page-size="archivePageSize"
+          :page-size-options="[5, 10, 15, 25]"
+          item-name="backups"
+          @update:current-page="archivePage = $event"
+          @update:page-size="archivePageSize = $event; archivePage = 1"
+        />
       </div>
 
       <!-- ═════════ Schedule ═════════ -->
@@ -1589,6 +1646,13 @@ li.is-locked .bk-toggle {
   padding: 0;
   display: grid;
   gap: 0.6rem;
+}
+
+/* The shared pagination bar, as its own rounded strip under the list */
+.bk-list + .bk-pagination {
+  margin-top: 0.85rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 .bk-list li {

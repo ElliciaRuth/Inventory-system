@@ -10,15 +10,55 @@ const loading = ref(true)
 const search = ref('')
 const showEmpty = ref(false)
 
+// Filters (applied to the loaded list)
+const typeFilter = ref('')
+const expiryFilter = ref('')
+const receivedFrom = ref('')
+const receivedTo = ref('')
+
+const typeOptions = computed(() =>
+  [...new Set(batches.value.map((b) => b.product_type).filter(Boolean))].sort()
+)
+
+const hasFilters = computed(() => !!(typeFilter.value || expiryFilter.value || receivedFrom.value || receivedTo.value))
+
+function clearFilters() {
+  typeFilter.value = ''
+  expiryFilter.value = ''
+  receivedFrom.value = ''
+  receivedTo.value = ''
+}
+
+// expired / soon (within 30 days) / ok / none (no expiry date)
+function expiryStatus(batch) {
+  if (!batch.expiration_date) return 'none'
+  const tone = expiryTone(batch.expiration_date)
+  return tone === 'is-expired' ? 'expired' : tone === 'is-soon' ? 'soon' : 'ok'
+}
+
+const filteredBatches = computed(() =>
+  batches.value.filter((b) => {
+    const received = String(b.date_received || '').slice(0, 10)
+    return (!typeFilter.value || b.product_type === typeFilter.value)
+      && (!expiryFilter.value || expiryStatus(b) === expiryFilter.value)
+      && (!receivedFrom.value || (received && received >= receivedFrom.value))
+      && (!receivedTo.value || (received && received <= receivedTo.value))
+  })
+)
+
 // Pagination
 const currentPage = ref(1)
 const pageSize = ref(15)
 
-const totalPages = computed(() => Math.max(1, Math.ceil(batches.value.length / pageSize.value)))
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredBatches.value.length / pageSize.value)))
 
 const paginatedBatches = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return batches.value.slice(start, start + pageSize.value)
+  return filteredBatches.value.slice(start, start + pageSize.value)
+})
+
+watch([typeFilter, expiryFilter, receivedFrom, receivedTo], () => {
+  currentPage.value = 1
 })
 
 async function load() {
@@ -93,7 +133,7 @@ onMounted(load)
         <div class="batch-toolbar-right">
           <span v-if="!loading" class="batch-count">
             <Boxes :size="15" />
-            {{ batches.length }} batch{{ batches.length === 1 ? '' : 'es' }}
+            {{ filteredBatches.length }} batch{{ filteredBatches.length === 1 ? '' : 'es' }}
           </span>
 
           <label class="batch-toggle">
@@ -103,6 +143,37 @@ onMounted(load)
           </label>
         </div>
       </form>
+
+      <div class="filter-bar">
+        <label class="filter-field">
+          <span>Product type</span>
+          <select v-model="typeFilter" class="form-select">
+            <option value="">All types</option>
+            <option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>Expiry</span>
+          <select v-model="expiryFilter" class="form-select">
+            <option value="">Any</option>
+            <option value="expired">Expired</option>
+            <option value="soon">Expiring within 30 days</option>
+            <option value="ok">Not expiring soon</option>
+            <option value="none">No expiry date</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>Received from</span>
+          <input v-model="receivedFrom" type="date" class="form-input" :max="receivedTo || undefined" />
+        </label>
+        <label class="filter-field">
+          <span>Received to</span>
+          <input v-model="receivedTo" type="date" class="form-input" :min="receivedFrom || undefined" />
+        </label>
+        <button v-if="hasFilters" type="button" class="btn btn-sm btn-secondary filter-clear" @click="clearFilters">
+          <X :size="14" /> Clear filters
+        </button>
+      </div>
 
       <div class="table-responsive">
         <table class="data-table stack-mobile">
@@ -121,11 +192,17 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-if="loading"><td colspan="9" class="batch-empty">Loading batches…</td></tr>
-            <tr v-else-if="!batches.length">
+            <tr v-else-if="!filteredBatches.length">
               <td colspan="9" class="batch-empty">
                 <Barcode :size="30" />
-                <strong>No batches found{{ search ? ` for "${search.trim()}"` : '' }}.</strong>
-                <span v-if="!showEmpty">Batches with no stock left are hidden; turn on "Show empty batches" to see them.</span>
+                <template v-if="batches.length">
+                  <strong>No batches match the selected filters.</strong>
+                  <span>Change or clear the filters to see more.</span>
+                </template>
+                <template v-else>
+                  <strong>No batches found{{ search ? ` for "${search.trim()}"` : '' }}.</strong>
+                  <span v-if="!showEmpty">Batches with no stock left are hidden; turn on "Show empty batches" to see them.</span>
+                </template>
               </td>
             </tr>
             <template v-else>
@@ -168,10 +245,10 @@ onMounted(load)
 
       <!-- Pagination (< 1 2 3 ... x > Page items : Go to : ) -->
       <AppPagination
-        v-if="batches.length > 0"
+        v-if="filteredBatches.length > 0"
         :current-page="currentPage"
         :total-pages="totalPages"
-        :total-items="batches.length"
+        :total-items="filteredBatches.length"
         :page-size="pageSize"
         :page-size-options="[5, 10, 15, 25, 50, 100]"
         item-name="batches"

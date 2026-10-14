@@ -1,0 +1,5 @@
+# Build output and caches (installer-source/build.ps1)
+/BSU-Inventory-Setup.exe
+/BSU-Inventory-Setup.exe.sha256
+/installer-source/.cache/
+/installer-source/build/

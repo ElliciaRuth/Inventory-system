@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { Search, X, ChevronDown, Check, Loader2 } from 'lucide-vue-next'
 import { barcodesApi } from '../api/reports'
+import CameraScanButton from './CameraScanButton.vue'
 
 // One bar that is both a dropdown and a search: open it to browse every item,
 // or type to filter. v-model is the selected product_id.
@@ -114,6 +115,21 @@ function onKeydown(event) {
   }
 }
 
+// Camera scan: same as a USB scanner typing the code and pressing Enter
+// (a product barcode is its stock no; anything else is looked up as a batch barcode)
+function onCameraScan(text) {
+  query.value = text
+  const code = text.toLowerCase()
+  const exact = props.items.find((i) => String(i.stock_no || '').toLowerCase() === code)
+  if (exact) {
+    choose(exact)
+  } else if (results.value.length === 1) {
+    choose(results.value[0])
+  } else if (props.scanBarcodes) {
+    lookupBarcode(text)
+  }
+}
+
 async function lookupBarcode(value) {
   scanning.value = true
   try {
@@ -177,6 +193,7 @@ function parts(text) {
       <button v-if="query" type="button" class="picker-btn" title="Clear search" @mousedown.prevent="query = ''">
         <X :size="15" />
       </button>
+      <CameraScanButton v-if="scanBarcodes" @scanned="onCameraScan" />
       <button type="button" class="picker-btn" :title="open ? 'Close list' : 'Show all items'" @mousedown.prevent="toggle">
         <ChevronDown :size="17" class="picker-chevron" />
       </button>
@@ -269,7 +286,7 @@ function parts(text) {
 .picker-value {
   position: absolute;
   left: 2.35rem;
-  right: 2.6rem;
+  right: 4.8rem;
   top: 50%;
   transform: translateY(-50%);
   display: flex;

@@ -5,6 +5,7 @@ import { stockoutApi } from '../api/stockout'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, triggerAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 import AppPagination from '../components/AppPagination.vue'
 
 const authStore = useAuthStore()
@@ -81,6 +82,19 @@ function when(datetime) {
 const busy = ref('')
 
 async function accept(item) {
+  const ok = await confirmDialog({
+    title: 'Accept this item?',
+    message: `${qty(item)} of ${item.item_name || 'this item'} will be approved and deducted from stock.`,
+    details: [
+      ['Request', `#${item.temp_stockout_id}`],
+      ['Item', item.item_name],
+      ['Sub-product', item.copy_label],
+      ['Quantity', qty(item)],
+      ['Requested by', item.requester_name],
+    ],
+    confirmText: 'Accept',
+  })
+  if (!ok) return
   const id = Number(item.temp_stockout_item_id)
   busy.value = `accept-${id}`
   try {
@@ -122,6 +136,20 @@ async function confirmReject() {
     rejectError.value = 'Please give a short reason; the requester will see it.'
     return
   }
+  const ok = await confirmDialog({
+    title: 'Reject this item?',
+    message: `${rejecting.value.item_name || 'This item'} will be rejected. The requester will see your reason.`,
+    details: [
+      ['Request', `#${rejecting.value.temp_stockout_id}`],
+      ['Item', rejecting.value.item_name],
+      ['Quantity', qty(rejecting.value)],
+      ['Requested by', rejecting.value.requester_name],
+      ['Reason', reason],
+    ],
+    confirmText: 'Reject',
+    variant: 'danger',
+  })
+  if (!ok) return
   const id = Number(rejecting.value.temp_stockout_item_id)
   busy.value = `reject-${id}`
   try {

@@ -108,7 +108,10 @@ class StockController extends BaseApiController
             'offices'           => $officeModel->orderedList($officeId),
             'references'        => $referenceModel->orderedList($officeId),
             'transactionTypes'  => $db->table('transaction_type_table')->orderBy('transaction_type_id', 'ASC')->get()->getResultArray(),
-            'adjustmentReasons' => $reasonModel->orderedList(),
+            'adjustmentReasons' => [
+                'adjust_out' => $reasonModel->forType('adjust_out'),
+                'adjust_in'  => $reasonModel->forType('adjust_in'),
+            ],
             'copiesMap'         => $copyModel->allCopiesGrouped($officeId),
             // Units that can borrow from this one (the other Bakery / FPC offices)
             'borrowerUnits'     => $db->table('user_office_table')->select('user_office_id, user_office_name')
@@ -472,7 +475,7 @@ class StockController extends BaseApiController
 
     /**
      * Which batches a stock-out would take from (shown in the stock form before saving).
-     * GET /api/stock/batch-plan?product_id=&copy_id=&quantity=&type=issue|borrow|adjust_out&reason_id=
+     * GET /api/stock/batch-plan?product_id=&copy_id=&quantity=&type=issue|borrow|adjust_out
      */
     public function batchPlan(): ResponseInterface
     {
@@ -480,19 +483,12 @@ class StockController extends BaseApiController
         $copyId    = (int) ($this->request->getGet('copy_id') ?? 0);
         $quantity  = max(0.0, (float) ($this->request->getGet('quantity') ?? 0));
         $type      = (string) ($this->request->getGet('type') ?? 'issue');
-        $reasonId  = (int) ($this->request->getGet('reason_id') ?? 0);
 
         if ($productId <= 0) {
             return $this->respondError('Choose a product.', [], 422);
         }
 
-        $mode = InventoryService::MODE_ISSUE;
-        if ($type === 'adjust_out') {
-            $reason = db_connect()->table('adjustment_reason')->where('adjustment_reason_id', $reasonId)->get(1)->getRowArray();
-            $mode   = strcasecmp((string) ($reason['adjustment_reason'] ?? ''), 'Expired') === 0
-                ? InventoryService::MODE_EXPIRED
-                : InventoryService::MODE_ADJUST;
-        }
+        $mode = $type === 'adjust_out' ? InventoryService::MODE_ADJUST : InventoryService::MODE_ISSUE;
 
         $plan = (new InventoryService(db_connect()))->planDepletion($productId, $quantity, $this->currentOfficeId(), $copyId, $mode);
 

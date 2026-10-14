@@ -114,6 +114,32 @@ class ImportController extends BaseApiController
     }
 
     /**
+     * Categories changed in the preview, for the audit log: [{ product, unit, from, to }].
+     * Products left on their detected category are not listed.
+     */
+    private function categoryChanges(array $plan, array $types): array
+    {
+        $changes = [];
+        foreach ($plan['products'] ?? [] as $product) {
+            if (($product['status'] ?? '') !== 'ok') {
+                continue;
+            }
+            $chosen   = StockcardImportService::cleanTypeName($types[$product['key']] ?? '');
+            $detected = (string) ($product['type'] ?? '');
+            if ($chosen !== '' && mb_strtolower($chosen) !== mb_strtolower($detected)) {
+                $changes[] = [
+                    'product' => (string) ($product['name'] ?? ''),
+                    'unit'    => (string) ($product['unit'] ?? ''),
+                    'from'    => $detected,
+                    'to'      => $chosen,
+                ];
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
      * POST /api/import/stockcards/commit   { token, mode: "replace"|"append", password, types: { productKey: type } }
      * Deleting the existing inventory first ("replace") needs the manager's own password.
      */
@@ -189,7 +215,7 @@ class ImportController extends BaseApiController
                 'receipts'         => $result['receipts'] ?? 0,
                 'issues'           => $result['issues'] ?? 0,
                 'adjustments'      => $result['adjustments'] ?? 0,
-                'type_overrides'   => $types,
+                'category_changes' => $this->categoryChanges($plan, $types),
                 'approved_by'      => $approvedBy,
             ]
         );

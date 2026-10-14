@@ -1,8 +1,9 @@
 <script setup>
-import { ref, reactive, watch, onMounted, computed } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
 import { X, AlertTriangle, Layers, ScanLine } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { triggerAutoReload } from '../composables/useAutoReload'
+import { confirmDialog } from '../composables/useConfirm'
 import ProductSearch from './ProductSearch.vue'
 
 const props = defineProps({
@@ -17,13 +18,34 @@ const emit = defineEmits(['close', 'saved'])
 const TYPE_LABELS = {
   receipt: 'Stock In (Receipt)',
   issue: 'Stock Out (Issue)',
-  adjust_out: 'Adjust Out (Spoiled, Spilled, Expired…)',
-  adjust_in: 'Adjust In (Count Correction)',
-  borrow: 'Lend to Another Unit (Borrow)',
+  adjust_out: 'Adjust Out (Spoiled, Damaged, Correction…)',
+  adjust_in: 'Adjust In (Wrong Count…)',
+  borrow: 'Lend to Another Office (Borrow)',
   return: 'Return of Borrowed Stock',
 }
 
 const OTHER_UNIT = '__other__'
+
+// Transaction date shown in the form: the current date and time, kept fresh while the form is open
+// (the server stamps the exact moment of saving)
+const now = ref(new Date())
+let clock = null
+watch(
+  () => props.isOpen,
+  (open) => {
+    clearInterval(clock)
+    clock = null
+    if (open) {
+      now.value = new Date()
+      clock = setInterval(() => (now.value = new Date()), 15000)
+    }
+  },
+  { immediate: true }
+)
+onUnmounted(() => clearInterval(clock))
+const nowText = computed(() =>
+  now.value.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+)
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -34,7 +56,7 @@ const options = ref({
   offices: [],
   references: [],
   transactionTypes: [],
-  adjustmentReasons: [],
+  adjustmentReasons: {}, // { adjust_out: [...], adjust_in: [...] }
   borrowerUnits: [],
 })
 
@@ -47,10 +69,12 @@ const form = reactive({
   usage_pct: 100,
   office: '',
   reference: '',
+  // Stock In only: the day the delivery was received
+  transaction_date: '',
   manufacturing_date: '',
   expiration_date: '',
   adjustment_reason_id: '',
-  // Borrow (lend to another unit)
+  // Borrow (lend to another office)
   borrower_name: '',
   borrower_user_office_id: '',
   borrower_unit: '',
@@ -65,8 +89,9 @@ const todayIso = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+const receivedDate = computed(() => form.transaction_date || todayIso())
 const maxManufacturingDate = computed(() =>
-  form.expiration_date && form.expiration_date < todayIso() ? form.expiration_date : todayIso()
+  form.expiration_date && form.expiration_date < receivedDate.value ? form.expiration_date : receivedDate.value
 )
 
 const selectedItem = computed(() =>
@@ -180,7 +205,6 @@ async function loadPlan() {
       copy_id: needsCopy.value ? form.copy_id : 0,
       quantity: outQty.value,
       type: previewType.value,
-      reason_id: form.adjustment_reason_id || 0,
     })
     if (ticket === planRequest) plan.value = res.data || null
   } catch {
@@ -199,7 +223,7 @@ function batchTone(batch) {
 }
 
 watch(
-  () => [form.product_id, form.copy_id, outQty.value, typeName.value, form.adjustment_reason_id, props.isOpen],
+  () => [form.product_id, form.copy_id, outQty.value, typeName.value, props.isOpen],
   schedulePlan
 )
 
@@ -227,7 +251,10 @@ async function fetchOptions() {
   }
 }
 
-onMounted(fetchOptions)
+onMounted(() => {
+  form.transaction_date = todayIso()
+  fetchOptions()
+})
 
 // Refresh stock figures every time the modal opens
 watch(
@@ -235,6 +262,7 @@ watch(
   (open) => {
     if (open) {
       errorMessage.value = ''
+      form.transaction_date = todayIso()
       fetchOptions()
     }
   }
@@ -253,9 +281,15 @@ watch(
 watch(() => [form.product_id, form.transaction_type_id], () => {
   form.copy_id = ''
   if (!isIssue.value) form.usage_pct = 100
-  if (!needsReason.value) form.adjustment_reason_id = ''
   loadOpenBorrows()
 })
+
+// Adjust Out and Adjust In offer different reasons
+watch(() => form.transaction_type_id, () => {
+  form.adjustment_reason_id = ''
+})
+
+const reasonOptions = computed(() => options.value.adjustmentReasons?.[typeName.value] || [])
 
 // A scanned batch barcode picks the product and, where one is needed, its sub-product
 function onScanned(batch) {
@@ -272,7 +306,9 @@ function validate() {
   if (!form.product_id) return 'Please select a product.'
   if (!form.transaction_type_id) return 'Please select a transaction type.'
   if (!(Number(form.quantity) > 0)) return 'Quantity must be greater than 0.'
-  if (isReceipt.value && !(Number(form.unit_cost) > 0)) return 'Unit cost is required for stock-in.'
+  if (isReceipt.value && (form.unit_cost === '' || form.unit_cost === null || !(Number(form.unit_cost) >= 0))) {
+    return 'Unit cost is required for stock-in (enter 0 for a free item).'
+  }
   if (needsCopy.value && !form.copy_id) return 'Please select a sub-product (price variant).'
   if (isIssue.value && !(Number(form.usage_pct) >= 1 && Number(form.usage_pct) <= 100)) {
     return 'Usage % must be between 1 and 100.'
@@ -280,8 +316,8 @@ function validate() {
   if (needsReason.value && !form.adjustment_reason_id) return 'Choose the reason for this adjustment.'
   if (isBorrow.value) {
     if (form.borrower_name.trim().length < 2) return 'Enter the name of the person borrowing.'
-    if (!form.borrower_user_office_id) return 'Choose the unit that is borrowing.'
-    if (form.borrower_user_office_id === OTHER_UNIT && !form.borrower_unit.trim()) return 'Type the name of the borrowing unit.'
+    if (!form.borrower_user_office_id) return 'Choose the office that is borrowing.'
+    if (form.borrower_user_office_id === OTHER_UNIT && !form.borrower_unit.trim()) return 'Type the name of the borrowing office.'
   }
   if (isReturn.value) {
     if (openBorrows.value.length && !form.borrow_id) return 'Choose which borrow this return is for.'
@@ -290,12 +326,15 @@ function validate() {
     }
   }
   if (plan.value && Number(plan.value.shortfall) > 0) {
-    if (isAdjustOut.value && plan.value.mode === 'expired') return `Only ${qtyText(plan.value.usable)} of this stock is expired.`
     const expired = Number(plan.value.expired_qty)
-    return `Only ${qtyText(plan.value.usable)} can be taken out${expired > 0 && !isAdjustOut.value ? `; ${qtyText(expired)} more is expired and must be removed with Adjust Out, reason "Expired"` : ''}.`
+    return `Only ${qtyText(plan.value.usable)} can be taken out${expired > 0 && !isAdjustOut.value ? `; ${qtyText(expired)} more is expired and must be removed with Adjust Out` : ''}.`
+  }
+  if (isReceipt.value) {
+    if (!form.transaction_date) return 'Please enter the transaction date.'
+    if (form.transaction_date > todayIso()) return 'Transaction date cannot be in the future.'
   }
   if (isReceipt.value && form.manufacturing_date) {
-    if (form.manufacturing_date > todayIso()) return 'Manufacturing date cannot be in the future.'
+    if (form.manufacturing_date > receivedDate.value) return 'Manufacturing date cannot be after the transaction date.'
     if (form.expiration_date && form.manufacturing_date > form.expiration_date) {
       return 'Manufacturing date must be on or before the expiration date.'
     }
@@ -317,6 +356,7 @@ async function handleSubmit() {
   }
   if (isReceipt.value) {
     payload.unit_cost = Number(form.unit_cost)
+    payload.transaction_date = form.transaction_date
     payload.expiration_date = form.expiration_date || ''
     payload.manufacturing_date = form.manufacturing_date || ''
   }
@@ -331,6 +371,28 @@ async function handleSubmit() {
     payload.borrow_notes = form.borrow_notes.trim()
   }
   if (isReturn.value && form.borrow_id) payload.borrow_id = Number(form.borrow_id)
+
+  const type = options.value.transactionTypes.find((t) => Number(t.transaction_type_id) === Number(form.transaction_type_id))
+  const copy = copies.value.find((c) => Number(c.copy_id) === Number(payload.copy_id))
+  const reason = reasonOptions.value.find((r) => String(r.adjustment_reason_id) === String(form.adjustment_reason_id))
+  const ok = await confirmDialog({
+    title: 'Save this stock movement?',
+    message: `${type ? typeLabel(type) : 'Transaction'}: ${qtyText(payload.quantity)} ${selectedItem.value?.unit || ''} of ${selectedItem.value?.product || 'this product'}.`,
+    details: [
+      ['Type', type ? typeLabel(type) : ''],
+      ['Product', selectedItem.value?.product],
+      ['Quantity', `${qtyText(payload.quantity)} ${selectedItem.value?.unit || ''}`],
+      ['Sub-product', copy ? `₱${peso(copy.unit_cost)}${copy.label ? ` (${copy.label})` : ''}` : ''],
+      ['Unit cost', payload.unit_cost !== undefined ? `₱${peso(payload.unit_cost)}` : ''],
+      ['Date', payload.transaction_date ? shortDate(payload.transaction_date) : ''],
+      ['Reason', reason?.adjustment_reason],
+      ['Borrower', payload.borrower_name],
+      ['Reference', payload.reference],
+      ['Office / source', payload.office],
+    ],
+    confirmText: 'Save',
+  })
+  if (!ok) return
 
   loading.value = true
   try {
@@ -464,11 +526,11 @@ async function handleSubmit() {
                 <input v-model="form.borrower_name" type="text" class="form-input" maxlength="150" placeholder="e.g. Juan Dela Cruz" />
               </div>
               <div class="form-group">
-                <label class="form-label">Borrowing Unit *</label>
+                <label class="form-label">Borrowing Office *</label>
                 <select v-model="form.borrower_user_office_id" class="form-select">
-                  <option value="">— Choose unit —</option>
+                  <option value="">— Choose office —</option>
                   <option v-for="u in options.borrowerUnits" :key="u.user_office_id" :value="String(u.user_office_id)">{{ u.user_office_name }}</option>
-                  <option :value="OTHER_UNIT">Other unit…</option>
+                  <option :value="OTHER_UNIT">Other office…</option>
                 </select>
                 <input
                   v-if="form.borrower_user_office_id === OTHER_UNIT"
@@ -477,7 +539,7 @@ async function handleSubmit() {
                   class="form-input"
                   style="margin-top: 0.4rem;"
                   maxlength="150"
-                  placeholder="Name of the unit"
+                  placeholder="Name of the office"
                 />
               </div>
             </div>
@@ -496,7 +558,7 @@ async function handleSubmit() {
           <div class="form-grid-2">
             <div class="form-group" v-if="isReceipt">
               <label class="form-label">Unit Cost (₱) *</label>
-              <input v-model.number="form.unit_cost" type="number" step="any" min="0.01" class="form-input" placeholder="0.00" required />
+              <input v-model.number="form.unit_cost" type="number" step="any" min="0" class="form-input" placeholder="0.00" required />
             </div>
 
             <div class="form-group" v-if="isIssue">
@@ -509,16 +571,17 @@ async function handleSubmit() {
               <label class="form-label">Reason *</label>
               <select v-model="form.adjustment_reason_id" class="form-select">
                 <option value="">— Choose a reason —</option>
-                <option v-for="r in options.adjustmentReasons" :key="r.adjustment_reason_id" :value="String(r.adjustment_reason_id)">
+                <option v-for="r in reasonOptions" :key="r.adjustment_reason_id" :value="String(r.adjustment_reason_id)">
                   {{ r.adjustment_reason }}
                 </option>
               </select>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Transaction Date</label>
-              <!-- For now the server stamps each movement with the moment it is saved -->
-              <input type="text" class="form-input" value="Now (recorded when you save)" disabled />
+              <label class="form-label">Transaction Date{{ isReceipt ? ' *' : '' }}</label>
+              <!-- Stock In may be back-dated to the day it was received; other movements are stamped when saved -->
+              <input v-if="isReceipt" v-model="form.transaction_date" type="date" class="form-input" :max="todayIso()" required aria-label="Transaction date" />
+              <input v-else type="text" class="form-input" :value="nowText" disabled aria-label="Transaction date and time" />
             </div>
           </div>
 
@@ -528,7 +591,7 @@ async function handleSubmit() {
               <Layers :size="15" />
               <strong>{{ isAdjustOut ? 'Will be taken from' : 'Will be issued from' }}</strong>
               <span class="sm-plan-rule">
-                {{ plan?.mode === 'expired' ? 'expired batches only' : plan?.mode === 'adjust' ? 'expired batches first, then oldest received' : 'oldest received batch first (FIFO)' }}
+                {{ plan?.mode === 'adjust' ? 'expired batches first, then oldest received' : 'oldest received batch first (FIFO)' }}
               </span>
             </div>
             <p v-if="planLoading && !plan" class="sm-plan-empty">Checking batches…</p>
@@ -544,7 +607,7 @@ async function handleSubmit() {
             <p v-else-if="plan" class="sm-plan-empty">No batch has stock for this.</p>
             <p v-if="plan && Number(plan.shortfall) > 0" class="sm-plan-warn">
               <AlertTriangle :size="13" />
-              {{ qtyText(plan.shortfall) }} short — only {{ qtyText(plan.usable) }} available{{ plan.mode === 'issue' && Number(plan.expired_qty) > 0 ? `; ${qtyText(plan.expired_qty)} more is expired (remove it with Adjust Out, reason "Expired")` : '' }}.
+              {{ qtyText(plan.shortfall) }} short — only {{ qtyText(plan.usable) }} available{{ plan.mode === 'issue' && Number(plan.expired_qty) > 0 ? `; ${qtyText(plan.expired_qty)} more is expired (remove it with Adjust Out)` : '' }}.
             </p>
           </div>
 

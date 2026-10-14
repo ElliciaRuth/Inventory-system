@@ -1,20 +1,33 @@
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import { ClipboardCheck, Search, ScanLine, CheckCircle2, RotateCcw } from 'lucide-vue-next'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ClipboardCheck, Search, CheckCircle2, RotateCcw } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { barcodesApi } from '../api/reports'
 import { triggerAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
+import AppPagination from '../components/AppPagination.vue'
+import CameraScanButton from '../components/CameraScanButton.vue'
 
 const items = ref([])
 const stockMap = ref({})
 const loading = ref(true)
 const saving = ref(false)
 const search = ref('')
-const onlyEntered = ref(false)
+// Filters: category, and which rows to show by their count
+const category = ref('')
+const show = ref('all') // all | differences | short | over | uncounted
+const SHOW_OPTIONS = [
+  ['all', 'All items'],
+  ['differences', 'Differences only'],
+  ['short', 'Short'],
+  ['over', 'Over'],
+  ['uncounted', 'Not counted'],
+]
+const page = ref(1)
+const pageSize = ref(15)
 const note = ref('')
-// product_id → counted quantity as typed ('' = not counted)
+// product_id → counted quantity; starts at the system quantity, so only differences need typing ('' = not counted)
 const counted = reactive({})
 const result = ref(null)
 const highlight = ref(0)
@@ -24,6 +37,7 @@ async function load() {
     const res = await stockApi.getOptions()
     items.value = res.data?.items || []
     stockMap.value = res.data?.stockMap || {}
+    fillFromSystem()
   } catch (err) {
     toast(errorMessage(err, 'Failed to load products.'), 'error')
   } finally {
@@ -42,26 +56,56 @@ const systemQty = (item) => Number(stockMap.value[item.product_id] || 0)
 const isEntered = (item) => counted[item.product_id] !== undefined && counted[item.product_id] !== '' && counted[item.product_id] !== null
 const variance = (item) => (isEntered(item) ? Number(counted[item.product_id]) - systemQty(item) : null)
 
+const hasDifference = (item) => variance(item) !== null && Math.abs(variance(item)) > 0.0001
+
+const categoryOf = (item) => String(item.type_name || '').trim() || 'Uncategorized'
+const categories = computed(() => [...new Set(items.value.map(categoryOf))].sort((a, b) => a.localeCompare(b)))
+
+function matchesShow(item) {
+  switch (show.value) {
+    case 'differences': return hasDifference(item)
+    case 'short': return hasDifference(item) && variance(item) < 0
+    case 'over': return hasDifference(item) && variance(item) > 0
+    case 'uncounted': return !isEntered(item)
+    default: return true
+  }
+}
+
 const rows = computed(() => {
   const q = search.value.trim().toLowerCase()
   return items.value.filter((item) =>
-    (!onlyEntered.value || isEntered(item)) &&
+    (!category.value || categoryOf(item) === category.value) &&
+    matchesShow(item) &&
     (!q || [item.product, item.product_no, item.stock_no, item.product_description].some((v) => String(v ?? '').toLowerCase().includes(q)))
   )
 })
 
+// The page of rows on screen
+const totalPages = computed(() => Math.max(1, Math.ceil(rows.value.length / pageSize.value)))
+const pagedRows = computed(() => {
+  const current = Math.min(page.value, totalPages.value)
+  return rows.value.slice((current - 1) * pageSize.value, current * pageSize.value)
+})
+watch([search, category, show], () => {
+  page.value = 1
+})
+
 const entered = computed(() => items.value.filter(isEntered))
-const differences = computed(() => entered.value.filter((item) => Math.abs(variance(item)) > 0.0001))
+const differences = computed(() => entered.value.filter(hasDifference))
 const shortages = computed(() => differences.value.filter((item) => variance(item) < 0))
 const overages = computed(() => differences.value.filter((item) => variance(item) > 0))
 const invalid = computed(() => entered.value.filter((item) => !(Number(counted[item.product_id]) >= 0)))
 
-function fillSystem(item) {
-  counted[item.product_id] = systemQty(item)
+// Every item starts counted at its system quantity; boxes already typed in are kept
+function fillFromSystem(reset = false) {
+  for (const item of items.value) {
+    if (reset || counted[item.product_id] === undefined) counted[item.product_id] = systemQty(item)
+  }
 }
 
-function clearAll() {
-  Object.keys(counted).forEach((key) => delete counted[key])
+// Back to the system quantities
+function resetAll() {
+  fillFromSystem(true)
   result.value = null
 }
 
@@ -82,7 +126,21 @@ async function onSearchEnter() {
   }
 }
 
+// Camera scan: same as a USB scanner typing the code and pressing Enter
+function onCameraScan(text) {
+  search.value = text
+  onSearchEnter()
+}
+
 function focusRow(productId) {
+  // Bring the item into the list (filters off if they hide it) and turn to its page
+  let index = rows.value.findIndex((i) => Number(i.product_id) === Number(productId))
+  if (index < 0) {
+    category.value = ''
+    show.value = 'all'
+    index = rows.value.findIndex((i) => Number(i.product_id) === Number(productId))
+  }
+  if (index >= 0) page.value = Math.floor(index / pageSize.value) + 1
   highlight.value = Number(productId)
   nextTick(() => {
     const input = document.getElementById(`count-${productId}`)
@@ -110,6 +168,11 @@ async function reconcile() {
     message: differences.value.length
       ? `${entered.value.length} item(s) counted. ${shortages.value.length} short (Adjust Out, expired batches first) and ${overages.value.length} over (Adjust In). Each adjustment is recorded in the stockcard ledger with the reason "Physical Count" and in the audit log.`
       : `All ${entered.value.length} counted item(s) match the system. Nothing will be adjusted.`,
+    details: [
+      ['Items counted', entered.value.length],
+      ['Short (Adjust Out)', shortages.value.length],
+      ['Over (Adjust In)', overages.value.length],
+    ],
     confirmText: differences.value.length ? 'Reconcile' : 'Save count',
     variant: differences.value.length ? 'danger' : undefined,
   })
@@ -142,7 +205,7 @@ async function reconcile() {
         <p class="hero-eyebrow">Reconciliation</p>
         <h1 class="hero-title">Physical Count</h1>
         <p class="hero-subtitle">
-          Count what is on the shelf, enter it here, and the system shows the difference. Reconciling records
+          Every count starts at the system quantity: change the ones that differ from the shelf and the system shows the difference. Reconciling records
           an Adjust Out for shortages (expired batches first) and an Adjust In for overages, with the reason “Physical Count”.
         </p>
       </div>
@@ -180,12 +243,15 @@ async function reconcile() {
             aria-label="Find an item or scan a barcode"
             @keydown.enter.prevent="onSearchEnter"
           />
-          <ScanLine :size="15" class="pc-scan-icon" />
+          <span class="input-cam"><CameraScanButton @scanned="onCameraScan" /></span>
         </div>
-        <label class="pc-toggle">
-          <input v-model="onlyEntered" type="checkbox" />
-          <span>Only counted items</span>
-        </label>
+        <select v-model="category" class="form-select pc-filter" aria-label="Category">
+          <option value="">All categories</option>
+          <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="show" class="form-select pc-filter" aria-label="Show">
+          <option v-for="[value, label] in SHOW_OPTIONS" :key="value" :value="value">{{ label }}</option>
+        </select>
         <div class="pc-summary">
           <span><strong>{{ entered.length }}</strong> counted</span>
           <span class="is-short"><strong>{{ shortages.length }}</strong> short</span>
@@ -196,7 +262,7 @@ async function reconcile() {
       <div v-if="loading" class="pc-empty">Loading items…</div>
       <div v-else-if="!rows.length" class="pc-empty">
         <ClipboardCheck :size="30" />
-        <strong>{{ onlyEntered ? 'No counts entered yet.' : 'No items match.' }}</strong>
+        <strong>{{ show === 'differences' && !search && !category ? 'No differences: every count matches the system.' : 'No items match these filters.' }}</strong>
       </div>
 
       <div v-else class="table-responsive">
@@ -211,7 +277,7 @@ async function reconcile() {
           </thead>
           <tbody>
             <tr
-              v-for="item in rows"
+              v-for="item in pagedRows"
               :key="item.product_id"
               :class="{
                 'is-highlight': highlight === Number(item.product_id),
@@ -236,7 +302,6 @@ async function reconcile() {
                     class="form-input"
                     placeholder="—"
                   />
-                  <button type="button" class="pc-same" title="Counted the same as the system" @click="fillSystem(item)">=</button>
                 </div>
               </td>
               <td data-label="Difference" class="pc-num">
@@ -251,10 +316,23 @@ async function reconcile() {
         </table>
       </div>
 
+      <AppPagination
+        v-if="!loading && rows.length > 0"
+        :current-page="Math.min(page, totalPages)"
+        :total-pages="totalPages"
+        :total-items="rows.length"
+        :page-size="pageSize"
+        :page-size-options="[10, 15, 25, 50, 100]"
+        item-name="items"
+        class="pc-pagination"
+        @update:current-page="page = $event"
+        @update:page-size="pageSize = $event; page = 1"
+      />
+
       <div class="pc-footer">
         <input v-model="note" type="text" class="form-input pc-note" maxlength="300" placeholder="Note (optional), e.g. Month-end count, storeroom A" />
-        <button type="button" class="btn btn-secondary" :disabled="saving || !entered.length" @click="clearAll">
-          <RotateCcw :size="14" /> Clear
+        <button type="button" class="btn btn-secondary" :disabled="saving || !differences.length" title="Put every count back to the system quantity" @click="resetAll">
+          <RotateCcw :size="14" /> Reset
         </button>
         <button type="button" class="btn btn-primary" :disabled="saving || !entered.length" @click="reconcile">
           <ClipboardCheck :size="15" />
@@ -287,24 +365,20 @@ async function reconcile() {
   pointer-events: none;
 }
 
-.pc-search .pc-scan-icon {
-  left: auto;
-  right: 12px;
-}
-
 .pc-search .form-input {
   width: 100%;
   padding-left: 34px;
   padding-right: 34px;
 }
 
-.pc-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
+.pc-filter {
+  width: auto;
+  min-width: 160px;
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 0.875rem;
+  background-color: var(--bg-surface);
 }
 
 .pc-summary {
@@ -377,22 +451,6 @@ async function reconcile() {
   text-align: right;
 }
 
-.pc-same {
-  flex-shrink: 0;
-  width: 34px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--text-muted);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.pc-same:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
 .pc-var {
   display: inline-block;
   padding: 0.1rem 0.55rem;
@@ -408,6 +466,11 @@ async function reconcile() {
 .pc-table tr.is-short td:first-child { box-shadow: inset 4px 0 0 var(--color-danger); }
 .pc-table tr.is-over td:first-child { box-shadow: inset 4px 0 0 var(--color-info); }
 .pc-table tr.is-highlight td { background: var(--color-primary-light); transition: background 0.3s; }
+
+/* The Reconcile bar follows the pagination, so it keeps square corners */
+section .pc-pagination {
+  border-radius: 0;
+}
 
 .pc-footer {
   display: flex;

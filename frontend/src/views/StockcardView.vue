@@ -1,17 +1,21 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { Download, ArrowLeftRight, Pencil, FileSpreadsheet, AlertTriangle, AlertOctagon, Clock, Archive } from 'lucide-vue-next'
+import {
+  Download, ArrowLeftRight, Pencil, FileSpreadsheet, AlertTriangle, AlertOctagon, Clock, Archive,
+  ArrowDownWideNarrow, ArrowUpNarrowWide, Search, ChevronLeft, ChevronRight, Loader2,
+} from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import StockModal from '../components/StockModal.vue'
 import EditStockcardModal from '../components/EditStockcardModal.vue'
 import ImportStockcardsModal from '../components/ImportStockcardsModal.vue'
-import ProductSearch from '../components/ProductSearch.vue'
 import { toast } from '../composables/useToast'
 import AppPagination from '../components/AppPagination.vue'
 import { typeLabel, typeBadge } from '../utils/transactionTypes'
+import { barcodesApi } from '../api/reports'
+import CameraScanButton from '../components/CameraScanButton.vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -90,6 +94,91 @@ const filterYear = ref(0)
 const filterMonth = ref('')
 const search = ref('')
 
+// ── Item navigator (left sidebar): category filter, search, items grouped by category ──
+const UNCATEGORIZED = 'Uncategorized'
+const navCategory = ref('')
+const navQuery = ref('')
+const navCollapsed = ref(false)
+const navList = ref(null)
+const scanning = ref(false)
+
+const categoryOf = (item) => String(item.type_name || '').trim() || UNCATEGORIZED
+const categories = computed(() => [...new Set(items.value.map(categoryOf))].sort((a, b) => a.localeCompare(b)))
+
+const navItems = computed(() => {
+  const words = navQuery.value.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  return items.value.filter((item) => {
+    if (navCategory.value && categoryOf(item) !== navCategory.value) return false
+    const haystack = [item.product, item.stock_no, item.product_no, item.product_description, item.unit]
+      .map((v) => String(v ?? '').toLowerCase())
+      .join(' ')
+    return words.every((w) => haystack.includes(w))
+  })
+})
+
+// [{ name, items }] in category order; items keep the server's alphabetical order
+const navGroups = computed(() => {
+  const groups = new Map()
+  for (const item of navItems.value) {
+    const name = categoryOf(item)
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name).push(item)
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, list]) => ({ name, items: list }))
+})
+
+function itemMeta(item) {
+  const stock = `${qtyText(item.stock_on_hand)} ${item.unit || ''}`.trim()
+  return [item.stock_no, stock].filter(Boolean).join(' · ')
+}
+
+function selectItem(item) {
+  selectedItemId.value = Number(item.product_id)
+}
+
+// Keep the chosen item in view inside the list (without scrolling the page)
+function revealSelected() {
+  nextTick(() => {
+    const list = navList.value
+    const el = list?.querySelector('.sc-nav-item.is-selected')
+    if (!list || !el) return
+    const top = el.offsetTop - list.offsetTop
+    if (top < list.scrollTop || top + el.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = top - list.clientHeight / 2 + el.offsetHeight / 2
+    }
+  })
+}
+
+// Enter: a single match opens; text that matches nothing is tried as a scanned batch barcode
+async function onNavEnter() {
+  const text = navQuery.value.trim()
+  if (!text) return
+  if (navItems.value.length === 1) return selectItem(navItems.value[0])
+  if (navItems.value.length) return
+  scanning.value = true
+  try {
+    const res = await barcodesApi.lookup(text)
+    const item = items.value.find((i) => Number(i.product_id) === Number(res.data?.product_id))
+    if (!item) {
+      toast(`Barcode ${text} belongs to ${res.data?.product || 'a product'} that is not in this list.`, 'error')
+      return
+    }
+    navQuery.value = ''
+    navCategory.value = ''
+    selectItem(item)
+  } catch (err) {
+    toast(err.response?.data?.message || `No product or batch matches “${text}”.`, 'error')
+  } finally {
+    scanning.value = false
+  }
+}
+
+// Camera scan: same as a USB scanner typing the code and pressing Enter
+function onCameraScan(text) {
+  navQuery.value = text
+  onNavEnter()
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const thisYear = new Date().getFullYear()
 const YEARS = Array.from({ length: thisYear - 2019 }, (_, i) => thisYear - i)
@@ -136,6 +225,7 @@ async function loadStockcard() {
       totalPages.value = res.data.totalPages || 1
       total.value = res.data.total || 0
       selectedItemId.value = res.data.itemId || 0
+      revealSelected()
     }
   } catch (err) {
     console.error('Failed to load stockcard', err)
@@ -220,38 +310,117 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Product Selection & Metadata Card -->
-    <div class="panel" style="margin-bottom: 1.5rem;">
-      <div class="panel-header" style="background: var(--bg-subtle);">
-        <div class="item-picker">
-          <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Stock Item</label>
-          <ProductSearch v-model="selectedItemId" :items="items" @scan-error="toast($event, 'error')" />
+    <div class="sc-layout" :class="{ 'is-nav-collapsed': navCollapsed }">
+      <!-- Left: item navigator -->
+      <aside class="sc-nav" aria-label="Item navigator">
+        <div class="sc-nav-head">
+          <span class="sc-nav-title">Item Navigator</span>
+          <button
+            type="button"
+            class="sc-nav-toggle"
+            :title="navCollapsed ? 'Show the item list' : 'Hide the item list'"
+            :aria-expanded="!navCollapsed"
+            @click="navCollapsed = !navCollapsed"
+          >
+            <component :is="navCollapsed ? ChevronRight : ChevronLeft" :size="16" />
+          </button>
         </div>
 
-        <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Month</label>
-            <select v-model="filterMonth" class="form-select">
-              <option value="">All months</option>
-              <option v-for="(m, i) in MONTHS" :key="m" :value="String(i + 1).padStart(2, '0')">{{ m }}</option>
+        <template v-if="!navCollapsed">
+          <div class="sc-nav-filters">
+            <label class="sc-label" for="sc-nav-category">Category Filter</label>
+            <select id="sc-nav-category" v-model="navCategory" class="form-select">
+              <option value="">All categories</option>
+              <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
             </select>
+            <div class="sc-nav-search">
+              <component :is="scanning ? Loader2 : Search" :size="15" class="sc-nav-search-icon" :class="{ 'is-spinning': scanning }" />
+              <input
+                v-model="navQuery"
+                type="search"
+                class="form-input"
+                placeholder="Search items, or scan a barcode…"
+                aria-label="Search items"
+                @keydown.enter.prevent="onNavEnter"
+              />
+              <span class="input-cam"><CameraScanButton @scanned="onCameraScan" /></span>
+            </div>
           </div>
-          <div>
-            <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Year</label>
-            <select v-model.number="filterYear" class="form-select">
-              <option :value="0">All years</option>
-              <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
-            </select>
+
+          <div ref="navList" class="sc-nav-list">
+            <div v-for="group in navGroups" :key="group.name" class="sc-nav-group">
+              <p class="sc-nav-group-title">{{ group.name }} <span>({{ group.items.length }} item{{ group.items.length === 1 ? '' : 's' }})</span></p>
+              <button
+                v-for="item in group.items"
+                :key="item.product_id"
+                type="button"
+                class="sc-nav-item"
+                :class="{ 'is-selected': Number(item.product_id) === selectedItemId }"
+                :aria-current="Number(item.product_id) === selectedItemId ? 'true' : undefined"
+                @click="selectItem(item)"
+              >
+                <span class="sc-nav-item-name">
+                  {{ item.product }}
+                  <span v-if="item.archived_at" class="sc-nav-archived">Archived</span>
+                </span>
+                <span class="sc-nav-item-meta">{{ itemMeta(item) }}</span>
+              </button>
+            </div>
+            <p v-if="!navItems.length" class="sc-nav-empty">
+              {{ items.length ? 'No items match.' : loading ? 'Loading items…' : 'No items yet.' }}
+            </p>
           </div>
-          <div>
-            <label class="form-label" style="display: block; margin-bottom: 0.35rem;">Order</label>
-            <select v-model="filterType" class="form-select">
-              <option value="latest">Latest First (DESC)</option>
-              <option value="oldest">Oldest First (ASC)</option>
-            </select>
+
+          <div class="sc-nav-foot">Showing {{ navItems.length }} of {{ items.length }} items</div>
+        </template>
+      </aside>
+
+      <!-- Right: the chosen item's stock card -->
+      <section class="panel sc-main">
+        <!-- Header: title, then period and order -->
+        <div class="sc-toolbar">
+          <h2 class="sc-main-title">Stock Item</h2>
+
+          <div class="sc-filters">
+            <div class="sc-field">
+              <span class="sc-label">Period</span>
+              <div class="sc-period">
+                <select v-model="filterMonth" class="form-select" aria-label="Month">
+                  <option value="">All months</option>
+                  <option v-for="(m, i) in MONTHS" :key="m" :value="String(i + 1).padStart(2, '0')">{{ m }}</option>
+                </select>
+                <select v-model.number="filterYear" class="form-select" aria-label="Year">
+                  <option :value="0">All years</option>
+                  <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="sc-field">
+              <span class="sc-label">Order</span>
+              <div class="sc-segment" role="radiogroup" aria-label="Order">
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="filterType === 'latest'"
+                  :class="{ 'is-on': filterType === 'latest' }"
+                  @click="filterType = 'latest'"
+                >
+                  <ArrowDownWideNarrow :size="15" /> Latest
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="filterType === 'oldest'"
+                  :class="{ 'is-on': filterType === 'oldest' }"
+                  @click="filterType = 'oldest'"
+                >
+                  <ArrowUpNarrowWide :size="15" /> Oldest
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
       <!-- Item Profile Details Grid -->
       <div v-if="itemInfo.item_name" style="padding: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; border-bottom: 1px solid var(--border-subtle);">
@@ -328,7 +497,7 @@ onMounted(() => {
             </strong>
             <p>
               Issue the batches that expire first.
-              <template v-if="expiredCount">Expired stock should be taken out with an Adjust Out, reason "Expired".</template>
+              <template v-if="expiredCount">Expired stock should be taken out with an Adjust Out (it takes expired batches first).</template>
             </p>
           </div>
         </div>
@@ -453,6 +622,7 @@ onMounted(() => {
         @update:current-page="handlePageChange"
         @update:page-size="handleLimitChange"
       />
+      </section>
     </div>
 
     <!-- Stock Movement Modal -->
@@ -540,19 +710,6 @@ onMounted(() => {
 
 .expiry-chip.is-ok {
   background: var(--bg-subtle);
-  color: var(--text-muted);
-}
-
-.nearest-expiry {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-  margin-top: 0.15rem;
-}
-
-.nearest-expiry-date {
-  font-size: 0.8rem;
   color: var(--text-muted);
 }
 
@@ -682,16 +839,472 @@ onMounted(() => {
   }
 }
 
-.item-picker {
-  flex: 1;
+.nearest-expiry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+}
+
+.nearest-expiry-date {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* ── Frame: the navigator sits on the soft theme green, the stock card is a light panel inside ──
+   The chosen item turns light and runs into the panel like a tab. */
+.sc-layout {
+  --sc-frame-pad: 12px;
+  --sc-tab-curve: 16px;
+  /* One shade darker than the theme's light green */
+  --sc-frame-bg: color-mix(in srgb, var(--color-primary) 9%, var(--color-primary-light));
+  --sc-frame-ink: var(--color-primary);
+  --sc-frame-soft: color-mix(in srgb, var(--color-primary) 72%, var(--text-muted));
+  --sc-frame-line: color-mix(in srgb, var(--color-primary) 26%, transparent);
+  --sc-frame-hover: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  align-items: start;
+  margin-bottom: 1.5rem;
+  padding: var(--sc-frame-pad) var(--sc-frame-pad) var(--sc-frame-pad) 0;
+  border-radius: var(--radius-xl);
+  background: var(--sc-frame-bg);
+  border: 1px solid var(--sc-frame-line);
+  box-shadow: var(--shadow-sm);
+}
+
+.sc-layout.is-nav-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.sc-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Item navigator (on the soft green frame) ── */
+.sc-nav {
+  position: sticky;
+  top: 92px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 110px);
   min-width: 0;
-  max-width: 560px;
+  color: var(--sc-frame-ink);
+}
+
+.sc-nav .sc-label {
+  color: var(--sc-frame-soft);
+}
+
+.sc-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem var(--sc-frame-pad) 0.85rem 1.1rem;
+}
+
+.sc-nav-title {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sc-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--sc-frame-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.sc-nav-toggle:hover {
+  background: var(--sc-frame-hover);
+}
+
+/* Collapsed to a slim rail on wide screens */
+@media (min-width: 1025px) {
+  .is-nav-collapsed .sc-nav-head {
+    justify-content: center;
+    padding-left: var(--sc-frame-pad);
+  }
+  .is-nav-collapsed .sc-nav-title {
+    display: none;
+  }
+}
+
+.sc-nav-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0 var(--sc-frame-pad) 0.9rem 1.1rem;
+}
+
+.sc-nav .form-select,
+.sc-nav .form-input {
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 0.875rem;
+  border-color: var(--sc-frame-line);
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+}
+
+.sc-nav .form-select:focus,
+.sc-nav .form-input:focus {
+  border-color: var(--border-focus);
+  background-color: var(--bg-surface);
+  box-shadow: 0 0 0 3px var(--color-primary-glow);
+}
+
+.sc-nav .form-input::placeholder {
+  color: var(--text-subtle);
+}
+
+/* The open list of a dropdown is drawn by the browser on a light background */
+.sc-nav .form-select option {
+  color: #12200f;
+  background: #fff;
+}
+
+.sc-nav-search {
+  position: relative;
+  margin-top: 0.35rem;
+}
+
+.sc-nav-search .form-input {
+  padding-left: 2.2rem;
+  padding-right: 2.6rem;
+}
+
+.sc-nav-search-icon {
+  position: absolute;
+  left: 0.8rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-subtle);
+  pointer-events: none;
+}
+
+.sc-nav-search-icon.is-spinning {
+  animation: sc-spin 0.8s linear infinite;
+}
+
+@keyframes sc-spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+/* No right padding: the chosen item has to reach the stock card */
+.sc-nav-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.25rem 0 0.75rem 0.75rem;
+  border-top: 1px solid var(--sc-frame-line);
+}
+
+.sc-nav-group + .sc-nav-group {
+  margin-top: 0.4rem;
+}
+
+.sc-nav-group-title {
+  margin: 0.75rem var(--sc-frame-pad) 0.35rem 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sc-frame-soft);
+}
+
+.sc-nav-group-title span {
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+
+.sc-nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: calc(100% - var(--sc-frame-pad));
+  margin-bottom: 2px;
+  padding: 0.6rem 0.8rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.sc-nav-item:hover:not(.is-selected) {
+  background: var(--sc-frame-hover);
+}
+
+.sc-nav-item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+/* The chosen item: same colour as the stock card and joined to it, with curved corners above and below */
+.sc-nav-item.is-selected {
+  width: 100%;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+
+.sc-nav-item.is-selected::before,
+.sc-nav-item.is-selected::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  width: var(--sc-tab-curve);
+  height: var(--sc-tab-curve);
+  pointer-events: none;
+}
+
+.sc-nav-item.is-selected::before {
+  bottom: 100%;
+  background: radial-gradient(circle at 0 0, transparent calc(var(--sc-tab-curve) - 0.5px), var(--bg-surface) var(--sc-tab-curve));
+}
+
+.sc-nav-item.is-selected::after {
+  top: 100%;
+  background: radial-gradient(circle at 0 100%, transparent calc(var(--sc-tab-curve) - 0.5px), var(--bg-surface) var(--sc-tab-curve));
+}
+
+.sc-nav-item-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.sc-nav-item-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.sc-nav-item.is-selected .sc-nav-item-name {
+  color: var(--color-primary);
+}
+
+.sc-nav-item.is-selected .sc-nav-item-meta {
+  color: var(--text-muted);
+}
+
+.sc-nav-archived {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sc-nav-empty {
+  margin: 1.5rem var(--sc-frame-pad) 1.5rem 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.sc-nav-foot {
+  padding: 0.7rem var(--sc-frame-pad) 0.2rem 1.1rem;
+  border-top: 1px solid var(--sc-frame-line);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ── Stock card: the light panel inside the frame ── */
+.sc-main {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.sc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.25rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-hover);
+}
+
+.sc-main-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.sc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.sc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sc-toolbar .form-select {
+  height: 44px;
+  padding-top: 0;
+  padding-bottom: 0;
+  background-color: var(--bg-surface);
+}
+
+/* Month + year read as one control */
+.sc-period {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sc-period .form-select:first-child {
+  width: 140px;
+}
+
+.sc-period .form-select:last-child {
+  width: 120px;
+}
+
+/* Latest / Oldest toggle */
+.sc-segment {
+  display: inline-flex;
+  height: 44px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.sc-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0.9rem;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sc-segment button:hover:not(.is-on) {
+  color: var(--text-main);
+  background: var(--bg-subtle);
+}
+
+.sc-segment button.is-on {
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.sc-segment button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* Narrower screens: the navigator sits above the stock card with a shorter list */
+/* Narrower screens: the navigator sits above the stock card, so the chosen item is a plain pill */
+@media (max-width: 1024px) {
+  .sc-layout,
+  .sc-layout.is-nav-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--sc-frame-pad);
+  }
+  .sc-nav {
+    position: static;
+    max-height: none;
+    margin-bottom: var(--sc-frame-pad);
+  }
+  .sc-nav-head,
+  .sc-nav-filters {
+    padding-left: 0.35rem;
+    padding-right: 0;
+  }
+  .sc-nav-list {
+    max-height: 300px;
+    padding: 0.25rem 0 0.5rem;
+  }
+  .sc-nav-item,
+  .sc-nav-item.is-selected {
+    width: 100%;
+    border-radius: var(--radius-md);
+  }
+  .sc-nav-item.is-selected::before,
+  .sc-nav-item.is-selected::after {
+    display: none;
+  }
+  .sc-nav-foot {
+    padding-right: 0;
+    padding-left: 0;
+  }
 }
 
 @media (max-width: 760px) {
-  .item-picker {
-    max-width: none;
-    flex-basis: 100%;
+  .sc-toolbar {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .sc-filters,
+  .sc-field {
+    flex: 1 1 100%;
+  }
+  .sc-period .form-select:first-child,
+  .sc-period .form-select:last-child {
+    width: auto;
+    flex: 1;
+  }
+  .sc-segment {
+    width: 100%;
+  }
+  .sc-segment button {
+    flex: 1;
+    justify-content: center;
   }
 }
 </style>

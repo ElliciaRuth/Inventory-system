@@ -13,6 +13,8 @@ export const useAuthStore = defineStore('auth', {
     loaded: false,
     loading: false,
     error: null,
+    // Why the last sign-in was refused with the right password: 'pending' | 'deactivated' | null
+    accountStatus: null,
   }),
 
   getters: {
@@ -64,6 +66,7 @@ export const useAuthStore = defineStore('auth', {
     async login(username, password) {
       this.loading = true
       this.error = null
+      this.accountStatus = null
       try {
         const res = await authApi.login(username, password)
         if (res.status && res.data?.user) {
@@ -75,6 +78,7 @@ export const useAuthStore = defineStore('auth', {
         return false
       } catch (err) {
         this.error = err.response?.data?.message || err.message || 'Invalid username or password'
+        this.accountStatus = err.response?.data?.errors?.account_status || null
         return false
       } finally {
         this.loading = false

@@ -1,7 +1,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { ArrowDownToLine, ArrowUpFromLine, Info, Trash2, AlertTriangle, AlertCircle, Check, X } from 'lucide-vue-next'
+import { ArrowDownToLine, ArrowUpFromLine, Info, Trash2, AlertCircle, Check, X } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
+import { confirmDialog } from '../composables/useConfirm'
+import { typeLabel } from '../utils/transactionTypes'
 
 const props = defineProps({
   isOpen: {
@@ -35,7 +37,6 @@ const office = ref('')
 
 const isSubmitting = ref(false)
 const isDeleting = ref(false)
-const showDeleteConfirm = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
@@ -45,7 +46,6 @@ watch(
   (txn) => {
     errorMessage.value = ''
     successMessage.value = ''
-    showDeleteConfirm.value = false
 
     if (txn) {
       const isReceipt = Number(txn.receipt_qty) > 0 || txn.transaction_type === 'receipt'
@@ -86,6 +86,21 @@ async function handleSave() {
     return
   }
 
+  const ok = await confirmDialog({
+    title: 'Save changes to this entry?',
+    message: 'The stock card and the stock on hand will be updated.',
+    details: [
+      ['Entry', `#${props.transaction.transaction_id}`],
+      ['Product', props.productName || props.transaction.item_name],
+      ['Quantity', `${originalQty.value} → ${Number(quantity.value)}`],
+      ['Unit cost', `₱${Number(unitCost.value).toFixed(2)}`],
+      ['Reference', reference.value.trim()],
+      ['Office / source', office.value.trim()],
+    ],
+    confirmText: 'Save changes',
+  })
+  if (!ok) return
+
   isSubmitting.value = true
 
   const payload = {
@@ -119,6 +134,28 @@ async function handleSave() {
   } finally {
     isSubmitting.value = false
   }
+}
+
+// What is about to be deleted, then the delete itself
+async function confirmDelete() {
+  const t = props.transaction
+  if (!t) return
+  const ok = await confirmDialog({
+    title: 'Delete this entry?',
+    message: 'The entry is removed and the batch quantity is restored. This cannot be undone.',
+    details: [
+      ['Entry', `#${t.transaction_id}`],
+      ['Product', props.productName || t.item_name],
+      ['Date', t.date ? String(t.date).split(' ')[0] : ''],
+      ['Type', typeLabel(t.transaction_type)],
+      ['Quantity', Number(t.receipt_qty) > 0 ? `+${t.receipt_qty}` : Number(t.issue_qty) > 0 ? `-${t.issue_qty}` : ''],
+      ['Reference', t.reference],
+      ['Office / source', t.office],
+    ],
+    confirmText: 'Delete entry',
+    variant: 'danger',
+  })
+  if (ok) handleDelete()
 }
 
 async function handleDelete() {
@@ -284,7 +321,7 @@ async function handleDelete() {
 
           <!-- Danger Zone: Deletion Prompt -->
           <div class="edit-danger-zone">
-            <div v-if="!showDeleteConfirm" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
               <div>
                 <strong style="color: var(--color-danger); font-size: 13.5px;">Delete this transaction?</strong>
                 <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
@@ -295,37 +332,12 @@ async function handleDelete() {
                 type="button"
                 class="btn btn-sm btn-secondary"
                 style="color: var(--color-danger); border-color: rgba(239, 68, 68, 0.3); display: inline-flex; align-items: center; gap: 5px;"
-                @click="showDeleteConfirm = true"
+                :disabled="isDeleting"
+                @click="confirmDelete"
               >
                 <Trash2 :size="14" />
-                <span>Delete Entry</span>
+                <span>{{ isDeleting ? 'Deleting…' : 'Delete Entry' }}</span>
               </button>
-            </div>
-
-            <div v-else class="delete-confirmation-box">
-              <p style="color: var(--color-danger); font-weight: 700; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                <AlertTriangle :size="16" style="flex-shrink: 0;" />
-                <span>Are you sure you want to permanently delete Transaction #{{ transaction.transaction_id }}?</span>
-              </p>
-              <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                <button
-                  type="button"
-                  class="btn btn-sm btn-secondary"
-                  @click="showDeleteConfirm = false"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-primary"
-                  style="background: #dc2626;"
-                  :disabled="isDeleting"
-                  @click="handleDelete"
-                >
-                  <span v-if="isDeleting">Deleting...</span>
-                  <span v-else>Yes, Delete Entry</span>
-                </button>
-              </div>
             </div>
           </div>
         </form>
@@ -489,12 +501,5 @@ async function handleDelete() {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px dashed var(--border-subtle);
-}
-
-.delete-confirmation-box {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  border-radius: 12px;
-  padding: 12px 16px;
 }
 </style>

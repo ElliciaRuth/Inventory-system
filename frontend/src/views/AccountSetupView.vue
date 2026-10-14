@@ -145,6 +145,13 @@ function resendRecoveryCode() {
 }
 
 async function handleLogout() {
+  const ok = await confirmDialog({
+    title: 'Sign out?',
+    message: 'You will need to sign in again and finish this step.',
+    details: [['Signed in as', authStore.user?.username]],
+    confirmText: 'Sign out',
+  })
+  if (!ok) return
   await authStore.logout()
   router.push('/login')
 }

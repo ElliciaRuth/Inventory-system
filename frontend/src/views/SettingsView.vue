@@ -129,7 +129,29 @@ function openModal(type, row = null) {
   Object.assign(modal, { open: true, type, id: row ? Number(row[def.pk]) : 0, values, saving: false, error: '' })
 }
 
+// A record's visible fields as label/value rows (email partly hidden)
+function recordDetails(type, values) {
+  return columnsFor(type).map((c) => [labelFor(type, c), c === 'email' ? maskEmail(values[c]) : values[c]])
+}
+
+function userDetails(user) {
+  return [
+    ['Name', user.name],
+    ['Username', user.username],
+    ['Role', user.role],
+    ['Office', user.user_office_name],
+  ]
+}
+
 async function saveModal() {
+  const label = modal.type === 'users' ? 'user' : (SECTION_TITLES[modal.type] || 'record').toLowerCase()
+  const ok = await confirmDialog({
+    title: modal.id ? `Save changes to this ${label}?` : `Add this ${label}?`,
+    message: modal.id ? 'The record will be updated with the values you entered.' : 'A new record will be added with the values you entered.',
+    details: recordDetails(modal.type, modal.values),
+    confirmText: modal.id ? 'Save changes' : 'Add',
+  })
+  if (!ok) return
   modal.saving = true
   modal.error = ''
   try {
@@ -159,8 +181,9 @@ async function run(key, action) {
 
 async function deleteRecord(type, row) {
   const ok = await confirmDialog({
-    title: `Delete ${(SECTION_TITLES[type] || 'record').toLowerCase()}?`,
+    title: `Delete ${type === 'users' ? 'user' : (SECTION_TITLES[type] || 'record').toLowerCase()}?`,
     message: 'This record will be permanently deleted. This cannot be undone.',
+    details: recordDetails(type, row),
     confirmText: 'Delete',
     variant: 'danger',
   })
@@ -172,16 +195,30 @@ async function activate(user) {
   const ok = await confirmDialog({
     title: 'Activate user?',
     message: `"${user.username}" will be able to log in to the system.`,
+    details: userDetails(user),
     confirmText: 'Activate',
   })
   if (!ok) return
   run(`activate-${user.user_id}`, () => settingsApi.activateUser(user.user_id))
 }
 
+async function decline(user) {
+  const ok = await confirmDialog({
+    title: 'Decline this sign-up?',
+    message: 'The account will not be accepted and the registration is removed. The person can sign up again later.',
+    details: userDetails(user),
+    confirmText: 'Decline',
+    variant: 'danger',
+  })
+  if (!ok) return
+  run(`decline-${user.user_id}`, () => settingsApi.declineUser(user.user_id))
+}
+
 async function deactivate(user) {
   const ok = await confirmDialog({
     title: 'Deactivate user?',
     message: `"${user.username}" will no longer be able to log in. You can reactivate the account later.`,
+    details: userDetails(user),
     confirmText: 'Deactivate',
     variant: 'danger',
   })
@@ -189,7 +226,17 @@ async function deactivate(user) {
   run(`deactivate-${user.user_id}`, () => settingsApi.deactivateUser(user.user_id))
 }
 
-function saveThresholds() {
+async function saveThresholds() {
+  const ok = await confirmDialog({
+    title: 'Save the expiry alert settings?',
+    message: `Items will be flagged ${thresholds.expiry_warning_days} days (warning) and ${thresholds.expiry_danger_days} days (danger) before they expire.`,
+    details: [
+      ['Warning', `${thresholds.expiry_warning_days} days before expiry`],
+      ['Danger', `${thresholds.expiry_danger_days} days before expiry`],
+    ],
+    confirmText: 'Save',
+  })
+  if (!ok) return
   run('thresholds', () =>
     settingsApi.saveSystemSettings(Number(thresholds.expiry_warning_days), Number(thresholds.expiry_danger_days))
   )
@@ -203,7 +250,7 @@ onMounted(load)
     <div class="page-hero">
       <div>
         <p class="hero-eyebrow">Settings</p>
-        <h1 class="hero-title">Others Management</h1>
+        <h1 class="hero-title">Office Settings</h1>
         <p class="hero-subtitle">Maintain backups, users, references, units, product types and offices.</p>
       </div>
     </div>
@@ -248,6 +295,7 @@ onMounted(load)
                 <td>{{ u.user_office_name || 'N/A' }}</td>
                 <td style="text-align: right;">
                   <button type="button" class="btn btn-sm btn-primary" :disabled="!!busy" @click="activate(u)">Activate</button>
+                  <button type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem; color: var(--color-danger);" :disabled="!!busy" @click="decline(u)">Decline</button>
                 </td>
               </tr>
             </tbody>
@@ -371,17 +419,17 @@ onMounted(load)
               <label class="form-label">New Password <small style="font-weight: 400;">(leave blank to keep)</small></label>
               <input v-model="modal.values[field]" type="password" class="form-input" autocomplete="new-password" />
             </template>
-            <!-- Shown partly hidden; only the owner changes it (My Profile, confirmed with a code) -->
-            <template v-else-if="field === 'email' && authStore.levelId < 4">
+            <!-- Shown partly hidden; an account's email can't be changed -->
+            <template v-else-if="field === 'email'">
               <label class="form-label">{{ labelFor(modal.type, field) }}</label>
               <input :value="modal.values[field] || 'No email address'" type="text" class="form-input" readonly />
               <small style="color: var(--text-muted); font-size: 0.75rem;">
-                Users change their own email from My Profile; it is confirmed with a code sent to the new address.
+                An account's email address can't be changed.
               </small>
             </template>
             <template v-else>
               <label class="form-label">{{ labelFor(modal.type, field) }}</label>
-              <input v-model="modal.values[field]" :type="field === 'email' ? 'email' : 'text'" class="form-input" :required="field !== 'email'" />
+              <input v-model="modal.values[field]" type="text" class="form-input" required />
             </template>
           </div>
           <div class="modal-footer" style="padding: 0; border: 0;">

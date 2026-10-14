@@ -3,9 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { useThemeStore } from '../stores/themeStore'
+import { alertDialog } from '../composables/useConfirm'
 import AuthLogoHeader from '../components/AuthLogoHeader.vue'
 import PasswordMatchHint, { matchClass } from '../components/PasswordMatchHint.vue'
-import { AlertTriangle, CheckCircle2, Palette, Moon, Sun } from 'lucide-vue-next'
+import { AlertTriangle, Palette, Moon, Sun } from 'lucide-vue-next'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -141,10 +142,7 @@ async function handleRegister() {
 
   loading.value = true
   try {
-    const res = await authApi.register(form.value)
-    successMessage.value =
-      res.message ||
-      'Account created successfully. Please wait for an administrator to activate your account.'
+    await authApi.register(form.value)
 
     // Reset form
     form.value = {
@@ -160,10 +158,16 @@ async function handleRegister() {
       user_office_id: '',
     }
 
-    // Redirect to login after 3.5 seconds
-    setTimeout(() => {
-      router.push('/login')
-    }, 3500)
+    loading.value = false
+    await alertDialog({
+      title: 'Account created',
+      message:
+        'Your account is waiting for approval. A manager of your office or an administrator has to accept it before you can sign in. ' +
+        'If you already had an account with this email address, sign in or reset your password instead.',
+      confirmText: 'Go to Sign In',
+      variant: 'success',
+    })
+    router.push('/login')
   } catch (err) {
     const errors = err.response?.data?.errors || {}
     fieldErrors.value.username = errors.username || ''
@@ -172,6 +176,12 @@ async function handleRegister() {
       err.response?.data?.message ||
       err.response?.data?.error ||
       'Failed to register. Please check your information and try again.'
+    loading.value = false
+    await alertDialog({
+      title: 'Account not created',
+      message: `${errorMessage.value} Once it is created, a manager of your office or an administrator has to accept it before you can sign in.`,
+      variant: 'danger',
+    })
   } finally {
     loading.value = false
   }
@@ -214,20 +224,12 @@ onMounted(() => {
 
           <h2 class="login-card-title">Create Account</h2>
           <p class="login-card-subtitle">
-            Create a new user. Your account will be pending until an admin activates it.
+            Create a new user. A manager of your office or an administrator has to accept your account before you can sign in.
           </p>
 
           <!-- Error Alert Banner -->
           <div v-if="errorMessage" class="login-error-banner">
             <span><AlertTriangle :size="15" /> {{ errorMessage }}</span>
-          </div>
-
-          <!-- Success Alert Banner -->
-          <div v-if="successMessage" class="login-success-banner">
-            <div><CheckCircle2 :size="15" /> {{ successMessage }}</div>
-            <div style="font-size: 12.5px; opacity: 0.9; font-weight: 500;">
-              Redirecting to login page in a few moments...
-            </div>
           </div>
 
           <form class="login-form-body" @submit.prevent="handleRegister">

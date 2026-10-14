@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AdjustmentReasonModel;
 use App\Models\ProductCopyModel;
 use CodeIgniter\Database\BaseConnection;
 use DomainException;
@@ -68,7 +69,7 @@ class InventoryService
      *   issue      → takes from the oldest received unexpired batches of the sub-product (FIFO)
      *   borrow     → a borrow record (borrower, unit, qty) + stock-out entries linked to it
      *   return     → stock back in as a new batch, linked to the borrow it settles
-     *   adjust_out → expired batches first ("Expired" reason: expired only), per-batch cost
+     *   adjust_out → expired batches first, then oldest received, per-batch cost
      *   adjust_in  → adds to the newest batch of the sub-product at its cost
      *
      * @return array{type: string, product_id: int, quantity: float, batches: list<array>, borrow_id?: int, reason?: string}
@@ -86,7 +87,7 @@ class InventoryService
         $referenceId  = $this->resolveReferenceId($payload);
         $reasonId     = (int) ($payload['adjustment_reason_id'] ?? 0);
         $entityId     = $this->currentEntityId($productId);
-        // For now every movement is stamped with the moment it is saved (no back-dating)
+        // Movements are stamped with the moment they are saved; only a Stock In may be back-dated (below)
         $dateTime     = date('Y-m-d H:i:s');
         $expDate      = ($payload['expiration_date'] ?? '') ?: null;
         $mfgDate      = ($payload['manufacturing_date'] ?? '') ?: null;
@@ -104,6 +105,19 @@ class InventoryService
             throw new DomainException('Unsupported transaction type.');
         }
         $resolvedTypeId = (int) $typeRow['transaction_type_id'];
+
+        // Stock In: the day the delivery was received, today or earlier (keeps the time of saving)
+        $receivedOn = trim((string) ($payload['transaction_date'] ?? ''));
+        if ($typeName === 'receipt' && $receivedOn !== '') {
+            if (! $this->isValidDate($receivedOn)) {
+                throw new DomainException('Transaction date is not a valid date.');
+            }
+            if ($receivedOn > $dateReceived) {
+                throw new DomainException('Transaction date cannot be in the future.');
+            }
+            $dateReceived = $receivedOn;
+            $dateTime     = $receivedOn . ' ' . date('H:i:s');
+        }
 
         $officeRow = $this->db->table('user_office_table')
             ->where('user_office_id', $userOfficeId)
@@ -130,8 +144,12 @@ class InventoryService
         ];
 
         if ($typeName === 'receipt') {
-            if ($unitCost <= 0) {
-                throw new DomainException('Unit cost is required for stock-in.');
+            // A free item (donation, sample…) may be received at 0
+            if (! is_numeric($payload['unit_cost'] ?? null)) {
+                throw new DomainException('Unit cost is required for stock-in (enter 0 for a free item).');
+            }
+            if ($unitCost < 0) {
+                throw new DomainException('Unit cost cannot be negative.');
             }
             foreach (['Expiration' => $expDate, 'Manufacturing' => $mfgDate] as $label => $date) {
                 if ($date !== null && ! $this->isValidDate($date)) {
@@ -139,7 +157,7 @@ class InventoryService
                 }
             }
             if ($mfgDate !== null && $mfgDate > $dateReceived) {
-                throw new DomainException('Manufacturing date cannot be in the future.');
+                throw new DomainException('Manufacturing date cannot be after the transaction date.');
             }
             if ($mfgDate !== null && $expDate !== null && $mfgDate > $expDate) {
                 throw new DomainException('Manufacturing date must be on or before the expiration date.');
@@ -233,16 +251,13 @@ class InventoryService
                 $result['settled']   = $settled;
             }
         } elseif ($typeName === 'adjust_out') {
-            $reason = $this->reasonName($reasonId);
-            $mode   = strcasecmp($reason, 'Expired') === 0 ? self::MODE_EXPIRED : self::MODE_ADJUST;
-
-            $result['reason']  = $reason;
-            $result['batches'] = $this->depleteBatches($productId, $qty, $copyId, $mode, $resolvedTypeId, 0.0, $reasonId, $entry, true);
+            $result['reason']  = $this->adjustmentReason($reasonId, AdjustmentReasonModel::ADJUST_OUT);
+            $result['batches'] = $this->depleteBatches($productId, $qty, $copyId, self::MODE_ADJUST, $resolvedTypeId, 0.0, $reasonId, $entry, true);
         } elseif ($typeName === 'adjust_in') {
             if ($copyId <= 0) {
                 throw new DomainException('Please select a sub-product (price variant) to add the stock to.');
             }
-            $result['reason']    = $this->reasonName($reasonId);
+            $result['reason']    = $this->adjustmentReason($reasonId, AdjustmentReasonModel::ADJUST_IN);
             $result['batches'][] = $this->addToLatestBatch($productId, $copyId, $qty, $resolvedTypeId, $reasonId, $entry);
         } else {
             throw new DomainException("Unsupported transaction type: '{$typeName}'.");
@@ -484,7 +499,7 @@ class InventoryService
             $expired = $plan['expired_qty'];
             throw new DomainException(match ($mode) {
                 self::MODE_ISSUE => "Only {$usable} can be taken out" . ($copyId > 0 ? ' of this sub-product' : '')
-                    . ($expired > 0 ? '; another ' . $this->qtyText($expired) . ' is expired and has to be removed with Adjust Out, reason "Expired".' : '.'),
+                    . ($expired > 0 ? '; another ' . $this->qtyText($expired) . ' is expired and has to be removed with Adjust Out.' : '.'),
                 self::MODE_EXPIRED => "Only {$usable} of this stock is expired.",
                 default            => "Only {$usable} is in stock.",
             });
@@ -561,7 +576,7 @@ class InventoryService
      */
     private function createBatch(string $kind, string $officeName, int $productId, int $copyId, float $qty, int $userOfficeId, array $entry, array $extra = []): array
     {
-        $prefix  = $kind . '-' . strtoupper($officeName) . '-' . date('Ymd') . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT);
+        $prefix  = $kind . '-' . strtoupper($officeName) . '-' . date('Ymd', strtotime($entry['date'])) . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT);
         $batchNo = $this->nextBatchNo($prefix);
 
         $this->db->table('batch_table')->insert($extra + [
@@ -572,7 +587,7 @@ class InventoryService
             'reference_id'   => $entry['reference_id'] ?: null,
             'office_id'      => $entry['office_id'] ?: null,
             'current_qty'    => $qty,
-            'date_received'  => date('Y-m-d'),
+            'date_received'  => substr($entry['date'], 0, 10),
             'created_at'     => $entry['date'],
             'updated_at'     => $entry['date'],
         ]);
@@ -643,13 +658,13 @@ class InventoryService
         $unit   = trim((string) ($payload['borrower_unit'] ?? ''));
         if ($unitId > 0) {
             if ($unitId === $userOfficeId) {
-                throw new DomainException('The borrowing unit must be a different unit from yours.');
+                throw new DomainException('The borrowing office must be a different office from yours.');
             }
             $row  = $this->db->table('user_office_table')->select('user_office_name')->where('user_office_id', $unitId)->get(1)->getRowArray();
             $unit = $row['user_office_name'] ?? $unit;
         }
         if ($unit === '') {
-            throw new DomainException('Choose the unit that is borrowing.');
+            throw new DomainException('Choose the office that is borrowing.');
         }
 
         $due = trim((string) ($payload['due_date'] ?? ''));
@@ -681,6 +696,17 @@ class InventoryService
         $row = $this->db->table('adjustment_reason')->where('adjustment_reason_id', $reasonId)->get(1)->getRowArray();
 
         return (string) ($row['adjustment_reason'] ?? '');
+    }
+
+    /** The chosen reason's name; it must be one of those offered for this kind of adjustment. */
+    private function adjustmentReason(int $reasonId, array $allowed): string
+    {
+        $reason = $this->reasonName($reasonId);
+        if (! in_array($reason, $allowed, true)) {
+            throw new DomainException('Choose the reason for this adjustment: ' . implode(', ', $allowed) . '.');
+        }
+
+        return $reason;
     }
 
     private function reasonIdByName(string $name): int
