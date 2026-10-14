@@ -111,6 +111,7 @@ class CreateAdmin extends BaseCommand
             'lvl_of_access_id'     => $levelId,
             'user_activity_id'     => 1,    // Active
             'must_change_password' => 0,    // chosen by the administrator, not a public default
+            'must_setup_smtp'      => 1,    // asked for the system SMTP account on first login
         ]);
         AuditLog::record('user.created', 'user', (int) $id, 'Administrator account created during server setup', [
             'username' => $username,
