@@ -135,7 +135,7 @@ onMounted(load)
         <h1 class="hero-title">My Stock-Out List</h1>
         <p class="hero-subtitle">Review and edit items before submitting them for approval.</p>
       </div>
-      <router-link to="/stockout" class="btn btn-secondary">+ Add More Items</router-link>
+      <router-link to="/stockout" class="btn btn-primary">+ Add More Items</router-link>
     </div>
 
     <section class="panel">

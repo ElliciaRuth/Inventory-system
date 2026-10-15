@@ -1,12 +1,13 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { TriangleAlert, PackageX, CalendarClock, Package, Handshake } from 'lucide-vue-next'
+import { TriangleAlert, PackageX, CalendarClock, Package, Handshake, Undo2 } from 'lucide-vue-next'
 import { dashboardApi } from '../api/dashboard'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
 import AdminDashboardView from './AdminDashboardView.vue'
 import AppPagination from '../components/AppPagination.vue'
+import StockModal from '../components/StockModal.vue'
 import { typeLabel, typeBadge, isStockIn, signedQty } from '../utils/transactionTypes'
 
 const emit = defineEmits(['update-alerts'])
@@ -98,8 +99,24 @@ function productStockcard(item) {
   return productId > 0 ? { path: '/stockcard', query: { item_id: productId } } : '/stockcard'
 }
 
+// The details panel takes the colour of the card that opened it
+const TAB_TONES = { 'low-stock': 'tone-warning', 'out-of-stock': 'tone-danger', expiring: 'tone-expiry', borrowed: 'tone-info' }
+const activeTone = computed(() => TAB_TONES[activeTab.value] || '')
+
 function toggleTab(tab) {
   activeTab.value = activeTab.value === tab ? null : tab
+}
+
+// ── Record Return straight from the borrowed list (same form as the Borrowed Items page) ──
+// Stock movements are for custodians and managers, like the Borrowed Items page itself
+const canRecordReturn = computed(() => authStore.levelId >= 2)
+const returning = ref(null)
+
+function recordReturn(b) {
+  // A row is one product; the form picks its borrow (or asks which one when several are open)
+  returning.value = { product_id: Number(b.product_id), borrow_id: 0 }
+  // On phones the details sheet sits above dialogs, so close it first
+  if (isPhone.value) activeTab.value = null
 }
 
 // ── Phones: the details open as a sheet over the page instead of below all the cards ──
@@ -317,7 +334,7 @@ onMounted(() => {
       <section
         v-if="activeTab"
         class="panel dash-details"
-        :class="{ 'is-sheet': sheetOpen }"
+        :class="[activeTone, { 'is-sheet': sheetOpen, 'has-tone': activeTone }]"
         :role="sheetOpen ? 'dialog' : undefined"
         :aria-modal="sheetOpen ? 'true' : undefined"
       >
@@ -495,6 +512,7 @@ onMounted(() => {
                   <th>Returned</th>
                   <th>Still Out</th>
                   <th>Last Movement</th>
+                  <th v-if="canRecordReturn"></th>
                 </tr>
               </thead>
               <tbody>
@@ -505,9 +523,14 @@ onMounted(() => {
                   <td data-label="Returned">{{ b.total_returned }}</td>
                   <td data-label="Still Out"><span class="badge badge-warning">{{ b.net_borrowed }}</span></td>
                   <td data-label="Last Movement">{{ b.last_borrowed }}</td>
+                  <td v-if="canRecordReturn" class="cell-actions" style="text-align: right;">
+                    <button type="button" class="btn btn-sm btn-primary dash-return" @click="recordReturn(b)">
+                      <Undo2 :size="14" /> Record Return
+                    </button>
+                  </td>
                 </tr>
                 <tr v-if="!pBorrowed.items.length">
-                  <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active borrowed items.</td>
+                  <td :colspan="canRecordReturn ? 7 : 6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active borrowed items.</td>
                 </tr>
               </tbody>
             </table>
@@ -527,6 +550,14 @@ onMounted(() => {
         </div>
       </section>
       </Teleport>
+
+      <StockModal
+        v-if="returning"
+        :is-open="true"
+        :preset-return="returning"
+        @close="returning = null"
+        @saved="fetchDashboard"
+      />
 
       <!-- Recent Transactions Feed with Customizable Pagination (Avoids Long Scrolling) -->
       <section class="panel">
@@ -612,12 +643,86 @@ onMounted(() => {
    green (products), amber (low stock), red (out of stock), orange (expiring), blue (borrowed).
    With something to show, the icon turns solid, the number takes the colour and a soft glow
    of the colour sits in the top corner; at 0 they stay plain. */
-.summary-card.tone-primary { --tone: var(--color-primary); --tone-bg: var(--color-primary-light); }
-.summary-card.tone-info { --tone: var(--color-info); --tone-bg: var(--color-info-bg); }
-.summary-card.tone-warning { --tone: var(--color-warning); --tone-bg: var(--color-warning-bg); }
-.summary-card.tone-danger { --tone: var(--color-danger); --tone-bg: var(--color-danger-bg); }
-.summary-card.tone-expiry { --tone: #c2410c; --tone-bg: #fff7ed; }
-html[data-theme='dark'] .summary-card.tone-expiry { --tone: #fb923c; --tone-bg: rgba(251, 146, 60, 0.12); }
+.tone-primary { --tone: var(--color-primary); --tone-bg: var(--color-primary-light); }
+.tone-info { --tone: var(--color-info); --tone-bg: var(--color-info-bg); }
+.tone-warning { --tone: var(--color-warning); --tone-bg: var(--color-warning-bg); }
+.tone-danger { --tone: var(--color-danger); --tone-bg: var(--color-danger-bg); }
+.tone-expiry { --tone: #c2410c; --tone-bg: #fff7ed; }
+html[data-theme='dark'] .tone-expiry { --tone: #fb923c; --tone-bg: rgba(251, 146, 60, 0.12); }
+
+/* Every card carries a strip of its colour along the top: faint at 0, full colour with something to show */
+.summary-card.has-tone {
+  background-image: linear-gradient(color-mix(in srgb, var(--tone) 30%, transparent), color-mix(in srgb, var(--tone) 30%, transparent));
+  background-size: 100% 4px;
+  background-repeat: no-repeat;
+}
+
+.summary-card.has-tone.has-alert:not(.is-active) {
+  border-color: color-mix(in srgb, var(--tone) 38%, transparent);
+  background-image:
+    linear-gradient(var(--tone), var(--tone)),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--tone) 16%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 6%, transparent) 0%, transparent 70%);
+  background-size: 100% 4px, 100% 100%, 100% 100%;
+}
+
+.summary-card.has-tone.has-alert:hover:not(:disabled):not(.is-active) {
+  border-color: var(--tone);
+  box-shadow: 0 18px 34px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+
+/* The open card: a solid border, ring and wash in its own colour (red for Out of Stock, …),
+   and a pointer down to the details it opened */
+.summary-card-action.has-tone.is-active {
+  background:
+    linear-gradient(var(--tone), var(--tone)) top / 100% 5px no-repeat,
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 14%, var(--bg-surface)) 0%, var(--bg-surface) 75%) !important;
+  border: 2.5px solid var(--tone) !important;
+  box-shadow:
+    0 18px 38px color-mix(in srgb, var(--tone) 28%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--tone) 22%, transparent) !important;
+}
+
+.summary-card-action.has-tone.is-active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -13px;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-top-color: var(--tone);
+}
+
+.summary-card.has-tone .card-active-pill {
+  background: var(--tone);
+  color: #fff;
+}
+
+.summary-card.has-tone.is-active .card-hint {
+  color: var(--tone);
+}
+
+.dash-details.has-tone {
+  border-top: 4px solid var(--tone);
+}
+
+.dash-details.has-tone :deep(.panel-title) {
+  color: var(--tone);
+}
+
+@media (max-width: 640px) {
+  /* On phones the details open as a sheet, so there is nothing below to point at */
+  .summary-card-action.has-tone.is-active::after {
+    display: none;
+  }
+}
+
+.dash-return {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
 
 .card-tone-icon {
   display: inline-flex;
@@ -642,17 +747,9 @@ html[data-theme='dark'] .summary-card.tone-expiry { --tone: #fb923c; --tone-bg: 
   color: var(--tone);
 }
 
-.summary-card.has-tone.has-alert:not(.is-active) {
-  background-image: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--tone) 11%, transparent) 0%, transparent 58%);
-}
-
 .summary-card-header {
   gap: 0.75rem;
   min-height: 34px;
-}
-
-.summary-card.has-tone.has-alert:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
 }
 
 .dash-details {

@@ -205,6 +205,12 @@ function onCameraScan(text) {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const thisYear = new Date().getFullYear()
 const YEARS = Array.from({ length: thisYear - 2019 }, (_, i) => thisYear - i)
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+// The chosen period, when one is chosen ("October 2026", "2026", "October")
+const periodLabel = computed(() =>
+  [filterMonth.value ? MONTH_NAMES[Number(filterMonth.value) - 1] : '', filterYear.value || ''].filter(Boolean).join(' ')
+)
 
 function peso(value) {
   return Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -399,10 +405,21 @@ async function saveEdits() {
   }
 }
 
-async function loadStockcard() {
+// Several loads can overlap (an import, the auto-reload, a filter change): only the latest one
+// fills the page, so an older answer can't switch the item back or flash stale rows
+let loadTicket = 0
+// The item whose card is on screen; the server may answer with another one (the first item,
+// or a replacement for a product an import removed) without that starting a second load
+let loadedItemId = 0
+// A load someone asked for (not the background sync) fades the rows until it answers
+const refreshing = ref(false)
+
+async function loadStockcard({ quiet = false } = {}) {
   // Unsaved edits keep their drafts; otherwise the inputs start again from the fresh values
   const keepDrafts = changeCount.value > 0
+  const ticket = ++loadTicket
   loading.value = true
+  refreshing.value = !quiet
   try {
     const res = await stockApi.getStockcard({
       item_id: selectedItemId.value,
@@ -414,32 +431,48 @@ async function loadStockcard() {
       search: search.value,
     })
 
+    if (ticket !== loadTicket) return
     if (res.status && res.data) {
+      const itemChanged = Number(res.data.itemId || 0) !== loadedItemId
+      loadedItemId = Number(res.data.itemId || 0)
       items.value = deduplicateById(res.data.items || [], 'product_id')
       itemInfo.value = res.data.itemInfo || {}
       batches.value = res.data.batches || []
       stockcard.value = deduplicateById(res.data.stockcard || [], 'transaction_id')
       totalPages.value = res.data.totalPages || 1
       total.value = res.data.total || 0
-      selectedItemId.value = res.data.itemId || 0
+      selectedItemId.value = loadedItemId
       if (!keepDrafts) clearEdits()
       if (editMode.value) syncDrafts()
-      revealSelected()
+      // Only a newly opened item scrolls the list; a refresh leaves it where it was
+      if (itemChanged) revealSelected()
       if (revealCardAfterLoad) {
         revealCardAfterLoad = false
         revealCard()
       }
     }
   } catch (err) {
-    console.error('Failed to load stockcard', err)
+    if (ticket === loadTicket) console.error('Failed to load stockcard', err)
   } finally {
-    loading.value = false
+    if (ticket === loadTicket) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
+}
+
+// After an import: stay on the open item (the server falls back to the first item when the
+// import removed it) and start from the first page
+function onImported() {
+  currentPage.value = 1
+  loadStockcard()
 }
 
 // Auto-reload on background interval, window focus, and when mutations occur
 // (not while there are unsaved edits: a reload would mix other people's changes into them)
-useAutoReload(() => (changeCount.value > 0 ? undefined : loadStockcard()))
+useAutoReload((reason) =>
+  changeCount.value > 0 ? undefined : loadStockcard({ quiet: ['interval', 'focus', 'visibility'].includes(reason) })
+)
 
 // A notification or link opened while already on this page switches the product
 watch(() => route.query.item_id, async (id) => {
@@ -449,7 +482,8 @@ watch(() => route.query.item_id, async (id) => {
   selectedItemId.value = Number(id)
 })
 
-watch(selectedItemId, () => {
+watch(selectedItemId, (id) => {
+  if (id === loadedItemId) return
   currentPage.value = 1
   loadStockcard()
 })
@@ -666,9 +700,9 @@ onMounted(() => {
         </div>
 
         <div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Unit & Packaging</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Unit</span>
           <div style="font-weight: 600; color: var(--text-main);">
-            {{ itemInfo.unit_name || 'pcs' }} ({{ itemInfo.measurement || 'Single' }})
+            {{ itemInfo.unit_name || 'pcs' }}
           </div>
         </div>
 
@@ -746,7 +780,7 @@ onMounted(() => {
 
       <!-- Ledger Table -->
       <div class="table-responsive">
-        <table class="data-table ledger-table" :class="{ 'is-editing': editing, 'as-cards': asCards }">
+        <table class="data-table ledger-table" :class="{ 'is-editing': editing, 'as-cards': asCards, 'is-refreshing': refreshing && stockcard.length }">
           <thead>
             <tr>
               <th>Date</th>
@@ -961,13 +995,19 @@ onMounted(() => {
               </td>
             </tr>
 
-            <tr v-if="loading">
+            <tr v-if="loading && !stockcard.length">
               <td colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 Loading ledger entries...
               </td>
             </tr>
             <tr v-else-if="!stockcard.length">
-              <td colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td v-if="periodLabel" colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <strong style="display: block; margin-bottom: 0.3rem; color: var(--text-main); font-size: 1rem;">
+                  No reports for {{ periodLabel }}{{ filterMonth && !filterYear ? ' (any year)' : '' }}
+                </strong>
+                No transactions were recorded for this item in that {{ filterMonth ? 'month' : 'year' }}.
+              </td>
+              <td v-else colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 No stock card transactions recorded for this item.
               </td>
             </tr>
@@ -1006,7 +1046,7 @@ onMounted(() => {
       :is-open="isStockModalOpen"
       :selected-product-id="selectedItemId"
       @close="isStockModalOpen = false"
-      @saved="loadStockcard"
+      @saved="loadStockcard()"
     />
 
     <!-- Edit Stockcard Entry Modal -->
@@ -1024,7 +1064,7 @@ onMounted(() => {
     <ImportStockcardsModal
       :is-open="isImportOpen"
       @close="isImportOpen = false"
-      @imported="selectedItemId = 0; loadStockcard()"
+      @imported="onImported"
     />
   </div>
 </template>
@@ -1199,6 +1239,15 @@ onMounted(() => {
 }
 
 /* Wide screens: headings wrap so the ten ledger columns fit beside the item navigator */
+/* A refresh keeps the rows on screen, faded a little, instead of flashing a loading row */
+.ledger-table tbody {
+  transition: opacity 0.2s ease;
+}
+
+.ledger-table.is-refreshing tbody {
+  opacity: 0.55;
+}
+
 .ledger-table th {
   white-space: normal;
   vertical-align: bottom;

@@ -31,6 +31,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  ChevronRight,
   Sun,
   Moon,
   Palette,
@@ -66,6 +67,8 @@ const themeStore = useThemeStore()
 const notificationStore = useNotificationStore()
 const router = useRouter()
 const route = useRoute()
+// Replaced with the release version at build time (vite.config.js)
+const APP_VERSION = __APP_VERSION__
 
 // Ask once per browser session whether an automatic backup is due
 function runAutoBackupOnce() {
@@ -746,8 +749,14 @@ onUnmounted(() => {
 
           <!-- Right: User Account & System Status Card -->
           <div class="mega-account-panel">
-            <!-- Account Profile Header -->
-            <div class="account-profile-card">
+            <!-- Account Profile Header → Edit Profile -->
+            <router-link
+              to="/profile"
+              class="account-profile-card"
+              :class="{ 'is-active': route.path === '/profile' }"
+              title="Edit profile"
+              @click="closeMegaMenu"
+            >
               <div class="account-avatar">
                 {{ (authStore.userName || 'U').charAt(0).toUpperCase() }}
               </div>
@@ -762,7 +771,8 @@ onUnmounted(() => {
                   </span>
                 </div>
               </div>
-            </div>
+              <ChevronRight :size="16" class="account-profile-go" aria-hidden="true" />
+            </router-link>
 
             <!-- Office & Access Meta Info -->
             <div class="account-meta-box">
@@ -818,6 +828,8 @@ onUnmounted(() => {
                 <span>Sign Out</span>
               </button>
             </div>
+
+            <p class="app-version">BSU Inventory System v{{ APP_VERSION }}</p>
           </div>
         </div>
       </div>
@@ -1677,6 +1689,14 @@ onUnmounted(() => {
   min-width: 280px;
 }
 
+.app-version {
+  margin: 0;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 .account-profile-card {
   display: flex;
   align-items: center;
@@ -1687,6 +1707,26 @@ onUnmounted(() => {
   border-radius: 14px;
   text-decoration: none;
   color: var(--text-main);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.account-profile-card:hover,
+.account-profile-card:focus-visible,
+.account-profile-card.is-active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-glow);
+}
+
+.account-profile-go {
+  flex-shrink: 0;
+  color: var(--text-subtle);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.account-profile-card:hover .account-profile-go {
+  color: var(--color-primary);
+  transform: translateX(2px);
 }
 
 .account-avatar {

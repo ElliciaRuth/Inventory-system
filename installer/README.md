@@ -469,7 +469,9 @@ powershell -ExecutionPolicy Bypass -File installer\installer-source\build.ps1
 ```
 
 Output: `installer\BSU-Inventory-Setup.exe` and `BSU-Inventory-Setup.exe.sha256`. The version is
-`frontend/package.json` → `version`; raise it for every release. A first build takes 5–15 minutes
+`frontend/package.json` → `version`; raise it for every release with `release.ps1` at the repository
+root: `.\release.ps1 -Version 2.5.0 -Tag -Build` sets the version, commits and tags it, then runs this
+build (main README, section 9). A first build takes 5–15 minutes
 (downloads ~600 MB); later builds reuse the cache.
 
 What `build.ps1` does:

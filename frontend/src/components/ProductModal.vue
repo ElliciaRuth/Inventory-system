@@ -20,9 +20,9 @@ const meta = ref({ types: [], units: [], entities: [] })
 
 const form = reactive({
   product_no: '',
+  stock_no: '',
   product: '',
   product_description: '',
-  measurement: '',
   product_reorder_point: 10,
   expiry_warning_days: 30,
   expiry_danger_days: 7,
@@ -90,9 +90,9 @@ watch(
   (newVal) => {
     if (newVal) {
       form.product_no = newVal.product_no || ''
+      form.stock_no = newVal.stock_no || ''
       form.product = newVal.product || ''
       form.product_description = newVal.product_description || ''
-      form.measurement = newVal.measurement || ''
       form.product_reorder_point = newVal.product_reorder_point ?? 10
       form.expiry_warning_days = newVal.expiry_warning_days ?? 30
       form.expiry_danger_days = newVal.expiry_danger_days ?? 7
@@ -101,9 +101,9 @@ watch(
       form.entity_name = newVal.entity_name || ''
     } else {
       form.product_no = ''
+      form.stock_no = ''
       form.product = ''
       form.product_description = ''
-      form.measurement = ''
       form.product_reorder_point = 10
       form.expiry_warning_days = 30
       form.expiry_danger_days = 7
@@ -152,10 +152,10 @@ async function handleSubmit() {
     message: `${form.product} (${form.product_no}) will be ${editing ? 'updated' : 'added to the catalog'}.`,
     details: [
       ['Product no.', form.product_no],
+      ['Stock code', String(form.stock_no).trim() || 'Generated automatically'],
       ['Name', form.product],
       ['Category', form.type_name],
       ['Unit', form.unit_name],
-      ['Measurement', form.measurement],
       ['Entity', form.entity_name],
       ['Reorder point', form.product_reorder_point],
     ],
@@ -180,7 +180,11 @@ async function save(productAction) {
     emit('close')
   } catch (err) {
     errorMessage.value =
-      err.response?.data?.message || err.response?.data?.errors?.product_no || err.message || 'Error saving product.'
+      err.response?.data?.message ||
+      err.response?.data?.errors?.product_no ||
+      err.response?.data?.errors?.stock_no ||
+      err.message ||
+      'Error saving product.'
   } finally {
     loading.value = false
   }
@@ -231,7 +235,7 @@ async function save(productAction) {
         </div>
 
         <form @submit.prevent="handleSubmit" id="productForm" class="product-form">
-          <!-- Row 1: Product No & Name -->
+          <!-- Row 1: Product No, Stock Code & Name -->
           <div class="form-grid-row grid-cols-code-name">
             <div class="form-group">
               <label class="form-label">Product No *</label>
@@ -242,6 +246,17 @@ async function save(productAction) {
                 placeholder="e.g. 101"
                 required
               />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Stock Code</label>
+              <input
+                v-model="form.stock_no"
+                type="text"
+                class="form-input stock-code-input"
+                maxlength="255"
+                placeholder="Auto if blank"
+              />
+              <span class="field-hint">Blank: office + product no.</span>
             </div>
             <div class="form-group">
               <label class="form-label">Product Name *</label>
@@ -266,8 +281,8 @@ async function save(productAction) {
             ></textarea>
           </div>
 
-          <!-- Row 3: Category, Unit, Measurement -->
-          <div class="form-grid-row grid-cols-3">
+          <!-- Row 3: Category & Unit -->
+          <div class="form-grid-row grid-cols-2">
             <div class="form-group">
               <label class="form-label">Category / Type</label>
               <div v-if="customType" class="category-custom">
@@ -296,16 +311,6 @@ async function save(productAction) {
               <datalist id="unitOptions">
                 <option v-for="u in meta.units" :key="u.unit_id" :value="u.unit" />
               </datalist>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Measurement / Spec</label>
-              <input
-                v-model="form.measurement"
-                type="text"
-                class="form-input"
-                placeholder="e.g. 300g, 500ml"
-              />
             </div>
           </div>
 
@@ -427,7 +432,15 @@ async function save(productAction) {
 }
 
 .grid-cols-code-name {
-  grid-template-columns: minmax(110px, 140px) minmax(0, 1fr);
+  grid-template-columns: minmax(110px, 140px) minmax(150px, 190px) minmax(0, 1fr);
+}
+
+.stock-code-input {
+  font-family: var(--font-mono);
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .grid-cols-3 {
@@ -468,6 +481,7 @@ async function save(productAction) {
 
 @media (max-width: 640px) {
   .grid-cols-code-name,
+  .grid-cols-2,
   .grid-cols-3 {
     grid-template-columns: 1fr;
     gap: 0.65rem;

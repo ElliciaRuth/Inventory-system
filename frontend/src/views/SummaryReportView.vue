@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Download, PencilLine, ExternalLink } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { stockApi } from '../api/stock'
@@ -12,6 +12,7 @@ import { typeLabel } from '../utils/transactionTypes'
 import '../styles/inline-edit.css'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const now = new Date()
 const YEARS = Array.from({ length: now.getFullYear() - 2019 }, (_, i) => now.getFullYear() - i)
 
@@ -29,6 +30,9 @@ const filters = reactive({
 const groupedRows = ref({})
 const productTypes = ref([])
 const loading = ref(true)
+
+const periodLabel = computed(() => `${MONTH_NAMES[Number(filters.month) - 1]} ${filters.year}`)
+const narrowed = computed(() => filters.search.trim() !== '' || Number(filters.type_id) > 0)
 
 function qty(v) {
   const n = Number(v || 0)
@@ -142,26 +146,42 @@ function entryLabel(entry) {
 
 const { confirmDiscard } = useUnsavedChanges(() => changeCount.value > 0)
 
+// Only the latest request fills the report (filters can change while one is loading)
+let loadTicket = 0
+
 async function load() {
   // Unsaved edits keep their drafts; otherwise the inputs start again from the fresh values
   const keepDrafts = changeCount.value > 0
+  const ticket = ++loadTicket
   loading.value = true
   try {
     const res = await reportsApi.getBatchList({ ...filters, entries: editMode.value ? 1 : 0 })
+    if (ticket !== loadTicket) return
     groupedRows.value = res.data?.groupedRows || {}
     productTypes.value = res.data?.productTypes || []
     if (!keepDrafts) clearDrafts()
     if (editMode.value) syncDrafts()
   } catch (err) {
-    toast(errorMessage(err, 'Failed to load the report.'), 'error')
+    if (ticket === loadTicket) toast(errorMessage(err, 'Failed to load the report.'), 'error')
   } finally {
-    loading.value = false
+    if (ticket === loadTicket) loading.value = false
   }
 }
 
-async function applyFilter() {
-  if (!(await confirmDiscard('Change the report period?', 'Discard and apply'))) return
-  clearDrafts()
+// Choosing a filter reloads the report straight away; typing a search waits for a pause.
+// The filters are locked while there are unsaved edits, so nothing is lost by reloading.
+let searchTimer = null
+watch(() => [filters.type_id, filters.month, filters.year], () => {
+  clearTimeout(searchTimer)
+  load()
+})
+watch(() => filters.search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(load, 350)
+})
+
+function searchNow() {
+  clearTimeout(searchTimer)
   load()
 }
 
@@ -233,31 +253,35 @@ onMounted(load)
       </router-link>
     </div>
 
-    <form class="panel" style="padding: 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="applyFilter">
+    <form
+      class="panel"
+      style="padding: 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;"
+      :title="changeCount ? 'Save or discard your changes first' : undefined"
+      @submit.prevent="searchNow"
+    >
       <div class="form-group" style="margin: 0; flex: 2; min-width: 200px;">
         <label class="form-label">Search Product</label>
-        <input v-model="filters.search" type="text" class="form-input" placeholder="Search product name" />
+        <input v-model="filters.search" type="search" class="form-input" placeholder="Search product name" :disabled="changeCount > 0" />
       </div>
       <div class="form-group" style="margin: 0; min-width: 180px;">
         <label class="form-label">Product Type</label>
-        <select v-model.number="filters.type_id" class="form-select">
+        <select v-model.number="filters.type_id" class="form-select" :disabled="changeCount > 0">
           <option :value="0">All Product Types</option>
           <option v-for="t in productTypes" :key="t.type_id" :value="Number(t.type_id)">{{ t.type }}</option>
         </select>
       </div>
       <div class="form-group" style="margin: 0;">
         <label class="form-label">Month</label>
-        <select v-model="filters.month" class="form-select">
+        <select v-model="filters.month" class="form-select" :disabled="changeCount > 0">
           <option v-for="(m, i) in MONTHS" :key="m" :value="String(i + 1).padStart(2, '0')">{{ m }}</option>
         </select>
       </div>
       <div class="form-group" style="margin: 0;">
         <label class="form-label">Year</label>
-        <select v-model.number="filters.year" class="form-select">
+        <select v-model.number="filters.year" class="form-select" :disabled="changeCount > 0">
           <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-primary">Apply Filter</button>
       <button
         v-if="canEdit"
         type="button"
@@ -280,7 +304,11 @@ onMounted(load)
     </p>
 
     <div v-if="loading && !groups.length" class="panel" style="padding: 3rem; text-align: center; color: var(--text-muted);">Loading report…</div>
-    <div v-else-if="!groups.length" class="panel" style="padding: 3rem; text-align: center; color: var(--text-muted);">No inventory activity for this period.</div>
+    <div v-else-if="!groups.length" class="panel report-empty">
+      <strong>No reports for {{ periodLabel }}</strong>
+      <span v-if="narrowed">No transactions this month match the search or product type.</span>
+      <span v-else>No transactions were recorded this month.</span>
+    </div>
 
     <section v-for="group in groups" :key="group.type" class="panel" style="margin-bottom: 1.5rem;">
       <div class="panel-header"><h2 class="panel-title">{{ group.type }}</h2></div>
@@ -486,6 +514,21 @@ onMounted(load)
 
 .report-card-link:hover {
   color: var(--color-primary);
+}
+
+.report-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.report-empty strong {
+  color: var(--text-main);
+  font-size: 1.05rem;
 }
 
 .report-edit-note {

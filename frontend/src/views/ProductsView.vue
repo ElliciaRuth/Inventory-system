@@ -301,7 +301,7 @@ onMounted(() => {
               <th>Stock Code</th>
               <th>Product Name</th>
               <th>Category</th>
-              <th>Unit / Spec</th>
+              <th>Unit</th>
               <th v-if="!showingArchived" style="text-align: right;">Total Stock</th>
               <th v-else>Archived</th>
               <th v-if="authStore.canManageStock" style="width: 170px; text-align: center;">Actions</th>
@@ -326,13 +326,10 @@ onMounted(() => {
               <td data-label="Category">
                 <span class="badge badge-info">{{ p.type_name || 'General' }}</span>
               </td>
-              <td data-label="Unit / Spec">
+              <td data-label="Unit">
                 <div>
                   <span style="font-size: 0.85rem; color: var(--text-main);">
                     {{ p.unit_name || 'pcs' }}
-                  </span>
-                  <span v-if="p.measurement" style="font-size: 0.75rem; color: var(--text-subtle); display: block;">
-                    {{ p.measurement }}
                   </span>
                 </div>
               </td>

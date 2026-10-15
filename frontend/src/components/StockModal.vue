@@ -465,7 +465,7 @@ async function handleSubmit() {
               </span>
             </div>
             <div style="font-size: 0.8rem; color: var(--text-muted);">
-              {{ selectedItem.measurement || selectedItem.product_description || '' }}
+              {{ selectedItem.product_description || '' }}
             </div>
           </div>
 

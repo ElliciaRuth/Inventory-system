@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig, loadEnv } from 'vite'
+
+// The release version (set by release.ps1) is shown in the app's menu
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -7,6 +11,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    define: {
+      __APP_VERSION__: JSON.stringify(version),
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,

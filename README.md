@@ -1,13 +1,13 @@
 # BSU Integrated Inventory Monitoring System
 
-[![Version](https://img.shields.io/badge/version-2.3.1-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![Release](https://img.shields.io/badge/release-October%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![CodeIgniter](https://img.shields.io/badge/CodeIgniter-4.7-EF4423.svg?logo=codeigniter&logoColor=white)](https://codeigniter.com/)
 [![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 
-> **Current Version:** `v2.3.1` (Production Release — October 2026)
+> **Current Version:** `v2.4.0` (Production Release — October 2026)
 
 An integrated inventory, stock-card, and stock-out monitoring system engineered specifically for Benguet State University (BSU) production and operating units, including the **Bakery Project**, the **Food Processing Center (FPC)**, and administrative offices.
 
@@ -28,7 +28,8 @@ BSU_Inventory_System/
 ├── docker-compose.yml Containerized stack launcher
 ├── setup.bat         Windows launcher (Default: Offline HTTPS; --dev: Dev servers; --prepare: USB packaging)
 ├── setup.ps1         Windows PowerShell stack management script
-└── setup.sh          Linux / macOS / WSL automated setup script
+├── setup.sh          Linux / macOS / WSL automated setup script
+└── release.ps1       Sets a new release version everywhere (optionally tags it and builds the installer)
 ```
 
 ---
@@ -371,7 +372,10 @@ Before executing any restore operation:
 - **Manufactured Batches (Code 128):** Generated via `BarcodeGeneratorSVG` and cached in `backend/public/barcodes/`.
   - **Batch Number Format:** `B-{OFFICE}-{YYYYMMDD}-{PRODUCT_ID}-{INDEX}`
   - **Barcode Payload:** `BC-{batchId (padded to 6)}-{YYYYMMDD}-{random 4 hex}`
-- **Hardware Scanner Support:** Supports standard USB and Bluetooth barcode scanners operating in keyboard-wedge mode (character stream followed by `Enter`). Scanning into the item selector, stock movements, or stock-out requests instantly resolves the batch details via `GET /api/barcode/lookup`.
+- **Product Barcode = Stock Code:** A finished product's barcode encodes its stock code (`stock_no`, e.g. `FPC FP 03A`), so every unit of the product carries the same code. It identifies the product only; the batch barcode also identifies the delivery (and so its expiry).
+- **Hardware Scanner Support:** Supports standard USB and Bluetooth barcode scanners operating in keyboard-wedge mode (character stream followed by `Enter`), and the camera button in the search boxes.
+  - **Batch barcodes** resolve through `GET /api/barcode/lookup` on every scanning page: Record Stock In / Out, the Stock Card item navigator, Physical Count and Request Stock Out.
+  - **Product barcodes (stock codes)** are matched against the product list on Record Stock In / Out, the Stock Card item navigator and Physical Count. Request Stock Out does not read them yet (its lookup only knows batch barcodes).
 
 ---
 
@@ -434,6 +438,12 @@ Any attempt to tamper with historical audit entries (even via direct MySQL conso
 ### 2.13 Product Catalog Archiving, Validation Guardrails & Restoration
 **Location:** [`backend/app/Models/ProductModel.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Models/ProductModel.php), [`backend/app/Controllers/Api/ProductController.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Controllers/Api/ProductController.php)
 
+#### Stock Code
+The product form has an optional **Stock Code** field. A typed code is saved as entered and must be unique within the office (`409` otherwise). Left blank, it is generated as `{OFFICE}-{product no., 4 digits}` (e.g. `FPC-0042`). Changing a product's number also renews its code when the code was still the generated one; a typed code is kept.
+
+The product form no longer has a *Measurement / Spec* field: the unit of measure and the description cover it. The `measurement` column stays in `product_table` (old values, backups and stockcard imports keep working) but is no longer shown or changed from the form.
+
+#### Archiving
 Products that are discontinued or inactive can be archived without deleting historical transaction ledgers.
 
 #### Archiving Blockers Validation (`archiveBlockers`)
@@ -666,8 +676,8 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 - **Stock Out (Issuance):** Custodian selects *Issue*, chooses price variant copy, enters quantity, and previews the real-time FIFO Batch Plan before confirming deduction.
 
 ### 4.3 Processing Staff Stock-Out Requests
-1. Staff member navigates to `/stockout`, searches catalog or scans batch barcode, inputs requested quantity, and adds item to cart.
-2. Staff reviews cart on `/stockout/list` and clicks **Submit for Approval**.
+1. Staff member navigates to `/stockout`, searches catalog or scans batch barcode, inputs requested quantity, and adds item to cart. A product (or every price variant of it) with no stock is flagged as **Out of stock** as soon as it is chosen, and the quantity and Add button are locked.
+2. After adding an item, the staff member is taken to `/stockout/list` (**+ Add More Items** goes back for the next one), reviews the cart and clicks **Submit for Approval**.
 3. Custodian receives notification and inspects pending requests on `/stockout/pending`.
 4. Custodian can modify requested quantity, approve individual items, click **Approve All** (which approves items with sufficient stock and skips shortfalls), or reject items with a required feedback explanation.
 
@@ -680,19 +690,21 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 ### 4.5 Inter-Unit Borrowing & Returns
 1. Custodian records movement type **Lend / Borrow Out** on Stockcard. Selects borrowing campus unit, borrower name, and due date.
 2. Outstanding loans are tracked under `/stock/borrows`. Overdue items display status alerts.
-3. When items are returned, click **Return** on the borrow card, enter returned quantity, and confirm. The system restocks inventory under a `RET-...` batch and updates outstanding loan balances.
+3. When items are returned, click **Record Return** on the borrow (on `/stock/borrows`, or in the dashboard's *Items Out (Borrowed)* details), enter returned quantity, and confirm. From the dashboard, the form picks the product's open borrow (or asks which one when there are several). The system restocks inventory under a `RET-...` batch and updates outstanding loan balances.
 
 ### 4.6 Excel Appendix 58 Stock Card Import
 1. Navigate to Stockcard and click **Import from Excel**.
 2. Upload `.xlsx` workbook.
 3. Review the interactive preview: normalized units, detected product classifications, beginning balances, and carry-forward rows. Correct any cells directly in the preview if desired.
-4. Select commit mode:
+4. Read the **notes about dates and rows**. They change nothing by themselves: each one says how a messy date was read (an assumed year, a missing day, a date earlier than the row before) and the row is still imported with that date. Only lines a note calls *skipped* are left out. Open the card from its note to correct a date before importing; the stock card orders entries by date, so out-of-order rows change the running balance row by row (not the final stock).
+5. Select commit mode:
    - **Keep existing data:** Appends new lines while skipping existing rows via SHA-256 fingerprints.
    - **Delete existing inventory first:** Prompts for Manager password, creates pre-wipe safety backup, and replaces office records.
+6. The Stock Card refreshes once and stays on the open item (the first item if the import removed it).
 
 ### 4.7 Correcting Entries in Edit Mode (Stock Card & Summary Report)
 1. **Stock Card:** open the item, turn on **Edit Mode** and change the date, reference, office, quantity, price or expiry right in the ledger. The trash button marks a row for deletion; the undo button puts a row back. The pencil opens the full form (also used to switch a single entry between Receipt and Issue).
-2. **Summary Report:** choose the month, turn on **Edit Mode** and change a Purchase, Used or Spoiled quantity or cost. A product with several entries in the month shows one line per entry under it.
+2. **Summary Report:** choose the month (the report reloads as soon as a filter changes; the filters are locked while there are unsaved edits), turn on **Edit Mode** and change a Purchase, Used or Spoiled quantity or cost. A product with several entries in the month shows one line per entry under it.
 3. Click **Save changes** in the bar at the bottom of the screen (or press Ctrl+S). Everything is saved together; if one change is not possible (stock would go below 0, a future date, a borrow-linked quantity), nothing is saved and the bar says why. The other page shows the change at once.
 
 ### 4.8 Exporting the Summary Report
@@ -774,7 +786,7 @@ erDiagram
 - `user_table`: User credentials, bcrypt password hash, name, role, office assignment, `recovery_email`, setup flags (`must_change_password`, `must_setup_smtp`; `must_setup_recovery_email` is no longer used).
 - `level_of_access`: RBAC levels (1 = Staff, 2 = Custodian, 3 = Manager, 4 = Technical Staff).
 - `user_office_table`: Operating units (BAKERY, FPC, administrative units).
-- `product_table`: Master catalog items, product number, stock number, unit, entity, reorder point, alert thresholds (`expiry_warning_days`, `expiry_danger_days`), archiving flags (`archived_at`, `archived_by`, `archive_reason`).
+- `product_table`: Master catalog items, product number, stock number (`stock_no`, the stock code: typed or generated), unit, entity, reorder point, alert thresholds (`expiry_warning_days`, `expiry_danger_days`), archiving flags (`archived_at`, `archived_by`, `archive_reason`).
 - `product_copy_table`: Price-variant sub-products (`unit_cost`, `label`).
 - `batch_table`: Batch records, unique batch number (`batch_no`), Code 128 payload (`barcode_value`), current quantity (`current_qty`), manufacturing date, expiration date, date received.
 - `transaction_table`: Core ledger movements, quantity (`transaction_qty`), unit cost (`transaction_unit_cost`), transaction date, linked batch ID, copy ID, reference ID, office ID, user ID, adjustment reason ID, borrow ID.
@@ -923,9 +935,27 @@ The CLI generates a secure temporary password. Log in using the temporary passwo
 
 ## 9. Version History & Changelog
 
+### Releasing a new version
+
+The version is `MAJOR.MINOR.PATCH`, kept in one place: `frontend/package.json`. The app's menu, the installer (`BSU-Inventory-Setup.exe`, which refuses to install an older version over a newer one) and the `VERSION` file on installed servers all read it from there.
+
+- **PATCH** (2.4.**1**): fixes only.
+- **MINOR** (2.**5**.0): new features or changed screens.
+- **MAJOR** (**3**.0.0): changes that need data moved by hand.
+
+1. While working, describe the changes in an `| **Unreleased** | … |` row at the top of the table below.
+2. Commit the work.
+3. Run `.\release.ps1 -Version 2.5.0 -Tag -Build`. It raises the version in `package.json`, `package-lock.json` and this README (badges, *Current Version*, footer, and the *Unreleased* row becomes the new version), commits that as `Release 2.5.0`, tags it `v2.5.0` and builds the installer. Nothing is pushed: run `git push; git push origin v2.5.0`.
+
+The script stops before changing anything when the version is not higher than the current one, when there is no *Unreleased* row, or (with `-Tag`) when there are uncommitted changes, so a tag is always exactly the released code.
+
+### Releases
+
+
 | Version | Release Date | Summary of Major Changes |
 |---|---|---|
-| **`v2.3.1`** *(Current)* | October 2026 | **Fix:**<br>• Export Summary: *Preview & Edit Report* showed an empty editor on servers set up by the Windows installer or the XAMPP setup (exports were fine). The server's Content-Security-Policy (`style-src 'self'`) blocked the editor's inline styles; the editor now links its skin and the report's styles as stylesheets (`GET api/export/summary/editor-style`) instead. No server configuration change is needed. |
+| **`v2.4.0`** *(Current)* | October 2026 | **Usability & Design Changes:**<br>**Products:**<br>• **Stock Code** on the product form (optional; generated from the office and product no. when blank; unique per office).<br>• *Measurement / Spec* removed from the product form and from the Products list, Stock Card header and stock form (the database column is kept).<br>**Reports:**<br>• Summary Report reloads as soon as a filter changes (search after a short pause); the *Apply Filter* button is gone.<br>• Summary Report and Stock Card say **No reports for *Month Year*** when the chosen period has no transactions.<br>**Dashboard:**<br>• **Record Return** in the *Items Out (Borrowed)* details.<br>• Summary cards in their own colours: a colour strip on every card, a coloured border and glow when there is something to show, and the opened card (e.g. Out of Stock in red) with a solid border, ring and a pointer to its details, which take the same colour.<br>**Stock-out requests:**<br>• A product with no stock is detected as soon as it is chosen; the chosen product shows how much is available.<br>• After *Add to My List*, the list opens; **+ Add More Items** uses the primary button style.<br>**Interface:**<br>• Higher-contrast BSU and Light themes (text, borders, page background and status colours meet WCAG AA 4.5:1).<br>• The profile card in the menu opens Edit Profile, and the menu shows the running version (e.g. *BSU Inventory System v2.4.0*).<br>**Releases:**<br>• `release.ps1` sets the version in `frontend/package.json` (the single source the app, installer and installed servers read) and in this README in one step, and can commit, tag and build the installer.<br>**Fixes:**<br>• Stock Card: importing a stockcard made the page jump between items and flash (three overlapping reloads); it now reloads once, keeps the open item and fades the rows instead of showing a loading row. |
+| **`v2.3.1`** | October 2026 | **Fix:**<br>• Export Summary: *Preview & Edit Report* showed an empty editor on servers set up by the Windows installer or the XAMPP setup (exports were fine). The server's Content-Security-Policy (`style-src 'self'`) blocked the editor's inline styles; the editor now links its skin and the report's styles as stylesheets (`GET api/export/summary/editor-style`) instead. No server configuration change is needed. |
 | **`v2.3.0`** | October 2026 | **Inline Editing, Official Summary Report & Mobile Layouts:**<br>**Stock Card & Summary Report:**<br>• **Edit Mode** on the Stock Card: date, reference, office, quantity, price and batch expiry are edited in the ledger; rows can be marked for deletion. All changes save together from a bar that stays at the bottom of the screen (Ctrl+S too), all or nothing.<br>• **Edit Mode** on the Summary Report: Purchase, Used and Spoiled quantities and costs are the stock card entries behind them, so a change made in the report shows on the Stock Card (and the other way round).<br>• Safeguards: no batch or running balance below 0, no future dates, borrow-linked quantities stay locked, every change in the audit log; the page asks before leaving or switching items with unsaved edits and pauses auto-refresh until they are saved.<br>**Summary Report export:**<br>• The office's printed template on every page: Bagong Pilipinas, BSU and BSU Food Products logos, the University Business Affairs Office heading (Old English / Corsiva), project name, *Inventory for the month of …*, product type, a CODE column and the *Prepared by / Verified by / Noted by* block.<br>• **Settings → Report Signatories** for managers (per office).<br>• **Preview & Edit Report**: the report in a built-in editor (TinyMCE, bundled, works offline) with **Save Changes** and a reminder to save before exporting.<br>• The MS Word download now carries the logos and keeps one report page per Word page.<br>**Mobile:**<br>• Dashboard: the recent activity and the detail sheets fit the screen (no sideways scrolling).<br>• Stock Card: the ledger shows as cards on phones and tablets, and fits beside the item navigator on desktops; choosing an item on a phone jumps to its ledger.<br>**Fixes:**<br>• Stock Card: the ledger failed to load (an apostrophe in an SQL comment broke the query's parameters).<br>• Stock Card edit form: a stock-out taken from several batches was saved onto its first batch entry only (the row's total), and Delete removed only that entry; the whole row is now changed.<br>• Export Summary: edited reports were refused as "A text value is too long".<br>**Installer:** no new database migrations; update over 2.2.x with the new `BSU-Inventory-Setup.exe`. |
 | **`v2.2.1`** | October 2026 | **Fixes & Password-Reset Changes:**<br>**Changes:**<br>• The recovery-email setup step was removed from first login. Forgot Password accepts the account's email or a recovery email already on file and always sends the code to the account's own email.<br>• The Windows installer's shortcuts and Server Manager open the system at the PC's LAN address (localhost when LAN access is off or the address doesn't answer).<br>**Fixes:**<br>• Stockcard: a stock-out taken from several batches now shows the balance after the whole movement (it showed the balance after the first batch only, e.g. 574 instead of 0). Stockcard exports were not affected.<br>• Windows installer: the administrator account created by the setup wizard is now asked for the system SMTP account on first login, so password reset emails can be set up on new installations.<br>• Forgot Password: an address that is one account's email and another's recovery email finds the account it belongs to; the page no longer names an address the code wasn't sent to; wrong code guesses are counted per account.<br>• Account setup: Sign out no longer fails with a missing `confirmDialog` import. |
 | **`v2.2.0`** | October 2026 | **Full Business Logic Hardening & Enterprise Security Release:**<br>• System SMTP account (app password encrypted via AES-256-GCM) sending self-service password-reset codes to each account's email.<br>• Account setup wizard for first-login mandatory password change and (Technical Staff) SMTP setup.<br>• First-In, First-Out (FIFO) stock issuance (unexpired batches, oldest received first) and real-time Batch Plan simulation.<br>• Appendix 58 Excel workbook parser with spell-check correction, multi-card detection, and idempotent commit.<br>• Tamper-evident, trigger-protected append-only audit trail (`audit_log`) capturing JSON before/after diffs.<br>• Modular `.zip` and AES-256-GCM encrypted `.bsubackup` disaster recovery archives with SHA-256 manifests.<br>• Physical count reconciliation engine with automated shortage/overage offsetting.<br>• Inter-unit borrowing tracking with overdue flags, linked returns, and balance replenishment.<br>• Product catalog archiving with safety validations against active stock and pending loans.<br>• Hardware barcode scanning & SVG generation for batches (`B-OFFICE-YYYYMMDD-PRODUCT-NN`) and products.<br>• `RequestGuard` DoS/zip-bomb protection, CSRF header checks, and three-tier brute-force account lockout.<br>• Offline XAMPP HTTPS server with automated local Root CA certificate authority provisioning. |
@@ -935,4 +965,4 @@ The CLI generates a secure temporary password. Log in using the temporary passwo
 
 ---
 
-*Benguet State University Integrated Inventory Monitoring System v2.3.1 · Engineered for BSU Operating & Production Units.*
+*Benguet State University Integrated Inventory Monitoring System v2.4.0 · Engineered for BSU Operating & Production Units.*

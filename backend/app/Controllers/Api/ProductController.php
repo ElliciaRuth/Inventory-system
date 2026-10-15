@@ -86,13 +86,18 @@ class ProductController extends BaseApiController
             return $error;
         }
 
+        $stockNo = $this->inputStockNo($input) ?? $this->stockNo($productNo, $officeId);
+        if ($error = $this->duplicateStockNo($stockNo, $officeId)) {
+            return $error;
+        }
+
         $payload = array_merge($this->productFields($input), [
             'product_no'     => $productNo,
             'entity_id'      => $this->resolveEntityId($input, $officeId) ?: $this->entityModel->defaultFor($officeId),
             'unit_id'        => $this->resolveUnitId($input, $officeId) ?: 1,
             'type_id'        => $this->resolveTypeId($input, $officeId) ?: 1,
             'user_office_id' => $officeId,
-            'stock_no'       => ! empty($input['stock_no']) ? trim((string) $input['stock_no']) : $this->stockNo($productNo, $officeId),
+            'stock_no'       => $stockNo,
         ]);
         $payload['product_reorder_point'] ??= 10;
         $payload['expiry_warning_days']   ??= 30;
@@ -144,7 +149,24 @@ class ProductController extends BaseApiController
                 return $error;
             }
             $payload['product_no'] = $productNo;
-            $payload['stock_no']   = $this->stockNo($productNo, $officeId);
+        }
+
+        // A typed stock code is kept as entered; a blank one is generated from the product no.
+        $stockNo = $this->inputStockNo($input);
+        // A new product no. also renews a code that was the generated one for the old number
+        $oldNo = (int) $existing['product_no'];
+        if (isset($payload['product_no']) && $payload['product_no'] !== $oldNo
+            && $stockNo === (string) $existing['stock_no'] && $stockNo === $this->stockNo($oldNo, $officeId)) {
+            $stockNo = null;
+        }
+        if ($stockNo === null && (isset($payload['product_no']) || array_key_exists('stock_no', $input))) {
+            $stockNo = $this->stockNo($payload['product_no'] ?? $oldNo, $officeId);
+        }
+        if ($stockNo !== null) {
+            if ($stockNo !== (string) $existing['stock_no'] && ($error = $this->duplicateStockNo($stockNo, $officeId, $id))) {
+                return $error;
+            }
+            $payload['stock_no'] = $stockNo;
         }
 
         if ($typeId = $this->resolveTypeId($input, $officeId)) {
@@ -311,6 +333,7 @@ class ProductController extends BaseApiController
         $required = $creating ? 'required' : 'permit_empty';
         $rules = [
             'product_no'            => "{$required}|integer|greater_than[0]",
+            'stock_no'              => 'permit_empty|max_length[255]',
             'product'               => "{$required}|min_length[2]|max_length[255]",
             'product_description'   => 'permit_empty|max_length[1000]',
             'measurement'           => 'permit_empty|max_length[100]',
@@ -361,6 +384,36 @@ class ProductController extends BaseApiController
             ['product_no' => "Product No {$productNo} is already in use."],
             ResponseInterface::HTTP_CONFLICT
         );
+    }
+
+    private function duplicateStockNo(string $stockNo, int $officeId, ?int $exceptId = null): ?ResponseInterface
+    {
+        $builder = db_connect()->table('product_table')
+            ->where('stock_no', $stockNo)
+            ->where('user_office_id', $officeId);
+        if ($exceptId !== null) {
+            $builder->where('product_id !=', $exceptId);
+        }
+
+        if ($builder->countAllResults() === 0) {
+            return null;
+        }
+
+        return $this->respondError(
+            "Stock code {$stockNo} is already used by another product in your office.",
+            ['stock_no' => "Stock code {$stockNo} is already in use."],
+            ResponseInterface::HTTP_CONFLICT
+        );
+    }
+
+    /**
+     * The stock code typed on the form, or null when it was left blank.
+     */
+    private function inputStockNo(array $input): ?string
+    {
+        $stockNo = trim((string) ($input['stock_no'] ?? ''));
+
+        return $stockNo === '' ? null : $stockNo;
     }
 
     /**

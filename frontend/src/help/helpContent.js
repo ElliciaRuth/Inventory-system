@@ -152,7 +152,7 @@ export const TOPICS = [
     steps: [
       'Open Menu → Request Stock Out.',
       'Search for a product by name, or scan the barcode on its batch label (with a scanner, or tap the camera button in the search box to use the camera of your phone).',
-      'Enter the quantity and add it to your list. Repeat for every item you need.',
+      'Enter the quantity and add it to your list. You are taken to your list; click "+ Add More Items" there for the next item.',
     ],
     tips: ['Nothing is sent yet: items wait in your list until you submit them.'],
     to: '/stockout',
@@ -325,7 +325,7 @@ export const TOPICS = [
     title: 'Monthly summary report',
     summary: 'Beginning, purchases, usage, spoilage and ending balance.',
     steps: [
-      'Open Menu → Summary Report and choose the month.',
+      'Open Menu → Summary Report and choose the month. The report updates as soon as you change a filter.',
       'To download it, click "Export Summary" and pick a range of months.',
       'To change the report first (wording, remarks, signatories), click "Preview & Edit Report", edit it, then click PDF Print or MS Word.',
     ],

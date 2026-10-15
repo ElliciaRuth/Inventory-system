@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ClipboardList, AlertTriangle, Package } from 'lucide-vue-next'
 import { stockoutApi } from '../api/stockout'
 import { stockApi } from '../api/stock'
@@ -8,6 +9,7 @@ import CameraScanButton from '../components/CameraScanButton.vue'
 import { toast, errorMessage } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
 
+const router = useRouter()
 const items = ref([])
 const loading = ref(true)
 const tableSearch = ref('')
@@ -25,6 +27,11 @@ const scanning = ref(false)
 const selected = computed(() => items.value.find((i) => Number(i.product_id) === Number(selectedId.value)) || null)
 const selectedCopy = computed(() => copies.value.find((c) => Number(c.copy_id) === Number(copyId.value)) || null)
 const maxQty = computed(() => (selectedCopy.value ? Number(selectedCopy.value.current_stock) : Number(selected.value?.current_stock || 0)))
+// Nothing to take: the product has no stock, or none of its sub-products (price variants) has any
+const outOfStock = computed(() =>
+  Boolean(selected.value) &&
+  (Number(selected.value.current_stock) <= 0 || (copies.value.length > 0 && copies.value.every((c) => Number(c.current_stock) <= 0)))
+)
 
 const pickerMatches = computed(() => {
   const q = pickerQuery.value.trim().toLowerCase()
@@ -128,6 +135,7 @@ async function addToList() {
     formError.value = 'Please select a product.'
     return
   }
+  if (outOfStock.value) return
   if (copies.value.length && !copyId.value) {
     formError.value = 'Please select a sub-product (price variant).'
     return
@@ -165,6 +173,7 @@ async function addToList() {
     })
     toast(`${selected.value.product} added to your list.`)
     clearSelection()
+    router.push('/stockout/list')
   } catch (err) {
     formError.value = errorMessage(err, 'Failed to add the item.')
   } finally {
@@ -207,6 +216,9 @@ onMounted(loadItems)
             <div class="form-input" style="flex: 1; font-weight: 700; display: flex; align-items: center; gap: 8px;">
               <Package :size="16" style="color: var(--color-primary); flex-shrink: 0;" />
               <span>{{ selected.product }}</span>
+              <span class="badge" :class="outOfStock ? 'badge-danger' : stockBadge(maxQty)" style="margin-left: auto;">
+                {{ outOfStock ? 'Out of stock' : `${maxQty} ${selected.unit_name || ''} available` }}
+              </span>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" @click="clearSelection">Change</button>
           </div>
@@ -229,13 +241,23 @@ onMounted(loadItems)
                   <strong>{{ item.product }}</strong>
                   <small v-if="item.unit_name || item.description"> · {{ [item.unit_name, item.description].filter(Boolean).join(' · ') }}</small>
                 </span>
-                <span class="badge" :class="stockBadge(item.current_stock)">{{ Number(item.current_stock) }} left</span>
+                <span class="badge" :class="stockBadge(item.current_stock)">
+                  {{ Number(item.current_stock) > 0 ? `${Number(item.current_stock)} left` : 'Out of stock' }}
+                </span>
               </li>
             </ul>
           </template>
         </div>
 
-        <div v-if="copies.length" class="form-group">
+        <div v-if="outOfStock" class="out-of-stock-note" role="alert">
+          <AlertTriangle :size="18" style="flex-shrink: 0;" />
+          <div>
+            <strong>{{ selected.product }} is out of stock.</strong>
+            <span>It can't be requested until new stock comes in. Choose another product.</span>
+          </div>
+        </div>
+
+        <div v-if="copies.length && !outOfStock" class="form-group">
           <label class="form-label">Sub-Product (Price Variant) *</label>
           <select v-model="copyId" class="form-select">
             <option value="">— Select sub-product —</option>
@@ -256,11 +278,20 @@ onMounted(loadItems)
           </div>
           <div class="form-group">
             <label class="form-label">Quantity *</label>
-            <input v-model="quantity" type="number" min="1" step="1" :max="maxQty || undefined" class="form-input" placeholder="Enter quantity" />
+            <input
+              v-model="quantity"
+              type="number"
+              min="1"
+              step="1"
+              :max="maxQty || undefined"
+              class="form-input"
+              :placeholder="outOfStock ? 'No stock available' : 'Enter quantity'"
+              :disabled="outOfStock"
+            />
           </div>
         </div>
 
-        <button type="submit" class="btn btn-primary" :disabled="!selected || saving">
+        <button type="submit" class="btn btn-primary" :disabled="!selected || outOfStock || saving">
           {{ saving ? 'Adding…' : '+ Add to My List' }}
         </button>
       </form>
@@ -304,6 +335,29 @@ onMounted(loadItems)
 </template>
 
 <style scoped>
+.out-of-stock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.875rem;
+}
+
+.out-of-stock-note div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.out-of-stock-note span {
+  color: var(--text-main);
+}
+
 .picker-list {
   position: absolute;
   top: 100%;
