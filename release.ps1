@@ -69,7 +69,9 @@ if ([version]$Version -le [version]$current) {
 }
 
 $readmeText = [System.IO.File]::ReadAllText($Readme, $Utf8)
-if ($readmeText -notmatch '\| \*\*Unreleased\*\* \|') {
+# Only a changelog table row (a line that starts with it), not the instructions that mention it
+$unreleasedRow = '(?m)^\| \*\*Unreleased\*\* \| [^|]+\|'
+if ($readmeText -notmatch $unreleasedRow) {
     throw 'README.md has no "| **Unreleased** |" row in the changelog (section 9). Write the release notes there first.'
 }
 
@@ -104,7 +106,7 @@ $replacements = @(
     @('(Monitoring System v)\d+\.\d+\.\d+( .)', "`${1}$Version`${2}"),
     # The previous release is no longer the current one
     @(' \*\(Current\)\*', ''),
-    @('\| \*\*Unreleased\*\* \| [^|]+\|', "| **``v$Version``** *(Current)* | $month |")
+    @($unreleasedRow, "| **``v$Version``** *(Current)* | $month |")
 )
 foreach ($r in $replacements) {
     if ($readmeText -notmatch $r[0]) { Write-Warning "README.md: nothing matched $($r[0])" }

@@ -212,8 +212,83 @@ class StockcardImportService
         // What "replace" would delete, so the dialog can say it before anyone confirms
         $plan['existing'] = $this->inventoryCounts($plan['summary']['office_ids']);
         $plan['types']    = $this->typeSuggestions($plan);
+        $plan['issues']   = self::issues($plan);
 
         return $plan;
+    }
+
+    /**
+     * Everything in a preview that has to be corrected before it may be imported: rows skipped or
+     * read with a guess, negative stock, balances that don't add up, missing names, units, offices
+     * or dates. Sheets that are not stock cards at all and automatic spelling fixes don't count.
+     *
+     * @return list<array{kind: string, card: ?string, row: ?int, message: string}>
+     *   kind: negative | missing | balance | date | other
+     */
+    public static function issues(array $plan): array
+    {
+        $issues = [];
+        $add = static function (?string $card, string $message) use (&$issues): void {
+            preg_match('/\brow (\d+)/i', $message, $m);
+            $issues[] = [
+                'kind'    => self::issueKind($message),
+                'card'    => $card,
+                'row'     => isset($m[1]) ? (int) $m[1] : null,
+                'message' => $message,
+            ];
+        };
+
+        foreach ($plan['cards'] ?? [] as $card) {
+            if (($card['status'] ?? 'ok') !== 'ok') {
+                if (empty($card['ignored'])) {
+                    $add($card['label'], 'Not imported: ' . $card['reason']);
+                }
+                continue;
+            }
+            foreach ($card['warnings'] ?? [] as $warning) {
+                $add($card['label'], $warning);
+            }
+        }
+
+        foreach ($plan['products'] ?? [] as $product) {
+            $label = $product['cards'][0] ?? null;
+            foreach ($product['warnings'] ?? [] as $warning) {
+                $add(self::cardNamed($product['cards'] ?? [], $warning) ?? $label, $warning);
+            }
+            if (($product['status'] ?? 'ok') !== 'ok' && ($product['reason'] ?? '') !== '') {
+                $add(self::cardNamed($product['cards'] ?? [], $product['reason']) ?? $label, 'Not imported: ' . $product['reason']);
+            }
+        }
+
+        foreach ($plan['notes'] ?? [] as $note) {
+            $add(null, $note);
+        }
+
+        return $issues;
+    }
+
+    private static function issueKind(string $message): string
+    {
+        return match (true) {
+            (bool) preg_match('/negative|is in stock at that point/i', $message)                                        => 'negative',
+            (bool) preg_match('/no item name|no unit of measurement|office|no date|not a date|not a valid date/i', $message) => 'missing',
+            (bool) preg_match('/balance|add up to|running balance/i', $message)                                         => 'balance',
+            (bool) preg_match('/date|year|day missing|future/i', $message)                                              => 'date',
+            default                                                                                                     => 'other',
+        };
+    }
+
+    /** The card a product note is about: product notes start with the card's label. */
+    private static function cardNamed(array $labels, string $message): ?string
+    {
+        usort($labels, static fn ($a, $b) => strlen($b) <=> strlen($a)); // "sugar (2)" before "sugar"
+        foreach ($labels as $label) {
+            if (str_starts_with($message, $label . ' ')) {
+                return $label;
+            }
+        }
+
+        return null;
     }
 
     /** Category names to suggest while typing: the file's offices' categories plus the detected ones. */

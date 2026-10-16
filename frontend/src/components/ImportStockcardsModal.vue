@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import {
-  X, FileSpreadsheet, Upload, AlertTriangle, CheckCircle2, Info, ArrowLeft, Trash2, Plus, ShieldCheck, SpellCheck, PencilLine,
-  Lock, Eye, EyeOff,
+  X, FileSpreadsheet, Upload, AlertTriangle, CheckCircle2, Info, Trash2, Plus, ShieldCheck, SpellCheck, PencilLine,
+  Lock, Eye, EyeOff, OctagonAlert, RotateCcw,
 } from 'lucide-vue-next'
 import { importApi } from '../api/import'
 import StockcardCardEditor from './StockcardCardEditor.vue'
@@ -39,11 +39,60 @@ const setAllType = ref('')
 const result = ref(null)
 
 const okProducts = computed(() => (plan.value?.products || []).filter((p) => p.status === 'ok'))
-const skippedProducts = computed(() => (plan.value?.products || []).filter((p) => p.status !== 'ok'))
-const skippedCards = computed(() => (plan.value?.cards || []).filter((c) => c.status !== 'ok'))
-const cardsWithNotes = computed(() => (plan.value?.cards || []).filter((c) => c.status === 'ok' && c.warnings.length))
-const noteCount = computed(() => cardsWithNotes.value.reduce((n, c) => n + c.warnings.length, 0))
+// Sheets that are not stock cards at all (a cover page, an unused template) are only listed
+const skippedCards = computed(() => (plan.value?.cards || []).filter((c) => c.status !== 'ok' && !c.ignored))
+const ignoredCards = computed(() => (plan.value?.cards || []).filter((c) => c.status !== 'ok' && c.ignored))
 const officeUnknown = computed(() => skippedCards.value.some((c) => /office/i.test(c.reason)))
+
+// ── Strict preview: every warning has to be corrected before anything can be imported ──
+// The server lists them (StockcardImportService::issues) and refuses an import while any remain
+const issues = computed(() => plan.value?.issues || [])
+const blocked = computed(() => issues.value.length > 0)
+
+// Red: stock or data that is wrong or missing; orange: read with a guess, or doesn't add up
+const SEVERE_KINDS = ['negative', 'missing']
+const toneOf = (kind) => (SEVERE_KINDS.includes(kind) ? 'is-danger' : 'is-warning')
+
+const ISSUE_KINDS = [
+  { kind: 'negative', one: 'row has negative stock', many: 'rows have negative stock' },
+  { kind: 'missing', one: 'missing name, unit, office or date', many: 'missing names, units, offices or dates' },
+  { kind: 'balance', one: "balance doesn't add up", many: "balances don't add up" },
+  { kind: 'date', one: 'date needs checking', many: 'dates need checking' },
+  { kind: 'other', one: 'other warning', many: 'other warnings' },
+]
+
+// "3 rows have negative stock": one line per kind found
+const issueSummary = computed(() =>
+  ISSUE_KINDS.map((k) => {
+    const count = issues.value.filter((i) => i.kind === k.kind).length
+    return count ? { ...k, count, text: `${count} ${count === 1 ? k.one : k.many}` } : null
+  }).filter(Boolean)
+)
+
+// The warnings grouped under the card they are about (file-wide ones last)
+const issuesByCard = computed(() => {
+  const groups = new Map()
+  for (const issue of issues.value) {
+    const key = issue.card || ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(issue)
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => Number(a === '') - Number(b === ''))
+    .map(([card, list]) => ({ card, list: [...list].sort((x, y) => (x.row ?? 0) - (y.row ?? 0)) }))
+})
+
+const cardIssues = (label) => issues.value.filter((i) => i.card === label)
+function cardTone(label) {
+  const list = cardIssues(label)
+  if (!list.length) return ''
+  return list.some((i) => SEVERE_KINDS.includes(i.kind)) ? 'is-danger' : 'is-warning'
+}
+// A product row takes the strongest tone of its cards
+function productTone(p) {
+  const tones = p.cards.map(cardTone)
+  return tones.includes('is-danger') ? 'is-danger' : tones.includes('is-warning') ? 'is-warning' : ''
+}
 
 // ── Correcting a card ──
 const editingCard = ref(null)
@@ -115,6 +164,7 @@ function applyTypeToAll() {
 
 const canImport = computed(() =>
   !busy.value &&
+  !blocked.value &&
   okProducts.value.length > 0 &&
   (mode.value === 'append' || mode.value === 'replace')
 )
@@ -140,8 +190,34 @@ watch(() => props.isOpen, (open) => {
   if (open) reset()
 })
 
-function close() {
+// Cancel & Re-upload: drop this preview and open the file picker for the corrected file
+async function reupload() {
   if (busy.value) return
+  reset()
+  await nextTick()
+  fileInput.value?.click()
+}
+
+// The X, a click outside and Cancel: a preview (and any corrections made in it) is only
+// thrown away after asking; nothing has been imported yet at that point
+async function close() {
+  if (busy.value) return
+  if (step.value === 'preview') {
+    const corrections = Number(plan.value?.edits || 0)
+    const ok = await confirmDialog({
+      title: 'Discard this import?',
+      message: `Nothing has been imported yet. The preview${corrections ? ` and the ${corrections} correction${corrections === 1 ? '' : 's'} made in it` : ''} will be lost, and the file has to be chosen again.`,
+      details: [
+        ['File', plan.value?.file_name],
+        ['Products', okProducts.value.length],
+        ['Warnings', issues.value.length || ''],
+      ],
+      confirmText: 'Discard import',
+      cancelText: 'Keep reviewing',
+      variant: 'warning',
+    })
+    if (!ok) return
+  }
   emit('close')
 }
 
@@ -227,6 +303,9 @@ async function runImport() {
     emit('imported')
   } catch (err) {
     const message = err.response?.data?.message || 'Import failed; nothing was changed.'
+    // The server found warnings the preview didn't show yet: show them and keep the import locked
+    const serverIssues = err.response?.data?.errors?.issues
+    if (Array.isArray(serverIssues) && plan.value) plan.value = { ...plan.value, issues: serverIssues }
     // A wrong password keeps the pop-up open so it can be typed again
     if (askPassword.value && err.response?.data?.errors?.password) {
       passwordError.value = message
@@ -293,6 +372,29 @@ function num(value) {
 
         <!-- ── Step 2: preview and options ── -->
         <template v-else-if="step === 'preview'">
+          <div v-if="blocked" class="import-blocked" role="alert">
+            <div class="import-blocked-head">
+              <OctagonAlert :size="22" />
+              <div>
+                <strong>Cannot proceed with import.</strong>
+                There are unresolved warnings in the preview. Please fix the file or clear the warnings before importing.
+              </div>
+            </div>
+            <ul class="import-blocked-summary">
+              <li v-for="k in issueSummary" :key="k.kind" :class="toneOf(k.kind)">{{ k.text }}</li>
+            </ul>
+            <div class="import-blocked-actions">
+              <span>Click a card below to correct its rows here, or fix the Excel file and upload it again.</span>
+              <button type="button" class="btn btn-sm import-btn-reupload" :disabled="busy" @click="reupload">
+                <RotateCcw :size="14" /> Cancel &amp; Re-upload
+              </button>
+            </div>
+          </div>
+          <div v-else class="import-alert import-alert-success">
+            <CheckCircle2 :size="16" />
+            <span><strong>No warnings.</strong> The file is ready to import: choose how below.</span>
+          </div>
+
           <div class="import-stats">
             <div><strong>{{ plan.summary.products }}</strong><span>products</span></div>
             <div><strong>{{ plan.summary.receipts }}</strong><span>receipts</span></div>
@@ -365,7 +467,7 @@ function num(value) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="p in okProducts" :key="p.key">
+                <tr v-for="p in okProducts" :key="p.key" :class="productTone(p)">
                   <td>
                     <strong>{{ p.name }}</strong>
                     <div class="import-card-links">
@@ -375,17 +477,16 @@ function num(value) {
                         :key="label"
                         type="button"
                         class="import-card-link"
-                        title="View and correct this card"
+                        :class="cardTone(label)"
+                        :title="cardIssues(label).length ? `${cardIssues(label).length} warning(s): click to correct` : 'View and correct this card'"
                         @click="editingCard = label"
                       >
-                        <PencilLine :size="11" /> {{ label }}
+                        <component :is="cardIssues(label).length ? AlertTriangle : PencilLine" :size="11" /> {{ label }}
+                        <span v-if="cardIssues(label).length" class="import-card-count">{{ cardIssues(label).length }}</span>
                       </button>
                     </div>
                     <div v-for="s in p.spelling" :key="s" class="import-fix-line">
                       <SpellCheck :size="12" /> Spelling: {{ s }}
-                    </div>
-                    <div v-for="w in p.warnings" :key="w" class="import-warn-line">
-                      <AlertTriangle :size="12" /> {{ w }}
                     </div>
                   </td>
                   <td>
@@ -410,38 +511,43 @@ function num(value) {
             </table>
           </div>
 
-          <template v-if="skippedProducts.length || skippedCards.length">
-            <h3 class="import-section-title">Not imported ({{ skippedProducts.length + skippedCards.length }})</h3>
-            <ul class="import-list">
-              <li v-for="c in skippedCards" :key="c.label">
-                <button type="button" class="import-card-link" title="View and correct this card" @click="editingCard = c.label">
-                  <PencilLine :size="11" /> {{ c.label }}
+          <template v-if="blocked">
+            <h3 class="import-section-title import-issues-title">
+              <AlertTriangle :size="15" /> Warnings to resolve ({{ issues.length }})
+            </h3>
+            <div class="import-issues">
+              <div v-for="g in issuesByCard" :key="g.card || '__file'" class="import-issue-card">
+                <button
+                  v-if="g.card"
+                  type="button"
+                  class="import-card-link is-title"
+                  :class="cardTone(g.card)"
+                  title="View and correct this card"
+                  @click="editingCard = g.card"
+                >
+                  <PencilLine :size="12" /> {{ g.card }}
                 </button>
-                — {{ c.reason }}
-              </li>
-              <li v-for="p in skippedProducts" :key="p.key"><strong>{{ p.name }}</strong> — {{ p.reason }}</li>
-            </ul>
+                <strong v-else class="import-issue-file">Whole file</strong>
+                <ul class="import-issue-list">
+                  <li v-for="(i, n) in g.list" :key="n" :class="toneOf(i.kind)">
+                    <span v-if="i.row" class="import-issue-row">Row {{ i.row }}</span>
+                    <span>{{ i.message }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </template>
 
-          <div v-for="n in plan.notes" :key="n" class="import-alert import-alert-info">
-            <Info :size="16" />
-            <span>{{ n }}</span>
-          </div>
-
-          <details v-if="noteCount" class="import-notes">
-            <summary>{{ noteCount }} notes about dates and rows (assumed years, missing days, skipped lines)</summary>
-            <div v-for="c in cardsWithNotes" :key="c.label" class="import-notes-card">
-              <button type="button" class="import-card-link is-title" title="View and correct this card" @click="editingCard = c.label">
-                <PencilLine :size="12" /> {{ c.label }}
-              </button>
-              <ul class="import-list">
-                <li v-for="w in c.warnings" :key="w">{{ w }}</li>
-              </ul>
-            </div>
-          </details>
+          <p v-if="ignoredCards.length" class="import-muted import-ignored">
+            <Info :size="13" />
+            <span>
+              Not stock cards, ignored: {{ ignoredCards.map((c) => c.label).join(', ') }}
+              (no Date / Receipt / Issue / Balance columns, or no entries).
+            </span>
+          </p>
 
           <h3 class="import-section-title">Import options</h3>
-          <fieldset class="import-choice">
+          <fieldset class="import-choice" :disabled="blocked" :class="{ 'is-locked': blocked }">
             <legend class="form-label">Existing inventory of {{ officeList }} *</legend>
 
             <label class="import-option" :class="{ 'is-selected': mode === 'replace', 'is-danger': mode === 'replace' }">
@@ -512,17 +618,22 @@ function num(value) {
         </template>
 
         <template v-else-if="step === 'preview'">
-          <button type="button" class="btn btn-secondary" :disabled="busy" style="margin-right: auto;" @click="reset">
-            <ArrowLeft :size="15" /> Choose another file
+          <button type="button" class="btn btn-secondary" :disabled="busy" style="margin-right: auto;" @click="reupload">
+            <RotateCcw :size="15" /> Cancel &amp; Re-upload
           </button>
+          <span v-if="blocked" class="import-locked-note">
+            <Lock :size="13" /> Resolve {{ issues.length }} warning{{ issues.length === 1 ? '' : 's' }} to import
+          </span>
           <button
             type="button"
             class="btn btn-primary"
-            :class="{ 'import-btn-danger': mode === 'replace' }"
+            :class="{ 'import-btn-danger': mode === 'replace' && !blocked }"
             :disabled="!canImport"
+            :title="blocked ? 'Cannot proceed with import: there are unresolved warnings in the preview.' : undefined"
             @click="startImport"
           >
             <template v-if="busy">Importing… this can take a minute</template>
+            <template v-else-if="blocked"><Lock :size="14" /> Import locked</template>
             <template v-else-if="mode === 'replace'">Delete &amp; Import {{ okProducts.length }} products</template>
             <template v-else>Import {{ okProducts.length }} products</template>
           </button>
@@ -594,6 +705,7 @@ function num(value) {
       :token="token"
       :label="editingCard"
       :warnings="notesFor(editingCard)"
+      :issues="cardIssues(editingCard)"
       @close="editingCard = null"
       @applied="onCardApplied"
     />
@@ -812,15 +924,6 @@ function num(value) {
   padding: 0.1rem 0.55rem;
 }
 
-.import-warn-line {
-  display: flex;
-  gap: 0.3rem;
-  align-items: flex-start;
-  margin-top: 0.2rem;
-  font-size: 0.75rem;
-  color: var(--color-warning);
-}
-
 .import-list {
   margin: 0;
   padding-left: 1.1rem;
@@ -829,19 +932,174 @@ function num(value) {
   line-height: 1.6;
 }
 
-.import-notes {
-  margin-top: 1rem;
+/* ── Strict preview: the red banner, the warnings list and the highlighted rows ── */
+.import-blocked {
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border: 2px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.import-blocked-head {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.import-blocked-head svg {
+  flex-shrink: 0;
+}
+
+.import-blocked-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.import-blocked-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-blocked-summary li {
+  padding: 0.2rem 0.65rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.import-blocked-summary li.is-danger { color: var(--color-danger); }
+.import-blocked-summary li.is-warning { color: var(--color-warning); }
+
+.import-blocked-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-main);
+}
+
+.import-btn-reupload {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: #fff;
+}
+
+.import-btn-reupload:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.import-issues-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-danger);
+}
+
+.import-issues {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 340px;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.import-issue-file {
   font-size: 0.85rem;
 }
 
-.import-notes summary {
-  cursor: pointer;
-  color: var(--color-primary);
-  font-weight: 600;
+.import-issue-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
-.import-notes-card {
-  margin-top: 0.6rem;
+.import-issue-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid currentColor;
+  border-radius: var(--radius-xs);
+}
+
+.import-issue-list li > span:last-child {
+  color: var(--text-main);
+}
+
+.import-issue-list li.is-danger { color: var(--color-danger); background: var(--color-danger-bg); }
+.import-issue-list li.is-warning { color: var(--color-warning); background: var(--color-warning-bg); }
+
+.import-issue-row {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.import-table tbody tr.is-danger td { background: var(--color-danger-bg); }
+.import-table tbody tr.is-warning td { background: var(--color-warning-bg); }
+.import-table tbody tr.is-danger td:first-child { box-shadow: inset 4px 0 0 var(--color-danger); }
+.import-table tbody tr.is-warning td:first-child { box-shadow: inset 4px 0 0 var(--color-warning); }
+
+.import-card-link.is-danger { border-color: var(--color-danger); background: var(--bg-surface); color: var(--color-danger); }
+.import-card-link.is-warning { border-color: var(--color-warning); background: var(--bg-surface); color: var(--color-warning); }
+
+.import-card-count {
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.import-card-link.is-danger .import-card-count { background: var(--color-danger); }
+.import-card-link.is-warning .import-card-count { background: var(--color-warning); }
+
+.import-ignored {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+}
+
+.import-choice.is-locked {
+  opacity: 0.55;
+}
+
+.import-choice.is-locked .import-option {
+  cursor: not-allowed;
+}
+
+.import-locked-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-danger);
 }
 
 .import-choice {

@@ -92,7 +92,7 @@ export const TOPICS = [
     ],
     tips: [
       'To get a Gmail or BSU (Google) app password: Google Account → Security → 2-Step Verification → App passwords. You can delete it afterwards.',
-      'No email on your account, or no internet? Ask your office manager to set a temporary password for you.',
+      'No email on your account, or no internet? Ask technical staff to set a temporary password for you.',
     ],
   },
   {
@@ -234,9 +234,13 @@ export const TOPICS = [
     steps: [
       'Open Menu → Stockcard Ledger and click "Import from Excel".',
       'Choose the Excel file. The system reads every stock card and shows a preview.',
-      'Check each card, correct anything that was read wrongly, then import.',
+      'Check each card. While the preview shows warnings (red banner) the import is locked: click a card to correct its rows, or fix the Excel file and click "Cancel & Re-upload".',
+      'When no warnings are left, choose how to import and click Import.',
     ],
-    tips: ['Replacing the existing inventory of your office before importing needs a manager\'s password.'],
+    tips: [
+      'Red rows have negative stock or missing data; orange rows have a date or balance to check.',
+      'Replacing the existing inventory of your office before importing needs a manager\'s password.',
+    ],
     to: '/stockcard',
   },
   {
@@ -359,7 +363,7 @@ export const TOPICS = [
     summary: 'New applicants, user accounts and the lists the system uses.',
     steps: [
       'Open Menu → Office Settings. New sign-ups also appear as "New applicant" under the bell.',
-      'Users: activate a pending account, deactivate one that should no longer sign in, or set a temporary password (the user must change it at the next login).',
+      'Users: activate a pending account, or deactivate one that should no longer sign in. Account details (name, username, role, office, temporary password) are changed by technical staff.',
       'You see the custodian and staff accounts of your office. Other managers\' accounts, including new manager sign-ups, are handled by technical staff.',
       'Entities, Units, References, Product Types and Offices: add, edit or remove the entries used in forms and reports.',
     ],

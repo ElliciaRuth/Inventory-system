@@ -608,7 +608,7 @@ onMounted(() => {
                   </span>
                 </td>
                 <td class="act-qty" style="font-weight: 700;">
-                  <span :style="{ color: isStockIn(tx.transaction_type) ? 'var(--color-success)' : 'var(--text-main)' }">
+                  <span :style="{ color: isStockIn(tx.transaction_type) ? 'var(--color-success)' : 'var(--color-danger)' }">
                     {{ signedQty(tx.transaction_type, tx.transaction_qty) }}
                   </span>
                 </td>

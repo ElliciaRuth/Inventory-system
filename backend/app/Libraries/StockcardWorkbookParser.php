@@ -56,6 +56,11 @@ class StockcardWorkbookParser
     /** @var list<string> notes about the whole file */
     private array $notes = [];
 
+    // Why a sheet is passed over when it is not a stock card at all (a cover page, an unused
+    // template): it holds no entries that could be wrong, so it never blocks an import
+    public const NO_HEADER  = 'No "Date / Reference / Receipt / Issue / Balance" header found.';
+    public const NO_ENTRIES = 'The card has no entries.';
+
     /**
      * @param array<int, string> $offices    user offices the cards can belong to
      * @param list<string>       $knownNames existing product names, used as the spelling reference
@@ -224,7 +229,7 @@ class StockcardWorkbookParser
         }
 
         if ($card['header_row'] === 0 || ! isset($card['columns']['receipt'], $card['columns']['issue'], $card['columns']['balance'])) {
-            $this->skip($card, 'No "Date / Reference / Receipt / Issue / Balance" header found.');
+            $this->skip($card, self::NO_HEADER);
         } elseif ($card['item'] === '') {
             $this->skip($card, 'The card has no item name.');
         }
@@ -397,7 +402,7 @@ class StockcardWorkbookParser
         $movements = array_filter($rows, static fn ($row) => in_array($row['type'], ['receipt', 'issue'], true));
 
         if ($rows === []) {
-            $this->skip($card, 'The card has no entries.');
+            $this->skip($card, self::NO_ENTRIES);
         } elseif ($movements !== [] && ! $balanceSeen) {
             $this->skip($card, 'No running balance is filled in, so this doesn\'t look like a standard stock card.');
         }
@@ -1121,6 +1126,8 @@ class StockcardWorkbookParser
             'entries'   => count($card['rows']),
             'status'    => $card['status'],
             'reason'    => $card['reason'],
+            // Not a stock card (see NO_HEADER, NO_ENTRIES): listed, but nothing to correct
+            'ignored'   => in_array($card['reason'], [self::NO_HEADER, self::NO_ENTRIES], true),
             'warnings'  => array_values(array_unique($card['warnings'])),
             // Where the card's fields and rows are, for corrections made in the preview
             'layout'    => [

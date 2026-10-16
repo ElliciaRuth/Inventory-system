@@ -78,6 +78,10 @@ class SettingsController extends BaseApiController
         }
 
         if ($type === 'users') {
+            // Managers activate, deactivate and decline accounts; only technical staff change them
+            if ($this->currentLevelId() < 4) {
+                return $this->respondError('Managers can activate or deactivate accounts but not change them. Ask technical staff to edit an account.', [], ResponseInterface::HTTP_FORBIDDEN);
+            }
             if ($id <= 0) {
                 return $this->respondError('Users must create their own accounts via registration.', [], ResponseInterface::HTTP_FORBIDDEN);
             }

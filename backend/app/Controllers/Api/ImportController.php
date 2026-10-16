@@ -157,6 +157,23 @@ class ImportController extends BaseApiController
         if (! in_array($mode, ['replace', 'append'], true)) {
             return $this->respondError('Choose whether to delete the existing inventory first or keep it.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
+
+        $service = new StockcardImportService();
+        $plan    = $service->loadPlan($token, $this->currentUserId());
+        if ($plan === null) {
+            return $this->respondError('This preview has expired. Choose the file again.', [], ResponseInterface::HTTP_GONE);
+        }
+        // A preview with warnings is never imported: they are corrected first (before any password is asked)
+        $issues = StockcardImportService::issues($plan);
+        if ($issues !== []) {
+            return $this->respondError(
+                'Cannot proceed with import. There are ' . count($issues) . ' unresolved warning' . (count($issues) === 1 ? '' : 's')
+                    . ' in the preview. Please fix the file or clear the warnings before importing.',
+                ['issues' => $issues],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
         $approvedBy = null;
         if ($mode === 'replace') {
             $password = (string) ($input['password'] ?? '');
@@ -184,11 +201,6 @@ class ImportController extends BaseApiController
             }
         }
 
-        $service = new StockcardImportService();
-        $plan    = $service->loadPlan($token, $this->currentUserId());
-        if ($plan === null) {
-            return $this->respondError('This preview has expired. Choose the file again.', [], ResponseInterface::HTTP_GONE);
-        }
         if ($error = $this->officeScopeError($plan)) {
             return $error;
         }

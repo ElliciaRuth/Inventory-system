@@ -182,7 +182,7 @@ onMounted(() => {
                 </span>
               </td>
               <td style="text-align: right; font-weight: 700;">
-                <span :style="{ color: isStockIn(t.transaction_type) ? 'var(--color-success)' : 'inherit' }">
+                <span :style="{ color: isStockIn(t.transaction_type) ? 'var(--color-success)' : 'var(--color-danger)' }">
                   {{ signedQty(t.transaction_type, t.transaction_qty) }}
                 </span>
               </td>

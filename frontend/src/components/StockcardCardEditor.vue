@@ -9,6 +9,8 @@ const props = defineProps({
   token: { type: String, required: true },
   label: { type: String, required: true },
   warnings: { type: Array, default: () => [] },
+  // The card's import warnings with their kind (StockcardImportService::issues), to colour its rows
+  issues: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'applied'])
 
@@ -44,6 +46,11 @@ const flaggedRows = computed(() => {
   }
   return set
 })
+
+// Rows with negative stock or missing data are red; other flagged rows orange
+const severeRows = computed(() => new Set(
+  props.issues.filter((i) => i.row && ['negative', 'missing'].includes(i.kind)).map((i) => Number(i.row))
+))
 
 const headerFields = computed(() => Object.keys(HEADER_LABELS).filter((f) => card.value?.header?.[f] !== null && card.value?.header?.[f] !== undefined))
 
@@ -184,7 +191,7 @@ async function apply() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="r in rows" :key="r.row" :class="{ 'is-flagged': flaggedRows.has(r.row) }">
+                  <tr v-for="r in rows" :key="r.row" :class="{ 'is-flagged': flaggedRows.has(r.row), 'is-severe': severeRows.has(r.row) }">
                     <td class="editor-rowno">
                       <AlertTriangle v-if="flaggedRows.has(r.row)" :size="12" />
                       {{ r.row }}
@@ -307,6 +314,20 @@ async function apply() {
 
 .editor-table tr.is-flagged td {
   background: var(--color-warning-bg);
+}
+
+.editor-table tr.is-flagged td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-warning);
+  color: var(--color-warning);
+}
+
+.editor-table tr.is-severe td {
+  background: var(--color-danger-bg);
+}
+
+.editor-table tr.is-severe td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-danger);
+  color: var(--color-danger);
 }
 
 .editor-rowno {

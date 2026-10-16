@@ -369,9 +369,9 @@ onMounted(load)
                     <td>{{ u.user_office_name }}</td>
                     <td><span class="badge" :class="activityId === 1 ? 'badge-success' : 'badge-danger'">{{ u.activity_status }}</span></td>
                     <td style="text-align: right; white-space: nowrap;">
-                      <button type="button" class="btn btn-sm btn-secondary" @click="openModal('users', u)">Edit</button>
-                      <button v-if="activityId === 1 && Number(u.level_id) !== 4" type="button" class="btn btn-sm btn-secondary" style="margin-left: 0.4rem; color: var(--color-danger);" :disabled="!!busy" @click="deactivate(u)">Deactivate</button>
-                      <button v-else-if="activityId !== 1" type="button" class="btn btn-sm btn-primary" style="margin-left: 0.4rem;" :disabled="!!busy" @click="activate(u)">Activate</button>
+                      <!-- Managers can't change accounts (technical staff do); only activate / deactivate -->
+                      <button v-if="activityId === 1 && Number(u.level_id) !== 4" type="button" class="btn btn-sm btn-secondary" style="color: var(--color-danger);" :disabled="!!busy" @click="deactivate(u)">Deactivate</button>
+                      <button v-else-if="activityId !== 1" type="button" class="btn btn-sm btn-primary" :disabled="!!busy" @click="activate(u)">Activate</button>
                     </td>
                   </tr>
                 </tbody>
