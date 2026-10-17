@@ -160,13 +160,13 @@ onMounted(load)
             <template v-for="rows in group.products" :key="rows[0].product_id">
               <tr v-if="rows.length > 1" class="parent-row">
                 <td>{{ rows[0].counter }}</td>
-                <td>{{ rows[0].stock_no }}</td>
+                <td>{{ rows[0].product_no }}</td>
                 <td>{{ rows[0].item }}</td>
                 <td colspan="16" style="color: var(--text-muted); font-style: italic;">Multiple price variants</td>
               </tr>
               <tr v-for="row in rows" :key="`${row.product_id}-${row.copy_id}`">
                 <td>{{ rows.length > 1 ? '' : row.counter }}</td>
-                <td>{{ rows.length > 1 ? '' : row.stock_no }}</td>
+                <td>{{ rows.length > 1 ? '' : row.product_no }}</td>
                 <td :class="{ variant: rows.length > 1 }">
                   <template v-if="rows.length > 1">↳ ₱{{ money(row.copy_unit_cost) }}{{ row.copy_label ? ` (${row.copy_label})` : '' }}</template>
                   <template v-else>{{ row.item }}</template>

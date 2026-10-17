@@ -170,9 +170,8 @@ class InventoryService
             ]);
 
             $product = $this->db->table('product_table')->where('product_id', $productId)->get(1)->getRowArray();
-            if (($product['stock_no'] ?? '') === '' && $userOfficeName !== '') {
-                $stockNo = strtoupper($userOfficeName) . '-' . str_pad((string) ($product['product_no'] ?? $productId), 4, '0', STR_PAD_LEFT);
-                $this->db->table('product_table')->where('product_id', $productId)->update(['stock_no' => $stockNo]);
+            if (($product['stock_no'] ?? '') === '' && ($product['product_no'] ?? '') !== '') {
+                $this->db->table('product_table')->where('product_id', $productId)->update(['stock_no' => $product['product_no']]);
             }
 
             $this->insertEntry($resolvedTypeId, $qty, $unitCost, $batch['batch_id'], (int) $copy['copy_id'], $entry);

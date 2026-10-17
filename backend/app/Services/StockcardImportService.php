@@ -473,11 +473,13 @@ class StockcardImportService
             }
         }
 
-        $productNo = (int) ($this->db->table('product_table')->selectMax('product_no', 'n')->where('user_office_id', $officeId)->get()->getRowArray()['n'] ?? 0) + 1;
+        // Use MAX(product_id)+1 as a numeric counter (product_no is now VARCHAR)
+        $nextNum   = (int) ($this->db->table('product_table')->selectMax('product_id', 'n')->where('user_office_id', $officeId)->get()->getRowArray()['n'] ?? 0) + 1;
         $office    = $this->officeName($officeId);
+        $stockNo   = $product['stock_no'] !== '' ? mb_substr($product['stock_no'], 0, 255) : strtoupper($office) . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
 
         $this->db->table('product_table')->insert([
-            'product_no'            => $productNo,
+            'product_no'            => $stockNo,
             'product'               => mb_substr($product['name'], 0, 255),
             'product_description'   => mb_substr($product['description'], 0, 1000),
             'measurement'           => $measurement ?: null,
@@ -489,7 +491,7 @@ class StockcardImportService
             'user_office_id'        => $officeId,
             // Always the office's "Benguet State University" (fund cluster 06), whatever the card says
             'entity_id'             => (new EntityModel())->defaultFor($officeId) ?: null,
-            'stock_no'              => $product['stock_no'] !== '' ? mb_substr($product['stock_no'], 0, 255) : strtoupper($office) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT),
+            'stock_no'              => $stockNo,
         ]);
 
         return [(int) $this->db->insertID(), true];

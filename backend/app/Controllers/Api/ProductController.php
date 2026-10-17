@@ -81,7 +81,7 @@ class ProductController extends BaseApiController
             return $error;
         }
 
-        $productNo = (int) $input['product_no'];
+        $productNo = trim((string) $input['product_no']);
         if ($error = $this->duplicateProductNo($productNo, $officeId)) {
             return $error;
         }
@@ -92,7 +92,7 @@ class ProductController extends BaseApiController
             'unit_id'        => $this->resolveUnitId($input, $officeId) ?: 1,
             'type_id'        => $this->resolveTypeId($input, $officeId) ?: 1,
             'user_office_id' => $officeId,
-            'stock_no'       => ! empty($input['stock_no']) ? trim((string) $input['stock_no']) : $this->stockNo($productNo, $officeId),
+            'stock_no'       => ! empty($input['stock_no']) ? trim((string) $input['stock_no']) : $productNo,
         ]);
         $payload['product_reorder_point'] ??= 10;
         $payload['expiry_warning_days']   ??= 30;
@@ -103,7 +103,7 @@ class ProductController extends BaseApiController
             return $this->respondError('Failed to create product', $this->productModel->errors());
         }
 
-        AuditLog::record('product.created', 'product', (int) $newId, 'Created product "' . ($payload['product'] ?? '') . "\" (no. {$productNo})", [
+        AuditLog::record('product.created', 'product', (int) $newId, 'Created product "' . ($payload['product'] ?? '') . "\" (stock code: {$productNo})", [
             'after' => $payload,
         ]);
 
@@ -139,12 +139,12 @@ class ProductController extends BaseApiController
         $payload  = $this->productFields($input);
 
         if (isset($input['product_no']) && $input['product_no'] !== '') {
-            $productNo = (int) $input['product_no'];
+            $productNo = trim((string) $input['product_no']);
             if ($error = $this->duplicateProductNo($productNo, $officeId, $id)) {
                 return $error;
             }
             $payload['product_no'] = $productNo;
-            $payload['stock_no']   = $this->stockNo($productNo, $officeId);
+            $payload['stock_no']   = $productNo;
         }
 
         if ($typeId = $this->resolveTypeId($input, $officeId)) {
@@ -310,7 +310,7 @@ class ProductController extends BaseApiController
     {
         $required = $creating ? 'required' : 'permit_empty';
         $rules = [
-            'product_no'            => "{$required}|integer|greater_than[0]",
+            'product_no'            => "{$required}|max_length[100]",
             'product'               => "{$required}|min_length[2]|max_length[255]",
             'product_description'   => 'permit_empty|max_length[1000]',
             'measurement'           => 'permit_empty|max_length[100]',
@@ -343,7 +343,7 @@ class ProductController extends BaseApiController
         return null;
     }
 
-    private function duplicateProductNo(int $productNo, int $officeId, ?int $exceptId = null): ?ResponseInterface
+    private function duplicateProductNo(string $productNo, int $officeId, ?int $exceptId = null): ?ResponseInterface
     {
         $builder = db_connect()->table('product_table')
             ->where('product_no', $productNo)
@@ -357,8 +357,8 @@ class ProductController extends BaseApiController
         }
 
         return $this->respondError(
-            "Product No {$productNo} is already used by another product in your office.",
-            ['product_no' => "Product No {$productNo} is already in use."],
+            "Stock Code \"{$productNo}\" is already used by another product in your office.",
+            ['product_no' => "Stock Code \"{$productNo}\" is already in use."],
             ResponseInterface::HTTP_CONFLICT
         );
     }

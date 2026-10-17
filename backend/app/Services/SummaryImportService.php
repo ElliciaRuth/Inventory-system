@@ -267,15 +267,19 @@ class SummaryImportService
             return [(int) $existing['product_id'], false];
         }
 
-        $productNo = (int) ($this->db->table('product_table')
-            ->selectMax('product_no', 'n')
+        // Use MAX(product_id)+1 as numeric counter (product_no is now VARCHAR)
+        $nextNum = (int) ($this->db->table('product_table')
+            ->selectMax('product_id', 'n')
             ->where('user_office_id', $officeId)
             ->get()->getRowArray()['n'] ?? 0) + 1;
 
-        $office = $this->officeName($officeId);
+        $office  = $this->officeName($officeId);
+        $stockNo = ($product['stock_no'] ?? '') !== ''
+                       ? mb_substr((string) $product['stock_no'], 0, 255)
+                       : strtoupper($office) . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
 
         $this->db->table('product_table')->insert([
-            'product_no'            => $productNo,
+            'product_no'            => $stockNo,
             'product'               => mb_substr($item, 0, 255),
             'product_description'   => '',
             'product_reorder_point' => 0,
@@ -285,9 +289,7 @@ class SummaryImportService
             'type_id'               => $typeId,
             'user_office_id'        => $officeId,
             'entity_id'             => (new EntityModel())->defaultFor($officeId) ?: null,
-            'stock_no'              => ($product['stock_no'] ?? '') !== ''
-                                           ? mb_substr((string) $product['stock_no'], 0, 255)
-                                           : strtoupper($office) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT),
+            'stock_no'              => $stockNo,
         ]);
 
         return [(int) $this->db->insertID(), true];
