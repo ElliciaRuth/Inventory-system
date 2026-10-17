@@ -281,15 +281,9 @@ class SummaryImportService
             return [(int) $existing['product_id'], false];
         }
 
-        $productNo = (int) ($this->db->table('product_table')
-            ->selectMax('product_no', 'n')
-            ->where('user_office_id', $officeId)
-            ->get()->getRowArray()['n'] ?? 0) + 1;
-
-        $office = $this->officeName($officeId);
-
+        // Insert first with empty product_no to get the auto-increment product_id
         $this->db->table('product_table')->insert([
-            'product_no'            => $productNo,
+            'product_no'            => '',  // temporary — updated below
             'product'               => mb_substr($item, 0, 255),
             'product_description'   => '',
             'product_reorder_point' => 0,
@@ -299,12 +293,21 @@ class SummaryImportService
             'type_id'               => $typeId,
             'user_office_id'        => $officeId,
             'entity_id'             => (new EntityModel())->defaultFor($officeId) ?: null,
-            'stock_no'              => ($product['stock_no'] ?? '') !== ''
-                                           ? mb_substr((string) $product['stock_no'], 0, 255)
-                                           : strtoupper($office) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT),
+            'stock_no'              => '',  // temporary — updated below
         ]);
 
-        return [(int) $this->db->insertID(), true];
+        $newId   = (int) $this->db->insertID();
+        $office  = $this->officeName($officeId);
+        $stockNo = ($product['stock_no'] ?? '') !== ''
+                       ? mb_substr((string) $product['stock_no'], 0, 100)
+                       : strtoupper($office) . '-' . str_pad((string) $newId, 4, '0', STR_PAD_LEFT);
+
+        $this->db->table('product_table')->where('product_id', $newId)->update([
+            'product_no' => $stockNo,
+            'stock_no'   => $stockNo,
+        ]);
+
+        return [$newId, true];
     }
 
     // ── Transaction writers ──────────────────────────────────────────────────

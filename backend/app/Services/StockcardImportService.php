@@ -548,11 +548,9 @@ class StockcardImportService
             }
         }
 
-        $productNo = (int) ($this->db->table('product_table')->selectMax('product_no', 'n')->where('user_office_id', $officeId)->get()->getRowArray()['n'] ?? 0) + 1;
-        $office    = $this->officeName($officeId);
-
+        // Insert first with a temporary empty product_no to get the auto-increment product_id
         $this->db->table('product_table')->insert([
-            'product_no'            => $productNo,
+            'product_no'            => '',  // temporary — updated below
             'product'               => mb_substr($product['name'], 0, 255),
             'product_description'   => mb_substr($product['description'], 0, 1000),
             'measurement'           => $measurement ?: null,
@@ -564,10 +562,22 @@ class StockcardImportService
             'user_office_id'        => $officeId,
             // Always the office's "Benguet State University" (fund cluster 06), whatever the card says
             'entity_id'             => (new EntityModel())->defaultFor($officeId) ?: null,
-            'stock_no'              => $product['stock_no'] !== '' ? mb_substr($product['stock_no'], 0, 255) : strtoupper($office) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT),
+            'stock_no'              => '',  // temporary — updated below
         ]);
 
-        return [(int) $this->db->insertID(), true];
+        $newId   = (int) $this->db->insertID();
+        $office  = $this->officeName($officeId);
+        // Use the product's stock_no from the file if provided, otherwise generate from product_id
+        $stockNo = $product['stock_no'] !== ''
+            ? mb_substr($product['stock_no'], 0, 100)
+            : strtoupper($office) . '-' . str_pad((string) $newId, 4, '0', STR_PAD_LEFT);
+
+        $this->db->table('product_table')->where('product_id', $newId)->update([
+            'product_no' => $stockNo,
+            'stock_no'   => $stockNo,
+        ]);
+
+        return [$newId, true];
     }
 
     /**

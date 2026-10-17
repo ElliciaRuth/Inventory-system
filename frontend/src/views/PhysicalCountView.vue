@@ -286,7 +286,7 @@ async function reconcile() {
               }"
             >
               <td class="cell-title">
-                <span class="pc-no">#{{ item.product_no }}</span>
+                <span class="pc-no">{{ item.product_no }}</span>
                 <strong>{{ item.product }}</strong>
                 <span v-if="item.stock_no" class="pc-muted">{{ item.stock_no }}</span>
               </td>

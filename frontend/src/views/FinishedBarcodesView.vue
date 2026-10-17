@@ -72,7 +72,7 @@ async function generate(product) {
     message: `A barcode will be made and saved for "${product.product}".`,
     details: [
       ['Product', product.product],
-      ['Product no.', product.product_no],
+      ['Stock Code', product.product_no],
       ['Stock no.', product.stock_no],
     ],
     confirmText: 'Generate',
@@ -138,7 +138,7 @@ onMounted(load)
         <table class="data-table">
           <thead>
             <tr>
-              <th>Product No</th>
+              <th>Stock Code</th>
               <th>Stock No</th>
               <th>Product</th>
               <th>Unit</th>

@@ -256,7 +256,12 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
       <div style="display:flex;gap:.5rem;">
-        <button
+      
+        <router-link to="/export/summary" class="btn btn-secondary">
+          <Download :size="15" />
+          <span>Export Summary</span>
+        </router-link>
+          <button
           v-if="authStore.levelId >= 2"
           class="btn btn-secondary"
           @click="isImportOpen = true"
@@ -264,10 +269,6 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
           <Upload :size="15" />
           <span>Import from Excel</span>
         </button>
-        <router-link to="/export/summary" class="btn btn-secondary">
-          <Download :size="15" />
-          <span>Export Summary</span>
-        </router-link>
       </div>
     </div>
 
@@ -361,10 +362,11 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
             <template v-for="rows in group.products" :key="rows[0].product_id">
               <tr v-if="rows.length > 1" class="parent-row">
                 <td>{{ rows[0].counter }}</td>
-                <td>{{ rows[0].stock_no }}</td>
+                <td>{{ rows[0].product_no }}</td>
                 <td>{{ rows[0].item }}</td>
                 <td colspan="16" style="color: var(--text-muted); font-style: italic;">Multiple price variants</td>
               </tr>
+<<<<<<< HEAD
               <template v-for="row in rows" :key="`${row.product_id}-${row.copy_id}`">
                 <tr :class="{ 'row-changed': live(row).changed }">
                   <td>{{ rows.length > 1 ? '' : row.counter }}</td>
@@ -471,6 +473,32 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
                   </tr>
                 </template>
               </template>
+=======
+              <tr v-for="row in rows" :key="`${row.product_id}-${row.copy_id}`">
+                <td>{{ rows.length > 1 ? '' : row.counter }}</td>
+                <td>{{ rows.length > 1 ? '' : row.product_no }}</td>
+                <td :class="{ variant: rows.length > 1 }">
+                  <template v-if="rows.length > 1">↳ ₱{{ money(row.copy_unit_cost) }}{{ row.copy_label ? ` (${row.copy_label})` : '' }}</template>
+                  <template v-else>{{ row.item }}</template>
+                </td>
+                <td>{{ qty(row.begin_qty) }}</td>
+                <td>{{ row.unit_name }}</td>
+                <td>{{ money(row.begin_cost) }}</td>
+                <td>{{ money(row.begin_qty * row.begin_cost) }}</td>
+                <td>{{ qty(row.purchase_qty) }}</td>
+                <td>{{ money(row.purchase_cost) }}</td>
+                <td>{{ money(row.purchase_total) }}</td>
+                <td>{{ qty(row.used_qty) }}</td>
+                <td>{{ money(row.used_cost) }}</td>
+                <td>{{ money(row.used_total) }}</td>
+                <td>{{ qty(row.spoiled_qty) }}</td>
+                <td>{{ money(row.spoiled_cost) }}</td>
+                <td>{{ money(row.spoiled_total) }}</td>
+                <td>{{ qty(row.ending_qty) }}</td>
+                <td>{{ money(row.ending_cost) }}</td>
+                <td>{{ money(row.ending_qty * row.ending_cost) }}</td>
+              </tr>
+>>>>>>> eb8a10f1b2b7069df3589e297fdaed6f4d2b2025
             </template>
           </tbody>
         </table>

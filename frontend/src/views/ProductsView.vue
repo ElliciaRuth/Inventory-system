@@ -109,7 +109,7 @@ function openEditModal(prod) {
 // The product an action is about
 function productDetails(p) {
   return [
-    ['Product no.', p.product_no],
+    ['Stock Code', p.product_no],
     ['Name', p.product],
     ['Stock no.', p.stock_no],
     ['Category', p.type_name],
@@ -310,13 +310,11 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr v-for="p in paginatedProducts" :key="p.product_id">
-              <td data-label="No.">
-                <span class="badge badge-neutral" style="font-family: var(--font-mono);">
-                  #{{ p.product_no }}
-                </span>
+              <td data-label="No." style="color: var(--text-muted); font-size: 0.8rem;">
+                {{ p.product_id }}
               </td>
               <td data-label="Stock Code" style="font-family: var(--font-mono); font-size: 0.825rem; font-weight: 600; color: var(--text-muted);">
-                {{ p.stock_no || '—' }}
+                {{ p.product_no || '—' }}
               </td>
               <td class="cell-title">
                 <div style="font-weight: 700; color: var(--text-main);">{{ p.product }}</div>
@@ -434,7 +432,7 @@ onMounted(() => {
         <div class="modal-header">
           <div>
             <h2 style="font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem;"><Archive :size="18" /> Archive product?</h2>
-            <p class="panel-subtitle"><strong>{{ archiving.product }}</strong> · #{{ archiving.product_no }}</p>
+            <p class="panel-subtitle"><strong>{{ archiving.product }}</strong> · {{ archiving.product_no }}</p>
           </div>
           <button type="button" class="btn btn-sm btn-secondary" :disabled="archiveBusy" @click="closeArchive">✕</button>
         </div>

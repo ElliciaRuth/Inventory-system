@@ -224,11 +224,11 @@ class ProductModel extends Model
 
     /**
      * Generate and store the stock_no for a product.
-     * Format: {user_office_name}-{product_no}
+     * Format: {user_office_name}-{product_no}  (kept for back-compat; now product_no IS the code)
      */
-    public function generateStockNo(int $productId, string $userOfficeName, int $productNo): string
+    public function generateStockNo(int $productId, string $userOfficeName, string $productNo): string
     {
-        $stockNo = strtoupper($userOfficeName) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT);
+        $stockNo = $productNo ?: strtoupper($userOfficeName) . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT);
         $this->update($productId, ['stock_no' => $stockNo]);
         return $stockNo;
     }

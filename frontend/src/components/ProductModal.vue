@@ -131,7 +131,7 @@ async function handleSubmit() {
   if (loading.value) return
   errorMessage.value = ''
   if (!form.product_no || !form.product) {
-    errorMessage.value = 'Product No and Product Name are required.'
+    errorMessage.value = 'Stock Code and Product Name are required.'
     return
   }
 
@@ -151,8 +151,12 @@ async function handleSubmit() {
     title: editing ? 'Save changes to this product?' : 'Add this product?',
     message: `${form.product} (${form.product_no}) will be ${editing ? 'updated' : 'added to the catalog'}.`,
     details: [
+<<<<<<< HEAD
       ['Product no.', form.product_no],
       ['Stock code', String(form.stock_no).trim() || 'Generated automatically'],
+=======
+      ['Stock Code', form.product_no],
+>>>>>>> eb8a10f1b2b7069df3589e297fdaed6f4d2b2025
       ['Name', form.product],
       ['Category', form.type_name],
       ['Unit', form.unit_name],
@@ -238,12 +242,12 @@ async function save(productAction) {
           <!-- Row 1: Product No, Stock Code & Name -->
           <div class="form-grid-row grid-cols-code-name">
             <div class="form-group">
-              <label class="form-label">Product No *</label>
+              <label class="form-label">Stock Code *</label>
               <input
-                v-model.number="form.product_no"
-                type="number"
+                v-model="form.product_no"
+                type="text"
                 class="form-input"
-                placeholder="e.g. 101"
+                placeholder="e.g. BSU-0001"
                 required
               />
             </div>

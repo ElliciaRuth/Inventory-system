@@ -27,9 +27,6 @@ class AuditLog
             $summary = Privacy::maskEmailsIn($summary);
             $details = Privacy::maskEmailsDeep($details);
 
-            $request = service('request');
-            $ip      = method_exists($request, 'getIPAddress') ? (string) $request->getIPAddress() : '';
-
             db_connect()->table('audit_log')->insert([
                 'created_at'     => date('Y-m-d H:i:s'),
                 'user_id'        => isset($user['id']) && (int) $user['id'] > 0 ? (int) $user['id'] : null,
@@ -40,7 +37,6 @@ class AuditLog
                 'entity_id'      => $entityId,
                 'summary'        => mb_substr($summary, 0, 500),
                 'details'        => $details === [] ? null : json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'ip_address'     => mb_substr($ip, 0, 45),
             ]);
         } catch (Throwable $e) {
             log_message('error', 'Audit log write failed (' . $action . '): ' . $e->getMessage());

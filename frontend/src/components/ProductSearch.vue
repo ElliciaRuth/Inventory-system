@@ -184,7 +184,7 @@ function parts(text) {
 
       <!-- The selected item shows in the bar until you start typing -->
       <div v-if="!query && selected" class="picker-value" :class="{ 'is-dim': open }" @mousedown.prevent="toggle">
-        <span class="picker-no">#{{ selected.product_no }}</span>
+        <span class="picker-no">{{ selected.product_no }}</span>
         <span class="picker-value-name">{{ selected.product }}</span>
         <span v-if="meta(selected)" class="picker-value-meta">{{ meta(selected) }}</span>
       </div>
@@ -211,7 +211,7 @@ function parts(text) {
         @mousedown.prevent="choose(item)"
         @mousemove="active = i"
       >
-        <span class="picker-no">#{{ item.product_no }}</span>
+        <span class="picker-no">{{ item.product_no }}</span>
         <span class="picker-option-text">
           <span class="picker-option-name"><template v-for="(part, p) in parts(item.product)" :key="p"><mark v-if="part.hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="meta(item)" class="picker-option-meta">{{ meta(item) }}</span>
