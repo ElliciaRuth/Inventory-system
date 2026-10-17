@@ -129,7 +129,7 @@ async function commitImport() {
 <template>
   <teleport to="body">
     <div v-if="isOpen" class="modal-backdrop" @click.self="close">
-      <div class="modal" style="max-width: 860px;">
+      <div class="modal-card" style="max-width: 860px;">
         <!-- Header -->
         <div class="modal-header">
           <div style="display:flex; align-items:center; gap:10px;">

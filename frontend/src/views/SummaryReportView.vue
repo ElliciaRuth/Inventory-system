@@ -82,7 +82,12 @@ onMounted(load)
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
       <div style="display:flex;gap:.5rem;">
-        <button
+      
+        <router-link to="/export/summary" class="btn btn-secondary">
+          <Download :size="15" />
+          <span>Export Summary</span>
+        </router-link>
+          <button
           v-if="authStore.levelId >= 2"
           class="btn btn-secondary"
           @click="isImportOpen = true"
@@ -90,10 +95,6 @@ onMounted(load)
           <Upload :size="15" />
           <span>Import from Excel</span>
         </button>
-        <router-link to="/export/summary" class="btn btn-secondary">
-          <Download :size="15" />
-          <span>Export Summary</span>
-        </router-link>
       </div>
     </div>
 
