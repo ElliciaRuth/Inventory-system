@@ -24,7 +24,7 @@ class CreateAuditLog extends Migration
                 'entity_id'      => ['type' => 'BIGINT', 'constraint' => 20, 'null' => true],
                 'summary'        => ['type' => 'VARCHAR', 'constraint' => 500, 'default' => ''],
                 'details'        => ['type' => 'TEXT', 'null' => true],
-                'ip_address'     => ['type' => 'VARCHAR', 'constraint' => 45, 'default' => ''],
+              
             ]);
             $this->forge->addPrimaryKey('audit_id');
             $this->forge->addKey('created_at');

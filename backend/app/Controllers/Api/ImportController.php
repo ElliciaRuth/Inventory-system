@@ -327,4 +327,120 @@ class ImportController extends BaseApiController
 
         return $plan;
     }
+
+    // ── Summary Report import ─────────────────────────────────────────────────
+
+    /**
+     * POST /api/import/summary/preview   multipart: file, month?
+     */
+    public function previewSummary(): ResponseInterface
+    {
+        if ($error = $this->custodianOrManager()) {
+            return $error;
+        }
+
+        $file = $this->request->getFile('file');
+        if ($file === null || ! $file->isValid()) {
+            return $this->respondError('Choose an Excel file to import.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if (strtolower($file->getClientExtension()) !== 'xlsx') {
+            return $this->respondError('Only Excel .xlsx files can be imported.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($file->getSize() > self::MAX_UPLOAD_BYTES) {
+            return $this->respondError('The file is larger than 20 MB.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $monthHint = trim((string) ($this->request->getPost('month') ?? ''));
+
+        try {
+            $result = (new \App\Services\SummaryImportService())->preview(
+                $file->getTempName(),
+                $file->getClientName(),
+                $this->currentUserId(),
+                $this->currentOfficeId(),
+                $monthHint
+            );
+        } catch (Throwable $e) {
+            log_message('error', 'Summary report import preview failed: ' . $e->getMessage());
+            return $this->respondError('The file could not be read: ' . $this->safeMessage($e), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return $this->respondSuccess([
+            'token' => $result['token'],
+            'plan'  => $result['plan'],
+        ], 'Preview ready');
+    }
+
+    /**
+     * POST /api/import/summary/commit   { token, mode: "replace"|"append", password? }
+     */
+    public function commitSummary(): ResponseInterface
+    {
+        if ($error = $this->custodianOrManager()) {
+            return $error;
+        }
+
+        $input = $this->input();
+        $token = (string) ($input['token'] ?? '');
+        $mode  = (string) ($input['mode']  ?? '');
+
+        if (! in_array($mode, ['replace', 'append'], true)) {
+            return $this->respondError('Choose whether to delete the existing inventory first or keep it.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $approvedBy = null;
+        if ($mode === 'replace') {
+            $password = (string) ($input['password'] ?? '');
+            $who      = $this->currentLevelId() >= 3 ? 'your' : "a manager's";
+            if ($password === '') {
+                return $this->respondError("Enter {$who} password to delete the existing inventory.", ['password' => 'Required.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $failKey = 'import_sum_pw_fail_' . $this->currentUserId();
+            if ((int) cache($failKey) >= self::MAX_PASSWORD_FAILURES) {
+                return $this->respondError('Too many wrong passwords. Try again in 15 minutes.', [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+            }
+            $approvedBy = $this->managerApproval($password);
+            if ($approvedBy === null) {
+                cache()->save($failKey, (int) cache($failKey) + 1, 900);
+                AuditLog::record('import.summary.password_failed', 'import', null, 'Wrong manager password on delete-and-import (summary); nothing was deleted');
+                return $this->respondError(
+                    $this->currentLevelId() >= 3 ? 'Incorrect password. Nothing was deleted.' : "That is not the password of an active manager of your office. Nothing was deleted.",
+                    ['password' => 'Incorrect password.'],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+        }
+
+        $service = new \App\Services\SummaryImportService();
+        $plan    = $service->loadPlan($token, $this->currentUserId());
+        if ($plan === null) {
+            return $this->respondError('This preview has expired. Choose the file again.', [], ResponseInterface::HTTP_GONE);
+        }
+
+        try {
+            $result = $service->commit($plan, $mode === 'replace', $this->currentUser() ?? []);
+        } catch (DomainException $e) {
+            return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (Throwable $e) {
+            log_message('error', 'Summary report import failed: ' . $e->getMessage());
+            return $this->respondError('Import failed; nothing was changed. The details were written to the server log.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $service->forgetPlan($token);
+
+        AuditLog::record($mode === 'replace' ? 'import.summary.replace' : 'import.summary.append', 'import', null,
+            ($mode === 'replace' ? 'Deleted existing inventory and imported ' : 'Imported ') . 'summary report from ' . ($plan['file_name'] ?? 'Excel')
+            . ': ' . ($result['products_created'] ?? 0) . ' products created, ' . ($result['products_reused'] ?? 0) . ' reused',
+            [
+                'receipts'    => $result['receipts']    ?? 0,
+                'issues'      => $result['issues']       ?? 0,
+                'adjustments' => $result['adjustments']  ?? 0,
+                'deleted'     => $result['deleted']      ?? null,
+                'backups'     => $result['backups']      ?? [],
+                'approved_by' => $approvedBy,
+            ]
+        );
+
+        return $this->respondSuccess($result, 'Import complete');
+    }
 }

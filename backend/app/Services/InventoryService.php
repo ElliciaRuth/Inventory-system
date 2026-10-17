@@ -189,15 +189,16 @@ class InventoryService
             }
             $borrower = $this->borrowerFrom($payload, $userOfficeId);
 
+            $userCol = $this->db->fieldExists('user_id', 'borrow_table') ? 'user_id' : 'borrowed_by_user_id';
             $this->db->table('borrow_table')->insert($borrower + [
-                'user_office_id'      => $userOfficeId,
-                'product_id'          => $productId,
-                'copy_id'             => $copyId,
-                'quantity'            => $qty,
-                'returned_qty'        => 0,
-                'status'              => 'outstanding',
-                'borrowed_by_user_id' => $userId ?: null,
-                'borrowed_at'         => $dateTime,
+                'user_office_id' => $userOfficeId,
+                'product_id'     => $productId,
+                'copy_id'        => $copyId,
+                'quantity'       => $qty,
+                'returned_qty'   => 0,
+                'status'         => 'outstanding',
+                $userCol         => $userId ?: null,
+                'borrowed_at'    => $dateTime,
             ]);
             $borrowId = (int) $this->db->insertID();
 
@@ -433,6 +434,7 @@ class InventoryService
      */
     public function borrows(int $userOfficeId, int $productId = 0, string $status = ''): array
     {
+        $userCol = $this->db->fieldExists('user_id', 'borrow_table') ? 'user_id' : 'borrowed_by_user_id';
         $builder = $this->db->table('borrow_table bt')
             ->select('bt.*, p.product, COALESCE(pc.unit_cost, 0) AS unit_cost, COALESCE(pc.label, "") AS copy_label,
                       COALESCE(ut.unit, "pcs") AS unit_name, u.username AS borrowed_by,
@@ -440,7 +442,7 @@ class InventoryService
             ->join('product_table p', 'p.product_id = bt.product_id')
             ->join('product_copy_table pc', 'pc.copy_id = bt.copy_id', 'left')
             ->join('unit_table ut', 'ut.unit_id = p.unit_id', 'left')
-            ->join('user_table u', 'u.user_id = bt.borrowed_by_user_id', 'left')
+            ->join('user_table u', "u.user_id = bt.{$userCol}", 'left')
             ->orderBy('bt.borrowed_at', 'DESC');
 
         if ($userOfficeId > 0) {
@@ -673,11 +675,10 @@ class InventoryService
         }
 
         return [
-            'borrower_name'           => mb_substr($name, 0, 150),
-            'borrower_user_office_id' => $unitId ?: null,
-            'borrower_unit'           => mb_substr($unit, 0, 150),
-            'due_date'                => $due ?: null,
-            'notes'                   => mb_substr(trim((string) ($payload['borrow_notes'] ?? '')), 0, 500),
+            'borrower_name' => mb_substr($name, 0, 150),
+            'borrower_unit' => mb_substr($unit, 0, 150),
+            'due_date'      => $due ?: null,
+            'notes'         => mb_substr(trim((string) ($payload['borrow_notes'] ?? '')), 0, 500),
         ];
     }
 

@@ -1,6 +1,6 @@
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { Download, PencilLine, ExternalLink } from 'lucide-vue-next'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { Download, Upload, PencilLine, ExternalLink } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
@@ -8,6 +8,7 @@ import { toast, errorMessage } from '../composables/useToast'
 import { triggerAutoReload } from '../composables/useAutoReload'
 import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 import UnsavedChangesBar from '../components/UnsavedChangesBar.vue'
+import ImportSummaryModal from '../components/ImportSummaryModal.vue'
 import { typeLabel } from '../utils/transactionTypes'
 import '../styles/inline-edit.css'
 
@@ -20,6 +21,7 @@ const YEARS = Array.from({ length: now.getFullYear() - 2019 }, (_, i) => now.get
 const SECTIONS = ['purchase', 'used', 'spoiled']
 
 const authStore = useAuthStore()
+const isImportOpen = ref(false)
 
 const filters = reactive({
   search: '',
@@ -236,6 +238,8 @@ async function saveEdits() {
   }
 }
 
+onUnmounted(() => clearTimeout(searchTimer))
+
 onMounted(load)
 </script>
 
@@ -247,11 +251,27 @@ onMounted(load)
         <h1 class="hero-title">Inventory Report</h1>
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
-      <router-link to="/export/summary" class="btn btn-secondary">
-        <Download :size="15" />
-        <span>Export Summary</span>
-      </router-link>
+      <div style="display:flex;gap:.5rem;">
+        <button
+          v-if="authStore.levelId >= 2"
+          class="btn btn-secondary"
+          @click="isImportOpen = true"
+        >
+          <Upload :size="15" />
+          <span>Import from Excel</span>
+        </button>
+        <router-link to="/export/summary" class="btn btn-secondary">
+          <Download :size="15" />
+          <span>Export Summary</span>
+        </router-link>
+      </div>
     </div>
+
+    <ImportSummaryModal
+      :is-open="isImportOpen"
+      @close="isImportOpen = false"
+      @imported="load"
+    />
 
     <form
       class="panel"
