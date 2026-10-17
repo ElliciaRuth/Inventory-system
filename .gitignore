@@ -73,6 +73,9 @@ Vagrantfile
 # never commit them (only the folder's access rules are kept)
 /backend/writable/backups/*
 !/backend/writable/backups/.htaccess
+
+# Barcode images are generated per batch on each PC (the app draws a missing one live)
+/backend/public/barcodes/*.svg
 *.sql
 *.bsubackup
 
