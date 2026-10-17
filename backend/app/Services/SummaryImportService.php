@@ -20,10 +20,15 @@ use DomainException;
  * then writes products, product copies, batches and transactions to match the
  * quantities and costs in the file:
  *
- *   begin_qty  > 0  → receipt  on the 1st of the month  ("Opening Balance")
+ *   begin_qty  > 0  → receipt  on the last day of the previous month ("Opening Balance"),
+ *                     so the report shows it as the month's beginning inventory
  *   purch_qty  > 0  → receipt  on the 15th of the month ("Purchase")
  *   used_qty   > 0  → issue    on the 20th of the month
  *   spoil_qty  > 0  → adjust_out on the 25th of the month
+ *
+ * Used and spoiled quantities are taken from the product's stock oldest first, across
+ * every price, as the stock card does. If the file uses more than it has, nothing is
+ * imported: the file is wrong, and stock is never made up to cover it.
  *
  * Every transaction carries a SHA-256 fingerprint so re-importing the same
  * file in "append" mode adds nothing.
@@ -147,6 +152,22 @@ class SummaryImportService
             $result['deleted'] = $this->wipeInventory([$officeId]);
         }
 
+        try {
+            $this->writeProducts($products, $plan, $officeId, $userId, $result);
+        } catch (\Throwable $e) {
+            // A DomainException (a row the file can't balance) is not a query error,
+            // so the transaction has to be rolled back here
+            $this->db->transRollback();
+            throw $e;
+        }
+
+        $this->db->transComplete();
+
+        return $result;
+    }
+
+    private function writeProducts(array $products, array $plan, int $officeId, int $userId, array &$result): void
+    {
         foreach ($products as $product) {
             $month     = $product['month'] ?? ($plan['month'] ?? '');
             $monthDate = $month !== '' ? $month . '-01' : date('Y-m-01');
@@ -159,10 +180,10 @@ class SummaryImportService
                 $fp = $this->fingerprint($product, 'begin', $officeId, $month);
                 if (! $this->alreadyImported($officeId, $fp)) {
                     $copyId  = (int) (new ProductCopyModel())->findOrCreateCopy($productId, (float) $product['begin_cost'], $officeId)['copy_id'];
-                    $batchId = $this->insertReceiptRow($productId, $copyId, $officeId, $userId, [
+                    $this->insertReceiptRow($productId, $copyId, $officeId, $userId, [
                         'qty'  => $product['begin_qty'],
                         'cost' => $product['begin_cost'],
-                        'date' => $monthDate,
+                        'date' => date('Y-m-d', strtotime($monthDate . ' -1 day')),
                         'ref'  => 'Opening Balance',
                     ], $fp);
                     $result['receipts']++;
@@ -194,15 +215,13 @@ class SummaryImportService
             if ($product['used_qty'] > 0) {
                 $fp = $this->fingerprint($product, 'used', $officeId, $month);
                 if (! $this->alreadyImported($officeId, $fp)) {
-                    $copyId   = (int) (new ProductCopyModel())->findOrCreateCopy($productId, (float) $product['begin_cost'], $officeId)['copy_id'];
-                    $batches  = $this->openBatches($copyId, $officeId);
                     $usedDate = date('Y-m-d', strtotime($monthDate . ' +19 days'));
-                    $this->insertIssueRow($batches, $copyId, $officeId, $userId, [
+                    $this->insertIssueRow($productId, $officeId, $userId, [
                         'qty'  => $product['used_qty'],
                         'date' => $usedDate,
                         'type' => 'issue',
                         'ref'  => 'Used',
-                    ], $fp, $product['item'], (float) $product['begin_cost'], $productId);
+                    ], $fp, $product);
                     $result['issues']++;
                 } else {
                     $result['already_imported']++;
@@ -213,25 +232,20 @@ class SummaryImportService
             if ($product['spoil_qty'] > 0) {
                 $fp = $this->fingerprint($product, 'spoil', $officeId, $month);
                 if (! $this->alreadyImported($officeId, $fp)) {
-                    $copyId    = (int) (new ProductCopyModel())->findOrCreateCopy($productId, (float) $product['begin_cost'], $officeId)['copy_id'];
-                    $batches   = $this->openBatches($copyId, $officeId);
                     $spoilDate = date('Y-m-d', strtotime($monthDate . ' +24 days'));
-                    $this->insertIssueRow($batches, $copyId, $officeId, $userId, [
-                        'qty'  => $product['spoil_qty'],
-                        'date' => $spoilDate,
-                        'type' => 'adjust_out',
-                        'ref'  => 'Breakage/Spoiled',
-                    ], $fp, $product['item'], (float) $product['begin_cost'], $productId);
+                    $this->insertIssueRow($productId, $officeId, $userId, [
+                        'qty'    => $product['spoil_qty'],
+                        'date'   => $spoilDate,
+                        'type'   => 'adjust_out',
+                        'ref'    => 'Breakage/Spoiled',
+                        'reason' => $this->adjustmentReasonId('Spoiled'),
+                    ], $fp, $product);
                     $result['adjustments']++;
                 } else {
                     $result['already_imported']++;
                 }
             }
         }
-
-        $this->db->transComplete();
-
-        return $result;
     }
 
     // ── Product/copy lookup & creation ───────────────────────────────────────
@@ -355,44 +369,35 @@ class SummaryImportService
     }
 
     /**
-     * Insert an issue or adjust_out transaction, consuming FIFO batches.
+     * Insert an issue or adjust_out transaction, taking the product's stock oldest first
+     * (across all its prices, as the stock card does), one transaction per batch used.
      *
-     * For Summary Report imports the beginning inventory is the carry-over from the
-     * previous month, so the numbers in the file are already verified.  If the
-     * available batches fall short (e.g. a partial Append re-import, or a tiny
-     * floating-point rounding gap), we auto-create a balancing receipt to cover the
-     * shortfall before proceeding, rather than aborting the entire import.
+     * Only stock received on or before the transaction date counts. If that is not enough,
+     * the row in the file doesn't add up: the import stops and nothing is written.
      */
     private function insertIssueRow(
-        array  &$batches,
-        int    $copyId,
+        int    $productId,
         int    $officeId,
         int    $userId,
         array  $data,
         string $fingerprint,
-        string $productName,
-        float  $unitCost = 0.0,
-        int    $productId = 0
+        array  $product
     ): void {
         $stamp     = $data['date'] . ' 08:00:00';
         $refId     = $this->referenceId($data['ref'] ?? '', $officeId);
         $remaining = round((float) $data['qty'], 4);
         $part      = 0;
 
-        foreach ($batches as &$batch) {
+        foreach ($this->openBatches($productId, $officeId, $data['date']) as $batch) {
             if ($remaining <= 0.0001) {
                 break;
             }
-            if ($batch['qty'] <= 0.0001) {
-                continue;
-            }
 
-            $take          = min($batch['qty'], $remaining);
-            $batch['qty'] -= $take;
-            $remaining    -= $take;
+            $take      = min($batch['qty'], $remaining);
+            $remaining = round($remaining - $take, 4);
 
             $this->db->table('batch_table')->where('batch_id', $batch['batch_id'])->update([
-                'current_qty' => round($batch['qty'], 4),
+                'current_qty' => round($batch['qty'] - $take, 4),
                 'updated_at'  => $stamp,
             ]);
 
@@ -407,111 +412,60 @@ class SummaryImportService
                 'transaction_unit_cost'    => 0,
                 'transaction_date'         => $stamp,
                 'batch_id'                 => $batch['batch_id'],
-                'copy_id'                  => $copyId,
+                'copy_id'                  => $batch['copy_id'] ?: null,
                 'reference_id'             => $refId,
+                'adjustment_reason_id'     => $data['reason'] ?? null,
                 'user_id'                  => $userId ?: null,
                 'user_office_id'           => $officeId,
                 'created_at'               => $stamp,
                 'updated_at'               => $stamp,
             ]);
         }
-        unset($batch);
 
-        // ── Shortfall handling ────────────────────────────────────────────────
-        // The Summary Report beginning inventory is last month's ending balance —
-        // the figures in the file are already audited.  If the remaining quantity
-        // still can't be satisfied by existing batches (e.g. partial Append
-        // re-import where the begin receipt was already fingerprinted, or a tiny
-        // floating-point gap), we auto-create a covering receipt so the import
-        // is never blocked by balance validation.
-        if ($remaining > 0.0001 && $productId > 0) {
-            $coverDate   = $data['date'];
-            $coverStamp  = $coverDate . ' 07:59:00'; // 1 min before the issue
-            $coverRefId  = $this->referenceId('Balance Adjustment', $officeId);
-            $officeName  = $this->officeName($officeId);
-            $baseBatchNo = 'B-' . strtoupper($officeName) . '-' . str_replace('-', '', $coverDate)
-                . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT) . '-ADJ';
-
-            $inventoryService = new InventoryService($this->db);
-            $batchNo          = $inventoryService->nextBatchNo($baseBatchNo);
-
-            $this->db->table('batch_table')->insert([
-                'batch_no'       => $batchNo,
-                'product_id'     => $productId,
-                'copy_id'        => $copyId,
-                'user_office_id' => $officeId,
-                'reference_id'   => $coverRefId,
-                'current_qty'    => 0, // will be consumed immediately
-                'date_received'  => $coverDate,
-                'created_at'     => $coverStamp,
-                'updated_at'     => $coverStamp,
-            ]);
-            $coverBatchId = (int) $this->db->insertID();
-
-            $barcodes = new BarcodeService();
-            $barcode  = $barcodes->generateBatchValue($coverBatchId);
-            $barcodes->saveBatchBarcode($barcode);
-            $this->db->table('batch_table')->where('batch_id', $coverBatchId)->update(['barcode_value' => $barcode]);
-
-            // Receipt transaction for the covering batch
-            $this->db->table('transaction_table')->insert([
-                'stock_import_fingerprint' => null,
-                'stock_import_batch'       => $this->runId,
-                'transaction_type_id'      => $this->typeId('receipt'),
-                'transaction_qty'          => round($remaining, 4),
-                'transaction_unit_cost'    => round($unitCost, 4),
-                'transaction_date'         => $coverStamp,
-                'batch_id'                 => $coverBatchId,
-                'copy_id'                  => $copyId,
-                'reference_id'             => $coverRefId,
-                'user_id'                  => $userId ?: null,
-                'user_office_id'           => $officeId,
-                'created_at'               => $coverStamp,
-                'updated_at'               => $coverStamp,
-            ]);
-
-            // Issue/adjust from the covering batch
-            $fp = $part === 0 ? $fingerprint : null;
-            $this->db->table('transaction_table')->insert([
-                'stock_import_fingerprint' => $fp,
-                'stock_import_batch'       => $this->runId,
-                'transaction_type_id'      => $this->typeId($data['type']),
-                'transaction_qty'          => round($remaining, 4),
-                'transaction_unit_cost'    => 0,
-                'transaction_date'         => $stamp,
-                'batch_id'                 => $coverBatchId,
-                'copy_id'                  => $copyId,
-                'reference_id'             => $refId,
-                'user_id'                  => $userId ?: null,
-                'user_office_id'           => $officeId,
-                'created_at'               => $stamp,
-                'updated_at'               => $stamp,
-            ]);
-
-            // batch current_qty stays 0 (fully consumed)
+        if ($remaining > 0.0001) {
+            $what = $data['type'] === 'issue' ? 'Used/Sold' : 'Breakage';
+            throw new DomainException(sprintf(
+                '%s (sheet "%s", row %d): the %s quantity is %s more than the stock on hand. Nothing was imported; correct the row and try again.',
+                $product['item'],
+                $product['sheet'] ?? '',
+                (int) ($product['row'] ?? 0),
+                $what,
+                rtrim(rtrim(number_format($remaining, 4, '.', ''), '0'), '.')
+            ));
         }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /**
-     * Batches of this sub-product that still have stock, oldest received first.
+     * The product's batches that still have stock on the given date, oldest received first.
      */
-    private function openBatches(int $copyId, int $officeId): array
+    private function openBatches(int $productId, int $officeId, string $onDate): array
     {
         $rows = $this->db->table('batch_table')
-            ->select('batch_id, current_qty')
-            ->where('copy_id', $copyId)
+            ->select('batch_id, copy_id, current_qty')
+            ->where('product_id', $productId)
             ->where('user_office_id', $officeId)
             ->where('current_qty >', 0)
+            ->where('date_received <=', $onDate)
             ->orderBy('date_received', 'ASC')
             ->orderBy('batch_id', 'ASC')
             ->get()->getResultArray();
 
         return array_map(
-            static fn ($r) => ['batch_id' => (int) $r['batch_id'], 'qty' => (float) $r['current_qty']],
+            static fn ($r) => ['batch_id' => (int) $r['batch_id'], 'copy_id' => (int) $r['copy_id'], 'qty' => (float) $r['current_qty']],
             $rows
         );
+    }
+
+    private function adjustmentReasonId(string $name): ?int
+    {
+        $row = $this->db->table('adjustment_reason')
+            ->select('adjustment_reason_id')
+            ->where('adjustment_reason', $name)
+            ->get(1)->getRowArray();
+
+        return $row ? (int) $row['adjustment_reason_id'] : null;
     }
 
     private function referenceId(string $reference, int $officeId): ?int
