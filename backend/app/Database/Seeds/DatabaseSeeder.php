@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
                 'last_name'            => 'Tech',
                 'name'                 => 'Admin Tech',
                 'user_office_id'       => null,
+                'email'                => 'admin_tech@gmail.com',
                 'lvl_of_access_id'     => 4,
                 'user_activity_id'     => 1,
                 'must_change_password' => 1, // the password above is public
