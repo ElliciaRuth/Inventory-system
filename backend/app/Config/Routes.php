@@ -41,6 +41,9 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('auth/setup-recovery-email/request', 'AuthController::requestRecoveryEmail');
         $routes->post('auth/setup-recovery-email/confirm', 'AuthController::confirmRecoveryEmail');
 
+        // ── Live refresh: change counters polled by the app (any signed-in user) ──
+        $routes->get('sync', 'SyncController::index');
+
         // ── Dashboard, transaction log, notifications ────────────────────────
         $routes->get('dashboard', 'DashboardController::index', ['filter' => 'level:1']);
         $routes->get('transactions', 'DashboardController::transactions', ['filter' => 'level:1']);

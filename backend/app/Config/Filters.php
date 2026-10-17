@@ -5,6 +5,7 @@ namespace Config;
 use App\Filters\AuthFilter;
 use App\Filters\LevelFilter;
 use App\Filters\RequestGuard;
+use App\Filters\SyncVersionFilter;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -40,6 +41,7 @@ class Filters extends BaseFilters
         'auth'          => AuthFilter::class,
         'level'         => LevelFilter::class,
         'requestguard'  => RequestGuard::class,
+        'syncversion'   => SyncVersionFilter::class,
     ];
 
     /**
@@ -112,5 +114,7 @@ class Filters extends BaseFilters
     public array $filters = [
         // Size, shape and rate limits for every API request (Config\RequestLimits)
         'requestguard' => ['before' => ['api', 'api/*']],
+        // Counts every successful change so open pages refresh (App\Libraries\SyncVersion)
+        'syncversion' => ['after' => ['api/*']],
     ];
 }

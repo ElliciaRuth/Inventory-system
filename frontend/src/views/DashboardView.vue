@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { TriangleAlert, PackageX, CalendarClock, Package, Handshake, Undo2 } from 'lucide-vue-next'
 import { dashboardApi } from '../api/dashboard'
 import { useAuthStore } from '../stores/authStore'
-import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
+import { useAutoReload, isBackgroundReload, deduplicateById } from '../composables/useAutoReload'
 import AdminDashboardView from './AdminDashboardView.vue'
 import AppPagination from '../components/AppPagination.vue'
 import StockModal from '../components/StockModal.vue'
@@ -63,14 +63,15 @@ const totalAlerts = computed(() => {
   )
 })
 
-async function fetchDashboard() {
+async function fetchDashboard(reason) {
   if (isAdminAccount.value) {
     loading.value = false
     emit('update-alerts', 0)
     return
   }
 
-  loading.value = true
+  // Background refreshes keep the current rows on screen instead of a loading state
+  if (!isBackgroundReload(reason)) loading.value = true
   try {
     const res = await dashboardApi.getOverview()
     if (res.status && res.data) {

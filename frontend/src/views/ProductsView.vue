@@ -3,7 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { productsApi } from '../api/products'
 import { useAuthStore } from '../stores/authStore'
-import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
+import { useAutoReload, isBackgroundReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import ProductModal from '../components/ProductModal.vue'
 import AppPagination from '../components/AppPagination.vue'
 import ImportStockcardsModal from '../components/ImportStockcardsModal.vue'
@@ -35,8 +35,9 @@ const selectedProduct = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(15)
 
-async function loadData() {
-  loading.value = true
+async function loadData(reason) {
+  // Background refreshes keep the current rows on screen instead of a loading state
+  if (!isBackgroundReload(reason)) loading.value = true
   try {
     const filters = { search: searchQuery.value, type_id: selectedType.value }
     const [prodRes, metaRes, archivedRes] = await Promise.all([

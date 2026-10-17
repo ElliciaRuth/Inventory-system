@@ -1,6 +1,31 @@
 import { defineStore } from 'pinia'
 import { notificationApi } from '../api/notification'
 import { useAuthStore } from './authStore'
+import { toast } from '../composables/useToast'
+
+// Notifications that need someone to act are announced with a pop-up when they arrive:
+// a new stock-out request, a decision on yours, a new sign-up
+const ANNOUNCED = /^(stockout-pending|stockout-decision|user-pending)-/
+
+// What this user has already seen, so only new arrivals pop up (not the ones there at sign-in)
+let seenFor = null
+let seenIds = new Set()
+
+function announceNew(notifications, userId) {
+  if (seenFor !== userId) {
+    seenFor = userId
+    seenIds = new Set(notifications.map((n) => n.id))
+    return
+  }
+  const fresh = notifications.filter((n) => ANNOUNCED.test(n.id) && !seenIds.has(n.id))
+  notifications.forEach((n) => seenIds.add(n.id))
+
+  if (fresh.length > 2) {
+    toast(`${fresh.length} new notifications. Open the bell to see them.`, 'info', 7000)
+  } else {
+    fresh.forEach((n) => toast(n.title, 'info', 7000))
+  }
+}
 
 export const useNotificationStore = defineStore('notification', {
   state: () => ({
@@ -89,6 +114,7 @@ export const useNotificationStore = defineStore('notification', {
         const res = await notificationApi.getNotifications()
         if (res && res.status && res.data) {
           this.notifications = res.data.notifications || []
+          announceNew(this.notifications, useAuthStore().user?.id ?? null)
           this.counts = res.data.counts || this.counts
           this.lastFetched = new Date().toISOString()
         }

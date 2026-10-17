@@ -1,32 +1,35 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '../views/DashboardView.vue'
-import ProductsView from '../views/ProductsView.vue'
-import StockcardView from '../views/StockcardView.vue'
-import TransactionsView from '../views/TransactionsView.vue'
-import AdminDashboardView from '../views/AdminDashboardView.vue'
 import LoginView from '../views/LoginView.vue'
-import RegisterView from '../views/RegisterView.vue'
-import AccountSetupView from '../views/AccountSetupView.vue'
-import ExportStockcardView from '../views/ExportStockcardView.vue'
-import NotificationsView from '../views/NotificationsView.vue'
-import StockoutView from '../views/StockoutView.vue'
-import StockoutListView from '../views/StockoutListView.vue'
-import StockoutPendingView from '../views/StockoutPendingView.vue'
-import StockoutHistoryView from '../views/StockoutHistoryView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import BatchesView from '../views/BatchesView.vue'
-import SummaryReportView from '../views/SummaryReportView.vue'
-import ExportSummaryView from '../views/ExportSummaryView.vue'
-import FinishedBarcodesView from '../views/FinishedBarcodesView.vue'
-import ForgotPasswordView from '../views/ForgotPasswordView.vue'
-import ProfileView from '../views/ProfileView.vue'
-import AuditLogView from '../views/AuditLogView.vue'
-import PhysicalCountView from '../views/PhysicalCountView.vue'
-import BorrowsView from '../views/BorrowsView.vue'
-import HelpView from '../views/HelpView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 import { toast } from '../composables/useToast'
+
+// The sign-in page and the dashboard come with the app; every other page is downloaded
+// the first time it is opened, so the first load stays small
+const ProductsView = () => import('../views/ProductsView.vue')
+const StockcardView = () => import('../views/StockcardView.vue')
+const TransactionsView = () => import('../views/TransactionsView.vue')
+const AdminDashboardView = () => import('../views/AdminDashboardView.vue')
+const RegisterView = () => import('../views/RegisterView.vue')
+const AccountSetupView = () => import('../views/AccountSetupView.vue')
+const ExportStockcardView = () => import('../views/ExportStockcardView.vue')
+const NotificationsView = () => import('../views/NotificationsView.vue')
+const StockoutView = () => import('../views/StockoutView.vue')
+const StockoutListView = () => import('../views/StockoutListView.vue')
+const StockoutPendingView = () => import('../views/StockoutPendingView.vue')
+const StockoutHistoryView = () => import('../views/StockoutHistoryView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const BatchesView = () => import('../views/BatchesView.vue')
+const SummaryReportView = () => import('../views/SummaryReportView.vue')
+const ExportSummaryView = () => import('../views/ExportSummaryView.vue')
+const FinishedBarcodesView = () => import('../views/FinishedBarcodesView.vue')
+const ForgotPasswordView = () => import('../views/ForgotPasswordView.vue')
+const ProfileView = () => import('../views/ProfileView.vue')
+const AuditLogView = () => import('../views/AuditLogView.vue')
+const PhysicalCountView = () => import('../views/PhysicalCountView.vue')
+const BorrowsView = () => import('../views/BorrowsView.vue')
+const HelpView = () => import('../views/HelpView.vue')
 
 // meta.public   — reachable without logging in
 // meta.minLevel — lowest access level allowed (mirrors the backend route filters)
@@ -269,6 +272,21 @@ onAuthFailure(({ type, step, code, message }) => {
       router.push({ name: 'account-setup' })
     }
   }
+})
+
+// After the server is updated, a tab opened before the update asks for page files that no
+// longer exist. Load the page fresh (once per page, so a real network failure can't loop).
+router.onError((error, to) => {
+  const stale = /dynamically imported module|Importing a module script failed|error loading dynamically imported/i
+  if (!stale.test(String(error?.message || ''))) return
+  const key = `bsu_reloaded_for:${to.fullPath}`
+  try {
+    if (sessionStorage.getItem(key)) return
+    sessionStorage.setItem(key, '1')
+  } catch {
+    return // Storage blocked: without the marker a reload could repeat, so leave it to the user
+  }
+  window.location.assign(to.fullPath)
 })
 
 export default router

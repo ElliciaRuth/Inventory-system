@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useAutoReload, isBackgroundReload } from '../composables/useAutoReload'
 import { Clock, UserCheck, Users, AlertTriangle, PenLine } from 'lucide-vue-next'
 import { maskEmail } from '../utils/maskEmail'
 import { settingsApi } from '../api/settings'
@@ -100,13 +101,16 @@ function pkFor(type) {
   return data.value.definitions[type]?.pk
 }
 
-async function load() {
+async function load(reason) {
   try {
     const res = await settingsApi.getAll()
     data.value = { ...data.value, ...res.data }
     if (!openSection.value) {
       openSection.value = data.value.pendingUsers?.length ? 'pending' : recordTypes.value[0] || 'users'
     }
+    // A background refresh updates the lists only: it must not overwrite the expiry and
+    // signatory forms while someone is typing in them
+    if (isBackgroundReload(reason)) return
     if (authStore.levelId >= 3) {
       const sys = await settingsApi.getSystemSettings()
       Object.assign(thresholds, sys.data || {})
@@ -260,6 +264,7 @@ async function saveSignatories() {
 }
 
 onMounted(load)
+useAutoReload(load)
 </script>
 
 <template>

@@ -8,7 +8,7 @@ import {
 } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
-import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
+import { useAutoReload, deduplicateById, triggerAutoReload, isBackgroundReload } from '../composables/useAutoReload'
 import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 import { confirmDialog } from '../composables/useConfirm'
 import StockModal from '../components/StockModal.vue'
@@ -471,7 +471,7 @@ function onImported() {
 // Auto-reload on background interval, window focus, and when mutations occur
 // (not while there are unsaved edits: a reload would mix other people's changes into them)
 useAutoReload((reason) =>
-  changeCount.value > 0 ? undefined : loadStockcard({ quiet: ['interval', 'focus', 'visibility'].includes(reason) })
+  changeCount.value > 0 ? undefined : loadStockcard({ quiet: isBackgroundReload(reason) })
 )
 
 // A notification or link opened while already on this page switches the product

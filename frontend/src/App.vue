@@ -7,12 +7,15 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import SplashScreen from './components/SplashScreen.vue'
 import { useThemeStore } from './stores/themeStore'
 import { useIdleTimeout } from './composables/useIdleTimeout'
+import { useLiveSync } from './composables/useLiveSync'
 
 const route = useRoute()
 const themeStore = useThemeStore()
 
 // Auto-logout after 15 minutes of inactivity
 useIdleTimeout()
+// Pages and notifications refresh by themselves when someone changes something
+useLiveSync()
 
 const alertCount = ref(0)
 // Standalone pages without the navbar

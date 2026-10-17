@@ -449,14 +449,14 @@ function handleKeyDown(e) {
   }
 }
 
-// Keep the bell and menu badges in sync: every 15s, on tab focus, on page change, when the
-// bell is opened, and whenever a view calls triggerAutoReload (accept/reject, stock movement…)
+// Keep the bell and menu badges in sync: within seconds of anyone's change (useLiveSync),
+// on tab focus, on page change, when the bell is opened, and every minute as a safety net
 function refreshNotifications() {
   if (isAdminAccount.value) return
   return notificationStore.fetchNotifications()
 }
 
-useAutoReload(refreshNotifications, { intervalMs: 15000 })
+useAutoReload(refreshNotifications)
 watch(() => route.path, refreshNotifications)
 watch(isNotifDropdownOpen, (open) => open && refreshNotifications())
 

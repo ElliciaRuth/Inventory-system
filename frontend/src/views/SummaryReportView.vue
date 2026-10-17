@@ -5,7 +5,7 @@ import { reportsApi } from '../api/reports'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
-import { triggerAutoReload } from '../composables/useAutoReload'
+import { useAutoReload, triggerAutoReload } from '../composables/useAutoReload'
 import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 import UnsavedChangesBar from '../components/UnsavedChangesBar.vue'
 import ImportSummaryModal from '../components/ImportSummaryModal.vue'
@@ -241,6 +241,10 @@ async function saveEdits() {
 onUnmounted(() => clearTimeout(searchTimer))
 
 onMounted(load)
+
+// Others' changes show up by themselves (not while there are unsaved edits: a reload would
+// mix them into the drafts). The report stays on screen while it refreshes.
+useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
 </script>
 
 <template>

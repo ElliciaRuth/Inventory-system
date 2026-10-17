@@ -2,7 +2,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { dashboardApi } from '../api/dashboard'
-import { useAutoReload, deduplicateById } from '../composables/useAutoReload'
+import { useAutoReload, isBackgroundReload, deduplicateById } from '../composables/useAutoReload'
 import AppPagination from '../components/AppPagination.vue'
 import { typeLabel, typeBadge, isStockIn, signedQty } from '../utils/transactionTypes'
 
@@ -20,8 +20,9 @@ const selectedType = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 
-async function loadTransactions() {
-  loading.value = true
+async function loadTransactions(reason) {
+  // Background refreshes keep the current rows on screen instead of a loading state
+  if (!isBackgroundReload(reason)) loading.value = true
   try {
     const res = await dashboardApi.getTransactions({
       page: currentPage.value,

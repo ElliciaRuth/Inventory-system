@@ -5,6 +5,13 @@ export const lastReloadTime = ref(Date.now())
 export const isReloading = ref(false)
 export const autoSyncEnabled = ref(true)
 
+// Reloads nobody asked for: the timer, coming back to the window, or a change someone
+// else made (useLiveSync). Pages refresh these quietly, without a loading state.
+const BACKGROUND_REASONS = new Set(['interval', 'focus', 'visibility', 'remote'])
+export function isBackgroundReload(reason) {
+  return BACKGROUND_REASONS.has(reason)
+}
+
 /**
  * Triggers a global reload across all active listeners and components.
  * Can be called after any mutation (create, update, delete, stock movement, etc.)
@@ -58,7 +65,9 @@ export function deduplicateById(items, key = 'id') {
  */
 export function useAutoReload(fetchFn, options = {}) {
   const {
-    intervalMs = 25000, // 25-second background interval
+    // A safety net only: changes arrive within seconds through useLiveSync. The timer
+    // still catches what changes by itself, such as batches reaching their expiry date.
+    intervalMs = 60000,
     reloadOnFocus = true,
     reloadOnVisibility = true,
   } = options

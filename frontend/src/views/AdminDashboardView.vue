@@ -4,7 +4,7 @@ import { Users, Clock, Building2, Trash2, Pencil, Check, X, ShieldCheck, UserPlu
 import { adminApi } from '../api/admin'
 import { maskEmail } from '../utils/maskEmail'
 import { useAuthStore } from '../stores/authStore'
-import { useAutoReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
+import { useAutoReload, isBackgroundReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import StatCard from '../components/StatCard.vue'
 import AppPagination from '../components/AppPagination.vue'
 import { confirmDialog } from '../composables/useConfirm'
@@ -43,8 +43,9 @@ const officeFormName = ref('')
 const modalLoading = ref(false)
 const actionMessage = ref('')
 
-async function fetchAdminData() {
-  loading.value = true
+async function fetchAdminData(reason) {
+  // Background refreshes keep the current rows on screen instead of a loading state
+  if (!isBackgroundReload(reason)) loading.value = true
   try {
     const res = await adminApi.getAdminData()
     if (res.status && res.data) {
