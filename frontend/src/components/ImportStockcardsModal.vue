@@ -44,52 +44,116 @@ const skippedCards = computed(() => (plan.value?.cards || []).filter((c) => c.st
 const ignoredCards = computed(() => (plan.value?.cards || []).filter((c) => c.status !== 'ok' && c.ignored))
 const officeUnknown = computed(() => skippedCards.value.some((c) => /office/i.test(c.reason)))
 
-// ── Strict preview: every warning has to be corrected before anything can be imported ──
-// The server lists them (StockcardImportService::issues) and refuses an import while any remain
+// ── Problems and guesses ──
+// The server sorts every message (StockcardImportService::issues): an error is wrong or missing
+// stock that must be corrected, or its product left out; an assumption is a guess the reader
+// already made (a missing day, a merged card…), confirmed with one click per group. The server
+// checks the same rules again on import.
 const issues = computed(() => plan.value?.issues || [])
-const blocked = computed(() => issues.value.length > 0)
-
-// Red: stock or data that is wrong or missing; orange: read with a guess, or doesn't add up
-const SEVERE_KINDS = ['negative', 'missing']
-const toneOf = (kind) => (SEVERE_KINDS.includes(kind) ? 'is-danger' : 'is-warning')
+const errors = computed(() => issues.value.filter((i) => i.severity === 'error'))
+const assumptions = computed(() => issues.value.filter((i) => i.severity === 'assumption'))
+// A problem with the whole file can't be left out with a product
+const fileErrors = computed(() => errors.value.filter((i) => !i.card))
 
 const ISSUE_KINDS = [
   { kind: 'negative', one: 'row has negative stock', many: 'rows have negative stock' },
-  { kind: 'missing', one: 'missing name, unit, office or date', many: 'missing names, units, offices or dates' },
+  { kind: 'missing', one: 'card or product not readable', many: 'cards or products not readable' },
   { kind: 'balance', one: "balance doesn't add up", many: "balances don't add up" },
-  { kind: 'date', one: 'date needs checking', many: 'dates need checking' },
-  { kind: 'other', one: 'other warning', many: 'other warnings' },
+  { kind: 'date', one: 'date problem', many: 'date problems' },
+  { kind: 'other', one: 'other problem', many: 'other problems' },
 ]
 
-// "3 rows have negative stock": one line per kind found
+// "3 rows have negative stock": one line per kind of error found
 const issueSummary = computed(() =>
   ISSUE_KINDS.map((k) => {
-    const count = issues.value.filter((i) => i.kind === k.kind).length
+    const count = errors.value.filter((i) => i.kind === k.kind).length
     return count ? { ...k, count, text: `${count} ${count === 1 ? k.one : k.many}` } : null
   }).filter(Boolean)
 )
 
-// The warnings grouped under the card they are about (file-wide ones last)
-const issuesByCard = computed(() => {
+// A list of messages grouped under the card they are about (file-wide ones last)
+function byCard(list) {
   const groups = new Map()
-  for (const issue of issues.value) {
+  for (const issue of list) {
     const key = issue.card || ''
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(issue)
   }
   return [...groups.entries()]
     .sort(([a], [b]) => Number(a === '') - Number(b === ''))
-    .map(([card, list]) => ({ card, list: [...list].sort((x, y) => (x.row ?? 0) - (y.row ?? 0)) }))
+    .map(([card, items]) => ({ card, list: [...items].sort((x, y) => (x.row ?? 0) - (y.row ?? 0)) }))
+}
+const errorsByCard = computed(() => byCard(errors.value))
+
+// Leave out the products that have errors and import the rest
+const skipErrors = ref(false)
+const productOfCard = computed(() => {
+  const map = {}
+  for (const p of okProducts.value) for (const label of p.cards) map[label] = p.key
+  return map
 })
+const errorProductKeys = computed(() => new Set(errors.value.map((i) => productOfCard.value[i.card]).filter(Boolean)))
+const isLeftOut = (p) => skipErrors.value && errorProductKeys.value.has(p.key)
+const productsToImport = computed(() => okProducts.value.filter((p) => !isLeftOut(p)))
+
+const GROUPS = {
+  date: { name: 'Date guesses', hint: 'A missing day, month or year was filled in from the rows around it.' },
+  order: { name: 'Dates out of order', hint: 'A row is dated before the row above it. Entries are imported in date order.' },
+  column: { name: 'Values in the wrong column', hint: 'A reference in the Date column, or a count typed under Issue, was moved where it belongs.' },
+  merged: { name: 'Cards merged into one product', hint: 'A continuation card for the same item was added to the earlier card.' },
+  correction: { name: 'Stock corrected to match the card', hint: "Where the card's carried-forward figure differs from the entries, a receipt or adjustment was added so the stock matches the card." },
+  unit: { name: 'Units filled in', hint: 'Cards without a unit of measurement use "pcs".' },
+}
+// Guesses about products being left out, or cards that import nothing, don't need confirming
+const relevantAssumption = (i) => !i.card || (productOfCard.value[i.card] && !isLeftOut({ key: productOfCard.value[i.card] }))
+const assumptionGroups = computed(() =>
+  Object.entries(GROUPS)
+    .map(([group, info]) => {
+      const all = assumptions.value.filter((i) => i.group === group)
+      const list = all.filter(relevantAssumption)
+      return list.length ? { group, ...info, list, byCard: byCard(list), total: all.length } : null
+    })
+    .filter(Boolean)
+)
+// An accepted group remembers how many guesses it had: new ones (after a correction) ask again
+const accepted = ref({})
+const isAccepted = (g) => accepted.value[g.group] === g.total
+function acceptGroup(g) {
+  accepted.value = { ...accepted.value, [g.group]: g.total }
+}
+function undoGroup(g) {
+  const next = { ...accepted.value }
+  delete next[g.group]
+  accepted.value = next
+}
+function acceptAllGroups() {
+  for (const g of assumptionGroups.value) acceptGroup(g)
+}
+const pendingGroups = computed(() => assumptionGroups.value.filter((g) => !isAccepted(g)))
+const pendingGuesses = computed(() => pendingGroups.value.reduce((n, g) => n + g.list.length, 0))
+
+// Why the import is locked (empty when it isn't)
+const lockReason = computed(() => {
+  if (fileErrors.value.length) return 'Fix the problem with the whole file'
+  if (errors.value.length && !skipErrors.value) {
+    return `Fix ${errors.value.length} problem${errors.value.length === 1 ? '' : 's'}, or leave those products out`
+  }
+  if (!productsToImport.value.length) return 'Nothing left to import'
+  if (pendingGroups.value.length) return `Accept ${pendingGuesses.value} guess${pendingGuesses.value === 1 ? '' : 'es'}`
+  return ''
+})
+const blocked = computed(() => lockReason.value !== '')
 
 const cardIssues = (label) => issues.value.filter((i) => i.card === label)
+const groupAccepted = (group) => accepted.value[group] === assumptions.value.filter((i) => i.group === group).length
 function cardTone(label) {
   const list = cardIssues(label)
-  if (!list.length) return ''
-  return list.some((i) => SEVERE_KINDS.includes(i.kind)) ? 'is-danger' : 'is-warning'
+  if (list.some((i) => i.severity === 'error')) return 'is-danger'
+  return list.some((i) => i.severity === 'assumption' && !groupAccepted(i.group)) ? 'is-warning' : ''
 }
 // A product row takes the strongest tone of its cards
 function productTone(p) {
+  if (isLeftOut(p)) return 'is-left-out'
   const tones = p.cards.map(cardTone)
   return tones.includes('is-danger') ? 'is-danger' : tones.includes('is-warning') ? 'is-warning' : ''
 }
@@ -165,7 +229,7 @@ function applyTypeToAll() {
 const canImport = computed(() =>
   !busy.value &&
   !blocked.value &&
-  okProducts.value.length > 0 &&
+  productsToImport.value.length > 0 &&
   (mode.value === 'append' || mode.value === 'replace')
 )
 
@@ -181,6 +245,8 @@ function reset() {
   closePasswordPrompt(true)
   types.value = {}
   setAllType.value = ''
+  skipErrors.value = false
+  accepted.value = {}
   result.value = null
   editingCard.value = null
   if (fileInput.value) fileInput.value.value = ''
@@ -210,7 +276,8 @@ async function close() {
       details: [
         ['File', plan.value?.file_name],
         ['Products', okProducts.value.length],
-        ['Warnings', issues.value.length || ''],
+        ['Problems', errors.value.length || ''],
+        ['Guesses', assumptions.value.length || ''],
       ],
       confirmText: 'Discard import',
       cancelText: 'Keep reviewing',
@@ -267,7 +334,8 @@ async function startImport() {
     message: 'The stock cards will be added. Your existing records are kept.',
     details: [
       ['File', plan.value?.file_name],
-      ['Products', okProducts.value.length],
+      ['Products', productsToImport.value.length],
+      ['Left out (problems)', okProducts.value.length - productsToImport.value.length || ''],
       ['Offices', officeList.value],
       ['Categories', typeSummary.value],
     ],
@@ -295,6 +363,8 @@ async function runImport() {
       mode: mode.value,
       password: mode.value === 'replace' ? password.value : undefined,
       types: types.value,
+      accept: assumptionGroups.value.filter(isAccepted).map((g) => g.group),
+      skip_errors: skipErrors.value,
     })
     result.value = res.data
     step.value = 'done'
@@ -372,16 +442,20 @@ function num(value) {
 
         <!-- ── Step 2: preview and options ── -->
         <template v-else-if="step === 'preview'">
-          <div v-if="blocked" class="import-blocked" role="alert">
+          <div v-if="errors.length" class="import-blocked" role="alert">
             <div class="import-blocked-head">
               <OctagonAlert :size="22" />
               <div>
-                <strong>Cannot proceed with import.</strong>
-                There are unresolved warnings in the preview. Please fix the file or clear the warnings before importing.
+                <strong>{{ errors.length }} problem{{ errors.length === 1 ? '' : 's' }} to fix</strong>
+                <template v-if="fileErrors.length">One concerns the whole file, so it has to be corrected before anything can be imported.</template>
+                <template v-else>
+                  in {{ errorProductKeys.size || 'some' }} product{{ errorProductKeys.size === 1 ? '' : 's' }}.
+                  Correct them, or leave those products out and import the rest.
+                </template>
               </div>
             </div>
             <ul class="import-blocked-summary">
-              <li v-for="k in issueSummary" :key="k.kind" :class="toneOf(k.kind)">{{ k.text }}</li>
+              <li v-for="k in issueSummary" :key="k.kind" class="is-danger">{{ k.text }}</li>
             </ul>
             <div class="import-blocked-actions">
               <span>Click a card below to correct its rows here, or fix the Excel file and upload it again.</span>
@@ -390,9 +464,16 @@ function num(value) {
               </button>
             </div>
           </div>
+          <div v-else-if="pendingGroups.length" class="import-alert import-alert-warning">
+            <AlertTriangle :size="16" />
+            <span>
+              <strong>No problems.</strong> The reader made {{ pendingGuesses }} guess{{ pendingGuesses === 1 ? '' : 'es' }} while reading the file:
+              check and accept them below.
+            </span>
+          </div>
           <div v-else class="import-alert import-alert-success">
             <CheckCircle2 :size="16" />
-            <span><strong>No warnings.</strong> The file is ready to import: choose how below.</span>
+            <span><strong>Ready to import.</strong> Choose how below.</span>
           </div>
 
           <div class="import-stats">
@@ -417,7 +498,9 @@ function num(value) {
           </div>
 
           <div class="import-section-head">
-            <h3 class="import-section-title">Products to import ({{ okProducts.length }})</h3>
+            <h3 class="import-section-title">
+              Products to import ({{ productsToImport.length }}<template v-if="productsToImport.length !== okProducts.length"> of {{ okProducts.length }}</template>)
+            </h3>
             <div class="import-setall">
               <span class="import-muted">{{ typeSummary }}</span>
               <div class="import-setall-field">
@@ -470,6 +553,7 @@ function num(value) {
                 <tr v-for="p in okProducts" :key="p.key" :class="productTone(p)">
                   <td>
                     <strong>{{ p.name }}</strong>
+                    <span v-if="isLeftOut(p)" class="import-left-out-badge">Left out</span>
                     <div class="import-card-links">
                       <span class="import-muted">{{ p.cards.length > 1 ? 'Cards:' : 'Card:' }}</span>
                       <button
@@ -511,12 +595,12 @@ function num(value) {
             </table>
           </div>
 
-          <template v-if="blocked">
+          <template v-if="errors.length">
             <h3 class="import-section-title import-issues-title">
-              <AlertTriangle :size="15" /> Warnings to resolve ({{ issues.length }})
+              <AlertTriangle :size="15" /> Problems to fix ({{ errors.length }})
             </h3>
             <div class="import-issues">
-              <div v-for="g in issuesByCard" :key="g.card || '__file'" class="import-issue-card">
+              <div v-for="g in errorsByCard" :key="g.card || '__file'" class="import-issue-card">
                 <button
                   v-if="g.card"
                   type="button"
@@ -529,11 +613,60 @@ function num(value) {
                 </button>
                 <strong v-else class="import-issue-file">Whole file</strong>
                 <ul class="import-issue-list">
-                  <li v-for="(i, n) in g.list" :key="n" :class="toneOf(i.kind)">
+                  <li v-for="(i, n) in g.list" :key="n" class="is-danger">
                     <span v-if="i.row" class="import-issue-row">Row {{ i.row }}</span>
                     <span>{{ i.message }}</span>
                   </li>
                 </ul>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="assumptionGroups.length">
+            <div class="import-section-head">
+              <h3 class="import-section-title import-guesses-title">
+                <Info :size="15" /> Guesses to confirm ({{ assumptionGroups.reduce((n, g) => n + g.list.length, 0) }})
+              </h3>
+              <button v-if="pendingGroups.length > 1" type="button" class="btn btn-sm btn-secondary" @click="acceptAllGroups">
+                <CheckCircle2 :size="14" /> Accept all guesses
+              </button>
+            </div>
+            <div class="import-guess-groups">
+              <div v-for="g in assumptionGroups" :key="g.group" class="import-guess-group" :class="{ 'is-accepted': isAccepted(g) }">
+                <div class="import-guess-head">
+                  <div>
+                    <strong>{{ g.name }} ({{ g.list.length }})</strong>
+                    <span class="import-muted">{{ g.hint }}</span>
+                  </div>
+                  <button v-if="!isAccepted(g)" type="button" class="btn btn-sm btn-primary" @click="acceptGroup(g)">
+                    Accept {{ g.list.length === 1 ? 'it' : `all ${g.list.length}` }}
+                  </button>
+                  <span v-else class="import-guess-done">
+                    <CheckCircle2 :size="14" /> Accepted
+                    <button type="button" class="import-guess-undo" @click="undoGroup(g)">Undo</button>
+                  </span>
+                </div>
+                <details class="import-guess-details">
+                  <summary>Show {{ g.list.length === 1 ? 'it' : `all ${g.list.length}` }}</summary>
+                  <div v-for="c in g.byCard" :key="c.card || '__file'" class="import-issue-card">
+                    <button
+                      v-if="c.card"
+                      type="button"
+                      class="import-card-link is-title"
+                      title="View and correct this card"
+                      @click="editingCard = c.card"
+                    >
+                      <PencilLine :size="12" /> {{ c.card }}
+                    </button>
+                    <strong v-else class="import-issue-file">Whole file</strong>
+                    <ul class="import-issue-list">
+                      <li v-for="(i, n) in c.list" :key="n" class="is-warning">
+                        <span v-if="i.row" class="import-issue-row">Row {{ i.row }}</span>
+                        <span>{{ i.message }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </details>
               </div>
             </div>
           </template>
@@ -547,6 +680,16 @@ function num(value) {
           </p>
 
           <h3 class="import-section-title">Import options</h3>
+          <label v-if="errors.length && !fileErrors.length" class="import-option import-skip-option" :class="{ 'is-selected': skipErrors }">
+            <input v-model="skipErrors" type="checkbox" />
+            <div>
+              <strong>Leave out the {{ errorProductKeys.size }} product{{ errorProductKeys.size === 1 ? '' : 's' }} with problems and import the other {{ okProducts.length - errorProductKeys.size }}</strong>
+              <small>
+                Correct them in the Excel file later and import it again with "Keep existing data":
+                rows already imported are skipped, so nothing is added twice.
+              </small>
+            </div>
+          </label>
           <fieldset class="import-choice" :disabled="blocked" :class="{ 'is-locked': blocked }">
             <legend class="form-label">Existing inventory of {{ officeList }} *</legend>
 
@@ -605,6 +748,14 @@ function num(value) {
           <p v-if="result.already_imported" class="import-muted">
             {{ result.already_imported }} rows were already in the system from an earlier import and were skipped.
           </p>
+          <div v-if="result.left_out?.length" class="import-alert import-alert-warning">
+            <AlertTriangle :size="16" />
+            <div>
+              <strong>Left out because of problems ({{ result.left_out.length }}):</strong>
+              {{ result.left_out.join(', ') }}.
+              Correct them in the Excel file and import it again with "Keep existing data".
+            </div>
+          </div>
           <p class="import-muted">Unit costs were imported as ₱0. Set them on the Stockcard with "Edit report cost" when you have them.</p>
         </template>
       </div>
@@ -622,20 +773,20 @@ function num(value) {
             <RotateCcw :size="15" /> Cancel &amp; Re-upload
           </button>
           <span v-if="blocked" class="import-locked-note">
-            <Lock :size="13" /> Resolve {{ issues.length }} warning{{ issues.length === 1 ? '' : 's' }} to import
+            <Lock :size="13" /> {{ lockReason }} to import
           </span>
           <button
             type="button"
             class="btn btn-primary"
             :class="{ 'import-btn-danger': mode === 'replace' && !blocked }"
             :disabled="!canImport"
-            :title="blocked ? 'Cannot proceed with import: there are unresolved warnings in the preview.' : undefined"
+            :title="blocked ? `Import locked: ${lockReason}.` : undefined"
             @click="startImport"
           >
             <template v-if="busy">Importing… this can take a minute</template>
             <template v-else-if="blocked"><Lock :size="14" /> Import locked</template>
-            <template v-else-if="mode === 'replace'">Delete &amp; Import {{ okProducts.length }} products</template>
-            <template v-else>Import {{ okProducts.length }} products</template>
+            <template v-else-if="mode === 'replace'">Delete &amp; Import {{ productsToImport.length }} products</template>
+            <template v-else>Import {{ productsToImport.length }} products</template>
           </button>
         </template>
 
@@ -654,7 +805,7 @@ function num(value) {
           <p>
             This removes <strong>{{ num(existing.products) }} products</strong>, {{ num(existing.batches) }} batches,
             {{ num(existing.transactions) }} transactions and {{ num(existing.requests) }} stock-out requests of
-            <strong>{{ officeList }}</strong>, then imports {{ okProducts.length }} products from the Excel file.
+            <strong>{{ officeList }}</strong>, then imports {{ productsToImport.length }} products from the Excel file.
           </p>
         </div>
 
@@ -1009,6 +1160,105 @@ function num(value) {
   align-items: center;
   gap: 0.4rem;
   color: var(--color-danger);
+}
+
+/* ── Guesses to confirm: one block per group, accepted with one click ── */
+.import-guesses-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-warning);
+}
+
+.import-guess-groups {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.import-guess-group {
+  padding: 0.75rem 1rem;
+  border: 1.5px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+}
+
+.import-guess-group.is-accepted {
+  border-color: var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
+.import-guess-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.import-guess-head strong {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.import-guess-head .btn {
+  flex-shrink: 0;
+}
+
+.import-guess-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.import-guess-undo {
+  border: 0;
+  background: none;
+  padding: 0 0.2rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.import-guess-details {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.import-guess-details summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.import-guess-details .import-issue-card {
+  margin-top: 0.6rem;
+}
+
+/* ── Products left out because of problems ── */
+.import-skip-option {
+  margin-bottom: 0.75rem;
+}
+
+.import-table tbody tr.is-left-out td {
+  opacity: 0.5;
+}
+
+.import-left-out-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-full);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: 1px;
 }
 
 .import-issues {

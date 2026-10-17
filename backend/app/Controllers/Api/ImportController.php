@@ -163,15 +163,13 @@ class ImportController extends BaseApiController
         if ($plan === null) {
             return $this->respondError('This preview has expired. Choose the file again.', [], ResponseInterface::HTTP_GONE);
         }
-        // A preview with warnings is never imported: they are corrected first (before any password is asked)
-        $issues = StockcardImportService::issues($plan);
-        if ($issues !== []) {
-            return $this->respondError(
-                'Cannot proceed with import. There are ' . count($issues) . ' unresolved warning' . (count($issues) === 1 ? '' : 's')
-                    . ' in the preview. Please fix the file or clear the warnings before importing.',
-                ['issues' => $issues],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
+        // Errors are corrected first, or their products left out; the reader's guesses are accepted
+        // group by group. Checked here again, before any password is asked.
+        $issues   = StockcardImportService::issues($plan);
+        $accepted = is_array($input['accept'] ?? null) ? array_map('strval', $input['accept']) : [];
+        $check    = StockcardImportService::importCheck($plan, $issues, $accepted, ! empty($input['skip_errors']));
+        if ($check['error'] !== null) {
+            return $this->respondError('Cannot proceed with import. ' . $check['error'], ['issues' => $issues], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $approvedBy = null;
@@ -206,7 +204,7 @@ class ImportController extends BaseApiController
         }
 
         try {
-            $result = $service->commit($plan, $mode === 'replace', $types, $this->currentUser() ?? []);
+            $result = $service->commit($plan, $mode === 'replace', $types, $this->currentUser() ?? [], $check['leave_out']);
         } catch (DomainException $e) {
             return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Throwable $e) {
@@ -228,6 +226,8 @@ class ImportController extends BaseApiController
                 'issues'           => $result['issues'] ?? 0,
                 'adjustments'      => $result['adjustments'] ?? 0,
                 'category_changes' => $this->categoryChanges($plan, $types),
+                'guesses_accepted' => $accepted,
+                'left_out'         => $result['left_out'] ?? [],
                 'approved_by'      => $approvedBy,
             ]
         );

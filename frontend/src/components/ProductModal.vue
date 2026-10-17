@@ -151,12 +151,7 @@ async function handleSubmit() {
     title: editing ? 'Save changes to this product?' : 'Add this product?',
     message: `${form.product} (${form.product_no}) will be ${editing ? 'updated' : 'added to the catalog'}.`,
     details: [
-<<<<<<< HEAD
-      ['Product no.', form.product_no],
-      ['Stock code', String(form.stock_no).trim() || 'Generated automatically'],
-=======
       ['Stock Code', form.product_no],
->>>>>>> eb8a10f1b2b7069df3589e297fdaed6f4d2b2025
       ['Name', form.product],
       ['Category', form.type_name],
       ['Unit', form.unit_name],
@@ -239,28 +234,18 @@ async function save(productAction) {
         </div>
 
         <form @submit.prevent="handleSubmit" id="productForm" class="product-form">
-          <!-- Row 1: Product No, Stock Code & Name -->
+          <!-- Row 1: Stock Code & Name -->
           <div class="form-grid-row grid-cols-code-name">
             <div class="form-group">
               <label class="form-label">Stock Code *</label>
               <input
                 v-model="form.product_no"
                 type="text"
-                class="form-input"
+                class="form-input stock-code-input"
+                maxlength="100"
                 placeholder="e.g. BSU-0001"
                 required
               />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Stock Code</label>
-              <input
-                v-model="form.stock_no"
-                type="text"
-                class="form-input stock-code-input"
-                maxlength="255"
-                placeholder="Auto if blank"
-              />
-              <span class="field-hint">Blank: office + product no.</span>
             </div>
             <div class="form-group">
               <label class="form-label">Product Name *</label>
@@ -436,7 +421,7 @@ async function save(productAction) {
 }
 
 .grid-cols-code-name {
-  grid-template-columns: minmax(110px, 140px) minmax(150px, 190px) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 200px) minmax(0, 1fr);
 }
 
 .stock-code-input {

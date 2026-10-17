@@ -79,6 +79,7 @@ class ReportsController extends BaseApiController
         if ($search !== '') {
             $builder->groupStart()
                 ->like('p.product', $search)
+                ->orLike('p.stock_no', $search)
                 ->orLike('b.batch_no', $search)
                 ->orLike('b.barcode_value', $search)
                 ->groupEnd();

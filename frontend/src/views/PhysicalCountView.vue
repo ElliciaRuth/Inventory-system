@@ -288,7 +288,7 @@ async function reconcile() {
               <td class="cell-title">
                 <span class="pc-no">{{ item.product_no }}</span>
                 <strong>{{ item.product }}</strong>
-                <span v-if="item.stock_no" class="pc-muted">{{ item.stock_no }}</span>
+                <span v-if="item.stock_no && item.stock_no !== item.product_no" class="pc-muted">{{ item.stock_no }}</span>
               </td>
               <td data-label="System Qty" class="pc-num">{{ qty(systemQty(item)) }} <span class="pc-unit">{{ item.unit }}</span></td>
               <td data-label="Counted Qty">

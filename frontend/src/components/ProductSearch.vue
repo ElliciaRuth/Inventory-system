@@ -25,8 +25,10 @@ const menu = ref(null)
 
 const selected = computed(() => props.items.find((i) => Number(i.product_id) === props.modelValue) || null)
 
+// The stock code is already shown first; a different stock_no (older data) is added here
 function meta(item) {
-  return [item.archived_at ? 'Archived' : '', item.stock_no, item.unit].filter(Boolean).join(' · ')
+  const otherCode = item.stock_no !== item.product_no ? item.stock_no : ''
+  return [item.archived_at ? 'Archived' : '', otherCode, item.unit].filter(Boolean).join(' · ')
 }
 
 const results = computed(() => {

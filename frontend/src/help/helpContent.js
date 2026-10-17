@@ -24,6 +24,7 @@ import {
   Users,
   Bell,
   KeyRound,
+  PencilLine,
 } from 'lucide-vue-next'
 
 export const ROLE_INTROS = {
@@ -234,11 +235,12 @@ export const TOPICS = [
     steps: [
       'Open Menu → Stockcard Ledger and click "Import from Excel".',
       'Choose the Excel file. The system reads every stock card and shows a preview.',
-      'Check each card. While the preview shows warnings (red banner) the import is locked: click a card to correct its rows, or fix the Excel file and click "Cancel & Re-upload".',
-      'When no warnings are left, choose how to import and click Import.',
+      'Problems to fix (red): stock or data that is wrong, such as negative stock or a balance that doesn\'t add up. Click a card to correct its rows, fix the Excel file and click "Cancel & Re-upload", or tick "Leave out the products with problems" to import the rest.',
+      'Guesses to confirm (orange): things the system already filled in, such as a missing day or a merged card. Check them and click "Accept" for each group, or "Accept all guesses".',
+      'Choose how to import and click Import.',
     ],
     tips: [
-      'Red rows have negative stock or missing data; orange rows have a date or balance to check.',
+      'Products left out can be imported later: correct the file and import it again with "Keep existing data". Rows already imported are skipped.',
       'Replacing the existing inventory of your office before importing needs a manager\'s password.',
     ],
     to: '/stockcard',
@@ -329,14 +331,56 @@ export const TOPICS = [
     title: 'Monthly summary report',
     summary: 'Beginning, purchases, usage, spoilage and ending balance.',
     steps: [
-      'Open Menu → Summary Report and choose the month. The report updates as soon as you change a filter.',
-      'To download it, click "Export Summary" and pick a range of months.',
-      'To change the report first (wording, remarks, signatories), click "Preview & Edit Report", edit it, then click PDF Print or MS Word.',
+      'Open Menu → Summary Report and choose the product type, month and year. The report updates as soon as you change a filter.',
+      'To download it, click "Export Summary" (see "Edit the Summary Report before downloading").',
+      'To bring in a summary kept in Excel, click "Import from Excel" (see "Import a Summary Report from Excel").',
     ],
     tips: [
       'To correct the figures, turn on "Edit Mode": the Purchase, Used and Spoiled quantities and costs become editable. Each one is a stock card entry, so "Save changes" updates the Stock Card too.',
     ],
     to: '/reports/summary',
+  },
+  {
+    id: 'import-summary',
+    category: 'reports',
+    levels: STOCK,
+    icon: Upload,
+    title: 'Import a Summary Report from Excel',
+    summary: 'Bring a monthly summary kept in Excel into the system.',
+    steps: [
+      'Open Menu → Summary Report and click "Import from Excel".',
+      'Choose the .xlsx file: one sheet per product type, with the columns Beginning Inventory, Purchases, Used/Sold, Breakage and Ending Inventory. If the file doesn\'t say which month it is for, choose the Report month.',
+      'Click Preview and check the products, quantities, costs and the month shown. Nothing is saved yet.',
+      'Choose how to import: keep the existing data, or delete the existing inventory of your office first (a manager\'s password is needed, and a backup is made automatically).',
+      'Click Import. The beginning inventory becomes the balance carried into the month; purchases, used and breakage are recorded within the month.',
+    ],
+    tips: [
+      'The figures must add up: if a row uses more than there is in stock, the import stops, names the product, sheet and row, and nothing is saved.',
+      'Importing the same file again with "Keep existing data" adds nothing: rows imported before are skipped.',
+    ],
+    to: '/reports/summary',
+  },
+  {
+    id: 'edit-summary-export',
+    category: 'reports',
+    levels: STOCK,
+    icon: PencilLine,
+    title: 'Edit the Summary Report before downloading',
+    summary: 'Change wording, add remarks or page breaks, then download PDF or Word.',
+    steps: [
+      'Open Menu → Export Summary and choose the period (From / To months) and the product type.',
+      'Click "Preview & Edit Report". The report opens in an editor, laid out like the printed copy.',
+      'Change the wording, add remarks, or adjust the signatories. Each dashed line is a new page; use the page-break button to start a page yourself.',
+      'Click "Save Changes" (or press Ctrl+S). Downloads use the saved version.',
+      'Choose the paper size (Long, Short or A4) and click "PDF Print" or "MS Word".',
+    ],
+    tips: [
+      'Edits are kept only while this page is open: download before leaving it. The page asks first if you try to leave with edits.',
+      'Changed the period or product type after opening the editor? Click "Rebuild Report from Data" to start over with the new selection, or "Discard Edits" to drop your changes.',
+      'The names under Prepared by, Verified by and Noted by come from Office Settings → Report Signatories (managers).',
+      'To download without editing, skip the editor and click "PDF Print" or "MS Word" straight away.',
+    ],
+    to: '/export/summary',
   },
   {
     id: 'export-stockcard',

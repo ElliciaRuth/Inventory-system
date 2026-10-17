@@ -510,6 +510,9 @@ class StockcardWorkbookParser
         $s = str_replace('\\', '/', $s);                              // "5\11"
         $s = preg_replace('#(?<=^|/)[oO](?=\d)|(?<=\d)[oO](?=/|$)#', '0', $s); // "O7/21/26": letter O for zero
 
+        if (preg_match('#^(\d{4})-(\d{1,2})-(\d{1,2})$#', $s, $m)) { // "2025-12-30": typed as text, or from another program
+            return $this->tokenParts((int) $m[2], (int) $m[3], (int) $m[1]);
+        }
         if (preg_match('#^(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})$#', $s, $m)) { // "12/30/2025", "01-13-2025", "2/28/26"
             return $this->tokenParts((int) $m[1], (int) $m[2], $this->fullYear($m[3]));
         }

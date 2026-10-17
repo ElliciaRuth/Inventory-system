@@ -111,7 +111,7 @@ function productDetails(p) {
   return [
     ['Stock Code', p.product_no],
     ['Name', p.product],
-    ['Stock no.', p.stock_no],
+    ['Stock no.', p.stock_no !== p.product_no ? p.stock_no : ''],
     ['Category', p.type_name],
     ['Unit', p.unit_name],
     ['Stock on hand', p.total_stock !== undefined ? `${p.total_stock} ${p.unit_name || ''}` : ''],

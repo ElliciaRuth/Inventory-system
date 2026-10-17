@@ -73,7 +73,7 @@ async function generate(product) {
     details: [
       ['Product', product.product],
       ['Stock Code', product.product_no],
-      ['Stock no.', product.stock_no],
+      ['Stock no.', product.stock_no !== product.product_no ? product.stock_no : ''],
     ],
     confirmText: 'Generate',
   })

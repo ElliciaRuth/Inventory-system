@@ -230,11 +230,16 @@ class StockcardImportService
         $issues = [];
         $add = static function (?string $card, string $message) use (&$issues): void {
             preg_match('/\brow (\d+)/i', $message, $m);
+            $group = self::assumptionGroup($message);
             $issues[] = [
-                'kind'    => self::issueKind($message),
-                'card'    => $card,
-                'row'     => isset($m[1]) ? (int) $m[1] : null,
-                'message' => $message,
+                'kind'     => self::issueKind($message),
+                // An error must be corrected (or its product left out); an assumption is a guess
+                // the reader already made, confirmed with one click per group
+                'severity' => $group === null ? 'error' : 'assumption',
+                'group'    => $group,
+                'card'     => $card,
+                'row'      => isset($m[1]) ? (int) $m[1] : null,
+                'message'  => $message,
             ];
         };
 
@@ -265,6 +270,96 @@ class StockcardImportService
         }
 
         return $issues;
+    }
+
+    /**
+     * Guesses the reader makes on its own, grouped so each group is accepted with one click.
+     * Anything not listed here is an error: wrong or missing stock, or a card that can't be read.
+     */
+    public const ASSUMPTION_GROUPS = [
+        'date'       => 'Date guesses',
+        'order'      => 'Dates out of order',
+        'column'     => 'Values in the wrong column',
+        'merged'     => 'Cards merged into one product',
+        'correction' => 'Stock corrected to match the card',
+        'unit'       => 'Units filled in',
+    ];
+
+    /** The group of a guess, or null when the message is an error. */
+    public static function assumptionGroup(string $message): ?string
+    {
+        return match (true) {
+            str_starts_with($message, 'Not imported:'),
+            (bool) preg_match('/excel balance is negative|excel balance is .+ the entries add up to/i', $message)        => null,
+            (bool) preg_match('/so the stock matches the card/i', $message)                                                => 'correction',
+            (bool) preg_match('/runs alongside an earlier card/i', $message)                                               => 'merged',
+            (bool) preg_match('/typed under Issue|looks like a reference/i', $message)                                    => 'column',
+            (bool) preg_match('/is earlier than the row before/i', $message)                                              => 'order',
+            (bool) preg_match('/no unit of measurement, so "pcs" was used/i', $message)                                    => 'unit',
+            (bool) preg_match('/day missing|year .*looked wrong|year is not written|no date, used|would be in the future|several days written|missing "\/"|extra characters after the date|unclear date/i', $message) => 'date',
+            default                                                                                                         => null,
+        };
+    }
+
+    /**
+     * Whether a preview may be imported with the guesses accepted so far, and which products
+     * are left out because they have errors (only when $skipErrors).
+     *
+     * @param list<string> $accepted assumption groups the user confirmed
+     * @return array{error: ?string, leave_out: list<string>}
+     */
+    public static function importCheck(array $plan, array $issues, array $accepted, bool $skipErrors): array
+    {
+        $ready = array_values(array_filter($plan['products'] ?? [], static fn ($p) => ($p['status'] ?? '') === 'ok'));
+        $productOf = [];
+        foreach ($ready as $product) {
+            foreach ($product['cards'] ?? [] as $label) {
+                $productOf[$label] = $product['key'];
+            }
+        }
+
+        $errors = array_filter($issues, static fn ($i) => $i['severity'] === 'error');
+        if ($errors !== [] && ! $skipErrors) {
+            return ['error' => count($errors) . ' problem' . (count($errors) === 1 ? '' : 's') . ' must be corrected first, '
+                . 'or choose to leave out the products that have them.', 'leave_out' => []];
+        }
+        foreach ($errors as $issue) {
+            if ($issue['card'] === null) {
+                return ['error' => 'A problem with the whole file must be corrected first: ' . $issue['message'], 'leave_out' => []];
+            }
+        }
+
+        // Errors on cards that weren't read at all leave nothing out: those cards import nothing anyway
+        $leaveOut = [];
+        foreach ($errors as $issue) {
+            if (isset($productOf[$issue['card']])) {
+                $leaveOut[$productOf[$issue['card']]] = true;
+            }
+        }
+        $leaveOut = array_keys($leaveOut);
+        if (count($leaveOut) >= count($ready)) {
+            return ['error' => 'Every product has a problem: there is nothing left to import.', 'leave_out' => $leaveOut];
+        }
+
+        // Only the guesses about products being imported have to be accepted
+        $pending = [];
+        foreach ($issues as $issue) {
+            if ($issue['severity'] !== 'assumption' || in_array($issue['group'], $accepted, true)) {
+                continue;
+            }
+            $card = $issue['card'];
+            if ($card !== null && (! isset($productOf[$card]) || in_array($productOf[$card], $leaveOut, true))) {
+                continue;
+            }
+            $pending[$issue['group']] = true;
+        }
+        if ($pending !== []) {
+            $names = array_map(static fn ($g) => self::ASSUMPTION_GROUPS[$g] ?? $g, array_keys($pending));
+
+            return ['error' => 'Accept the guesses first: ' . implode(', ', $names) . '.', 'leave_out' => $leaveOut];
+        }
+
+        return ['error' => null, 'leave_out' => $leaveOut];
     }
 
     private static function issueKind(string $message): string
@@ -418,11 +513,15 @@ class StockcardImportService
 
     /**
      * @param bool                  $replace delete the existing inventory of the file's offices first
-     * @param array<string, string> $types   product key => category typed in the preview (detected type when blank)
+     * @param array<string, string> $types    product key => category typed in the preview (detected type when blank)
+     * @param list<string>          $leaveOut product keys not imported because they have errors (importCheck)
      */
-    public function commit(array $plan, bool $replace, array $types, array $user): array
+    public function commit(array $plan, bool $replace, array $types, array $user, array $leaveOut = []): array
     {
-        $products = array_values(array_filter($plan['products'], static fn ($p) => $p['status'] === 'ok'));
+        $products = array_values(array_filter(
+            $plan['products'],
+            static fn ($p) => $p['status'] === 'ok' && ! in_array($p['key'], $leaveOut, true)
+        ));
         foreach ($products as &$product) {
             $chosen          = self::cleanTypeName($types[$product['key']] ?? '');
             $product['type'] = $chosen !== '' ? $chosen : $product['type'];
@@ -446,6 +545,11 @@ class StockcardImportService
             'adjustments'        => 0,
             'already_imported'   => 0,
             'offices'            => $plan['summary']['offices'],
+            // Products not imported because they have errors: fix the file and import it again
+            'left_out'           => array_values(array_map(
+                static fn ($p) => $p['name'],
+                array_filter($plan['products'], static fn ($p) => in_array($p['key'], $leaveOut, true))
+            )),
         ];
 
         // A backup of each office comes first; nothing is deleted without one

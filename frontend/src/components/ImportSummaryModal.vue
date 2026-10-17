@@ -144,12 +144,7 @@ async function commitImport() {
 <template>
   <teleport to="body">
     <div v-if="isOpen" class="modal-backdrop" @click.self="close">
-<<<<<<< HEAD
       <div class="modal-card import-card">
-=======
-      <div class="modal-card" style="max-width: 860px;">
-        <!-- Header -->
->>>>>>> eb8a10f1b2b7069df3589e297fdaed6f4d2b2025
         <div class="modal-header">
           <div>
             <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 8px;">

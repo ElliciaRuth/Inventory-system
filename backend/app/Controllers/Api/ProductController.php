@@ -86,7 +86,8 @@ class ProductController extends BaseApiController
             return $error;
         }
 
-        $stockNo = $this->inputStockNo($input) ?? $this->stockNo($productNo, $officeId);
+        // The stock code is the product no. (a separately sent stock_no is still accepted)
+        $stockNo = $this->inputStockNo($input) ?? $productNo;
         if ($error = $this->duplicateStockNo($stockNo, $officeId)) {
             return $error;
         }
@@ -97,7 +98,7 @@ class ProductController extends BaseApiController
             'unit_id'        => $this->resolveUnitId($input, $officeId) ?: 1,
             'type_id'        => $this->resolveTypeId($input, $officeId) ?: 1,
             'user_office_id' => $officeId,
-            'stock_no'       => ! empty($input['stock_no']) ? trim((string) $input['stock_no']) : $productNo,
+            'stock_no'       => $stockNo,
         ]);
         $payload['product_reorder_point'] ??= 10;
         $payload['expiry_warning_days']   ??= 30;
@@ -143,9 +144,14 @@ class ProductController extends BaseApiController
         $officeId = (int) $existing['user_office_id'];
         $payload  = $this->productFields($input);
 
-        if (isset($input['product_no']) && $input['product_no'] !== '') {
-            $productNo = trim((string) $input['product_no']);
+        // The stock code changes only when it was edited: saving other fields never rewrites it
+        // (a product restored from an older backup may still have a separate stock_no)
+        $productNo = trim((string) ($input['product_no'] ?? ''));
+        if ($productNo !== '' && $productNo !== (string) $existing['product_no']) {
             if ($error = $this->duplicateProductNo($productNo, $officeId, $id)) {
+                return $error;
+            }
+            if ($productNo !== (string) $existing['stock_no'] && ($error = $this->duplicateStockNo($productNo, $officeId, $id))) {
                 return $error;
             }
             $payload['product_no'] = $productNo;
@@ -415,17 +421,6 @@ class ProductController extends BaseApiController
             }
         }
         return $fields;
-    }
-
-    /**
-     * stock_no = UPPERCASE user office name + zero-padded product no.
-     */
-    private function stockNo(int $productNo, int $officeId): string
-    {
-        $officeRow  = db_connect()->table('user_office_table')->where('user_office_id', $officeId)->get(1)->getRowArray();
-        $officeName = $officeRow['user_office_name'] ?? 'BSU';
-
-        return strtoupper($officeName) . '-' . str_pad((string) $productNo, 4, '0', STR_PAD_LEFT);
     }
 
     private function resolveTypeId(array $input, int $officeId): int

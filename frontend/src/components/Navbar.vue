@@ -277,8 +277,8 @@ const menuColumns = computed(() => {
   if (isAdminAccount.value) {
     return [
       [{ title: 'OVERVIEW', color: '#3b82f6', items: [{ label: 'Dashboard', to: '/', icon: LayoutDashboard }] }],
-      [{ title: 'USER MANAGEMENT', color: '#8b5cf6', items: [{ label: 'User Management', to: '/admin', icon: Users }] }],
-      [{ title: 'SYSTEM SETTINGS', color: '#64748b', items: [{ label: 'Settings', to: '/settings', icon: Settings, badge: notificationStore.counts.pendingUsers || 0 }] }],
+      // Office Settings is for managers; technical staff handle sign-ups and offices here
+      [{ title: 'USER MANAGEMENT', color: '#8b5cf6', items: [{ label: 'User Management', to: '/admin', icon: Users, badge: notificationStore.counts.pendingUsers || 0 }] }],
     ]
   }
 
