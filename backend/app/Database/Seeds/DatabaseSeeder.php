@@ -22,7 +22,6 @@ class DatabaseSeeder extends Seeder
                 'first_name'           => 'Admin',
                 'last_name'            => 'Tech',
                 'name'                 => 'Admin Tech',
-                'email'                => 'admin_tech@bsu.edu.ph',
                 'user_office_id'       => null,
                 'lvl_of_access_id'     => 4,
                 'user_activity_id'     => 1,

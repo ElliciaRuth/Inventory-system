@@ -54,22 +54,40 @@ class StockMovementUpgrades extends Migration
                 'product_id'               => ['type' => 'INT', 'constraint' => 11],
                 'copy_id'                  => ['type' => 'INT', 'constraint' => 11, 'null' => true],
                 'borrower_name'            => ['type' => 'VARCHAR', 'constraint' => 150],
-                'borrower_user_office_id'  => ['type' => 'INT', 'constraint' => 11, 'null' => true],
                 'borrower_unit'            => ['type' => 'VARCHAR', 'constraint' => 150, 'default' => ''],
                 'quantity'                 => ['type' => 'DECIMAL', 'constraint' => '12,2', 'default' => 0],
                 'returned_qty'             => ['type' => 'DECIMAL', 'constraint' => '12,2', 'default' => 0],
                 'status'                   => ['type' => 'VARCHAR', 'constraint' => 20, 'default' => 'outstanding'],
                 'due_date'                 => ['type' => 'DATE', 'null' => true],
                 'notes'                    => ['type' => 'VARCHAR', 'constraint' => 500, 'default' => ''],
-                'borrowed_by_user_id'      => ['type' => 'INT', 'constraint' => 11, 'null' => true],
+                'user_id'                  => ['type' => 'INT', 'constraint' => 11, 'null' => true],
                 'borrowed_at'              => ['type' => 'DATETIME'],
                 'returned_at'              => ['type' => 'DATETIME', 'null' => true],
             ]);
             $this->forge->addPrimaryKey('borrow_id');
             $this->forge->addKey('user_office_id');
+            $this->forge->addKey('user_id');
             $this->forge->addKey('product_id');
             $this->forge->addKey('status');
+            $this->forge->addForeignKey('user_id', 'user_table', 'user_id', 'SET NULL', 'CASCADE');
+            $this->forge->addForeignKey('user_office_id', 'user_office_table', 'user_office_id', 'CASCADE', 'CASCADE');
             $this->forge->createTable('borrow_table', true);
+        } else {
+            // If borrow_table already exists, ensure user_id and foreign keys are in place
+            if ($db->fieldExists('borrowed_by_user_id', 'borrow_table') && ! $db->fieldExists('user_id', 'borrow_table')) {
+                $db->query('ALTER TABLE borrow_table CHANGE borrowed_by_user_id user_id INT(11) NULL');
+            }
+            // Add foreign keys if not already present
+            try {
+                $db->query('ALTER TABLE borrow_table ADD CONSTRAINT fk_borrow_user FOREIGN KEY (user_id) REFERENCES user_table (user_id) ON DELETE SET NULL ON UPDATE CASCADE');
+            } catch (\Throwable $e) {
+                // Constraint may already exist
+            }
+            try {
+                $db->query('ALTER TABLE borrow_table ADD CONSTRAINT fk_borrow_office FOREIGN KEY (user_office_id) REFERENCES user_office_table (user_office_id) ON DELETE CASCADE ON UPDATE CASCADE');
+            } catch (\Throwable $e) {
+                // Constraint may already exist
+            }
         }
 
         if (! $db->fieldExists('borrow_id', 'transaction_table')) {
