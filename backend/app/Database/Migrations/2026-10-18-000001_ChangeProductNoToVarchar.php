@@ -22,15 +22,12 @@ class ChangeProductNoToVarchar extends Migration
         // Alter the column type to VARCHAR(100)
         $this->db->query("ALTER TABLE product_table MODIFY COLUMN product_no VARCHAR(100) NOT NULL DEFAULT ''");
 
-        // Re-create the unique index on the new type
-        $this->db->query('ALTER TABLE product_table ADD UNIQUE KEY uq_product_no_per_office (product_no, user_office_id)');
+        // Do NOT re-create a unique index — product_no is now a user-defined stock code label,
+        // not a system-enforced unique key. Uniqueness is managed at the application level.
     }
 
     public function down(): void
     {
-        // Drop the VARCHAR unique index
-        $this->db->query('ALTER TABLE product_table DROP INDEX IF EXISTS uq_product_no_per_office');
-
         // Revert to INT(11)
         $this->db->query('ALTER TABLE product_table MODIFY COLUMN product_no INT(11) NOT NULL DEFAULT 0');
 

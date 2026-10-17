@@ -54,6 +54,7 @@ class StockMovementUpgrades extends Migration
                 'product_id'               => ['type' => 'INT', 'constraint' => 11],
                 'copy_id'                  => ['type' => 'INT', 'constraint' => 11, 'null' => true],
                 'borrower_name'            => ['type' => 'VARCHAR', 'constraint' => 150],
+                'borrower_user_office_id'  => ['type' => 'INT', 'constraint' => 11, 'null' => true],
                 'borrower_unit'            => ['type' => 'VARCHAR', 'constraint' => 150, 'default' => ''],
                 'quantity'                 => ['type' => 'DECIMAL', 'constraint' => '12,2', 'default' => 0],
                 'returned_qty'             => ['type' => 'DECIMAL', 'constraint' => '12,2', 'default' => 0],
