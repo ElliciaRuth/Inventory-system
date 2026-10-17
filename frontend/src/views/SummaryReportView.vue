@@ -1,8 +1,13 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { Download } from 'lucide-vue-next'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { Download, Upload } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { toast, errorMessage } from '../composables/useToast'
+import { useAuthStore } from '../stores/authStore'
+import ImportSummaryModal from '../components/ImportSummaryModal.vue'
+
+const authStore = useAuthStore()
+const isImportOpen = ref(false)
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const now = new Date()
@@ -53,6 +58,18 @@ async function load() {
   }
 }
 
+// Auto-reload when dropdowns change immediately
+watch(() => [filters.type_id, filters.month, filters.year], load)
+
+// Debounce search so it doesn't fire on every keystroke
+let searchTimer = null
+watch(() => filters.search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(load, 400)
+})
+
+onUnmounted(() => clearTimeout(searchTimer))
+
 onMounted(load)
 </script>
 
@@ -64,13 +81,29 @@ onMounted(load)
         <h1 class="hero-title">Inventory Report</h1>
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
-      <router-link to="/export/summary" class="btn btn-secondary">
-        <Download :size="15" />
-        <span>Export Summary</span>
-      </router-link>
+      <div style="display:flex;gap:.5rem;">
+        <button
+          v-if="authStore.levelId >= 2"
+          class="btn btn-secondary"
+          @click="isImportOpen = true"
+        >
+          <Upload :size="15" />
+          <span>Import from Excel</span>
+        </button>
+        <router-link to="/export/summary" class="btn btn-secondary">
+          <Download :size="15" />
+          <span>Export Summary</span>
+        </router-link>
+      </div>
     </div>
 
-    <form class="panel" style="padding: 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="load">
+    <ImportSummaryModal
+      :is-open="isImportOpen"
+      @close="isImportOpen = false"
+      @imported="load"
+    />
+
+    <div class="panel" style="padding: 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;">
       <div class="form-group" style="margin: 0; flex: 2; min-width: 200px;">
         <label class="form-label">Search Product</label>
         <input v-model="filters.search" type="text" class="form-input" placeholder="Search product name" />
@@ -94,8 +127,7 @@ onMounted(load)
           <option v-for="y in YEARS" :key="y" :value="y">{{ y }}</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-primary">Apply Filter</button>
-    </form>
+    </div>
 
     <div v-if="loading" class="panel" style="padding: 3rem; text-align: center; color: var(--text-muted);">Loading report…</div>
     <div v-else-if="!groups.length" class="panel" style="padding: 3rem; text-align: center; color: var(--text-muted);">No inventory activity for this period.</div>

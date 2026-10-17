@@ -53,8 +53,19 @@ class ExportController extends BaseApiController
     public function stockcardOptions(): ResponseInterface
     {
         $productModel = new ProductModel();
+        $db           = db_connect();
+
+        $productTypes = $db->table('type_of_product pt')
+            ->select('pt.type_id, pt.type')
+            ->join('product_table p', 'p.type_id = pt.type_id')
+            ->where('p.user_office_id', $this->userOfficeId())
+            ->groupBy('pt.type_id')
+            ->orderBy('pt.type', 'ASC')
+            ->get()->getResultArray();
+
         return $this->respondSuccess([
-            'products' => $productModel->listForSelect($this->userOfficeId()),
+            'products'      => $productModel->listForSelect($this->userOfficeId()),
+            'product_types' => $productTypes,
         ], 'Export options retrieved');
     }
 
@@ -70,6 +81,7 @@ class ExportController extends BaseApiController
 
         $format    = trim((string) ($input['format']     ?? ''));
         $productId = (int)         ($input['product_id'] ?? 0);
+        $typeId    = (int)         ($input['type_id']    ?? 0);
         $monthFrom = trim((string) ($input['month_from'] ?? ''));
         $monthTo   = trim((string) ($input['month_to']   ?? ''));
         $sortOrder = ($input['sort_order'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
@@ -102,7 +114,7 @@ class ExportController extends BaseApiController
             return $this->respondError('From Month must be before To Month.');
         }
 
-        $products = $this->fetchExportData($dateFrom, $dateTo, $productId, $this->userOfficeId(), $sortOrder);
+        $products = $this->fetchExportData($dateFrom, $dateTo, $productId, $this->userOfficeId(), $sortOrder, $typeId);
         $filename = 'Stockcard_' . $monthFrom . '_to_' . $monthTo;
 
         return match ($format) {
@@ -121,7 +133,8 @@ class ExportController extends BaseApiController
         string $dateTo,
         int $productId,
         int $userOfficeId,
-        string $sortOrder
+        string $sortOrder,
+        int $typeId = 0
     ): array {
         $db = db_connect();
 
@@ -157,6 +170,7 @@ class ExportController extends BaseApiController
 
         if ($userOfficeId > 0) { $builder->where('t.user_office_id', $userOfficeId); }
         if ($productId    > 0) { $builder->where('b.product_id',     $productId); }
+        if ($typeId       > 0) { $builder->where('p.type_id',        $typeId); }
 
         $transactions = $builder
             ->orderBy('b.product_id',        'ASC')

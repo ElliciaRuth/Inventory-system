@@ -70,12 +70,16 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
         $routes->post('stock/count', 'StockController::count', ['filter' => 'level:2']);
         $routes->get('stock/copies/(:num)', 'StockController::copies/$1', ['filter' => 'level:1']);
 
-        // ── Excel stock card import — managers (level 3) ─────────────────────
+        // ── Excel stock card import — managers (level 3) ──────────────────────────────
         // Custodians and managers; deleting the existing inventory first needs a manager's password
         $routes->post('import/stockcards/preview', 'ImportController::preview', ['filter' => 'level:2']);
         $routes->get('import/stockcards/card', 'ImportController::card', ['filter' => 'level:2']);
         $routes->post('import/stockcards/revise', 'ImportController::revise', ['filter' => 'level:2']);
         $routes->post('import/stockcards/commit', 'ImportController::commit', ['filter' => 'level:2']);
+
+        // ── Excel summary report import — custodians and managers (level 2+) ──────────────
+        $routes->post('import/summary/preview', 'ImportController::previewSummary', ['filter' => 'level:2']);
+        $routes->post('import/summary/commit',  'ImportController::commitSummary',  ['filter' => 'level:2']);
 
         // ── Batch reports & barcodes — level 2+ ──────────────────────────────
         $routes->get('reports/batches', 'ReportsController::batches', ['filter' => 'level:2']);

@@ -33,4 +33,25 @@ export const importApi = {
     const response = await client.post('/import/stockcards/commit', payload, { timeout: 300000 })
     return response.data
   },
+
+  // ── Summary Report import ────────────────────────────────────
+
+  // Upload a Summary Report .xlsx; returns { token, plan } without writing anything
+  async previewSummary(file, monthHint = '') {
+    const form = new FormData()
+    form.append('file', file)
+    if (monthHint) form.append('month', monthHint)
+
+    const response = await client.post('/import/summary/preview', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+    return response.data
+  },
+
+  // payload: { token, mode: 'replace' | 'append', password? }
+  async commitSummary(payload) {
+    const response = await client.post('/import/summary/commit', payload, { timeout: 300000 })
+    return response.data
+  },
 }

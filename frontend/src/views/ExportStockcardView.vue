@@ -1,17 +1,19 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { exportApi, triggerBlobDownload } from '../api/export'
 import {
   BarChart3, ArrowLeft, AlertTriangle, CheckCircle2, Filter, Package, CalendarDays, Settings,
-  FileText, File, ArrowUpDown, ArrowUpNarrowWide, ArrowDownWideNarrow, ClipboardList, FilePen, Info, ArrowRight,
+  FileText, File, ArrowUpDown, ArrowUpNarrowWide, ArrowDownWideNarrow, ClipboardList, FilePen, Info, ArrowRight, LayoutGrid,
 } from 'lucide-vue-next'
 
 const router = useRouter()
 
 // Filter Form State
 const products = ref([])
+const productTypes = ref([])
 const selectedProductId = ref('0')
+const selectedTypeId = ref('0')
 const monthFrom = ref('')
 const monthTo = ref('')
 const paperSize = ref('long')
@@ -39,6 +41,7 @@ async function loadOptions() {
     const res = await exportApi.getStockcardOptions()
     if (res && res.status && res.data) {
       products.value = res.data.products || []
+      productTypes.value = res.data.product_types || []
     }
   } catch (err) {
     console.error('Failed to load product list', err)
@@ -47,6 +50,17 @@ async function loadOptions() {
     loadingOptions.value = false
   }
 }
+
+// Filtered product list — only show products of the selected type
+const filteredProducts = computed(() => {
+  if (!selectedTypeId.value || selectedTypeId.value === '0') return products.value
+  return products.value.filter(p => String(p.type_id) === selectedTypeId.value)
+})
+
+// When type changes, reset product selection to "All"
+watch(() => selectedTypeId.value, () => {
+  selectedProductId.value = '0'
+})
 
 // Quick Period Presets
 function setPreset(preset) {
@@ -91,6 +105,13 @@ const selectedProductLabel = computed(() => {
   return found ? found.product : 'Selected Product'
 })
 
+// Selected type label for preview
+const selectedTypeLabel = computed(() => {
+  if (!selectedTypeId.value || selectedTypeId.value === '0') return ''
+  const found = productTypes.value.find(t => String(t.type_id) === selectedTypeId.value)
+  return found ? found.type : ''
+})
+
 // Paper size description for preview
 const paperSizeLabel = computed(() => {
   if (paperSize.value === 'short') return 'Short (8.5″ × 11″ Letter)'
@@ -125,6 +146,7 @@ async function handleDownload(format) {
   const payload = {
     format,
     product_id: parseInt(selectedProductId.value, 10) || 0,
+    type_id: parseInt(selectedTypeId.value, 10) || 0,
     month_from: monthFrom.value,
     month_to: monthTo.value,
     paper_size: paperSize.value,
@@ -231,6 +253,24 @@ onMounted(() => {
           </div>
 
           <div class="ex-panel-body">
+            <!-- Product Type Field -->
+            <div class="form-group">
+              <label class="form-label ex-field-label" for="export_type">
+                <LayoutGrid :size="15" class="ex-label-icon" /> Product Type
+              </label>
+              <select
+                id="export_type"
+                v-model="selectedTypeId"
+                class="form-select ex-select"
+                :disabled="loadingOptions"
+              >
+                <option value="0">— All Product Types —</option>
+                <option v-for="t in productTypes" :key="t.type_id" :value="String(t.type_id)">
+                  {{ t.type }}
+                </option>
+              </select>
+            </div>
+
             <!-- Product Field -->
             <div class="form-group">
               <label class="form-label ex-field-label" for="export_product">
@@ -244,7 +284,7 @@ onMounted(() => {
               >
                 <option value="0">— All Products in Office —</option>
                 <option
-                  v-for="p in products"
+                  v-for="p in filteredProducts"
                   :key="p.product_id"
                   :value="String(p.product_id)"
                 >
@@ -456,6 +496,10 @@ onMounted(() => {
               <span class="ex-preview-val" :title="selectedProductLabel">
                 {{ selectedProductLabel }}
               </span>
+            </div>
+            <div v-if="selectedTypeId !== '0'" class="ex-preview-row">
+              <span class="ex-preview-lbl">Type</span>
+              <span class="ex-preview-val">{{ selectedTypeLabel }}</span>
             </div>
             <div class="ex-preview-row">
               <span class="ex-preview-lbl">Period</span>
