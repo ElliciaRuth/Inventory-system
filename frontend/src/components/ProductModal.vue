@@ -85,9 +85,17 @@ onMounted(() => {
   fetchMeta()
 })
 
+// The form as it was when the window opened, to tell whether anything was changed
+const initialForm = ref('')
+const formSnapshot = () => JSON.stringify(Object.entries(form).map(([key, value]) => [key, String(value ?? '').trim()]))
+const isDirty = computed(() => formSnapshot() !== initialForm.value)
+
+// Filled every time the window opens (not only when another product is chosen), so an
+// "Add New Product" opened again starts empty
 watch(
-  () => props.product,
-  (newVal) => {
+  () => [props.isOpen, props.product],
+  ([open, newVal]) => {
+    if (!open) return
     if (newVal) {
       form.product_no = newVal.product_no || ''
       form.stock_no = newVal.stock_no || ''
@@ -114,9 +122,29 @@ watch(
     customType.value = false
     errorMessage.value = ''
     askProductAction.value = false
+    initialForm.value = formSnapshot()
   },
   { immediate: true }
 )
+
+// Cancel, the X and a click outside: changes are only thrown away after asking
+async function requestClose() {
+  if (loading.value) return
+  if (isDirty.value) {
+    const editing = Boolean(props.product?.product_id)
+    const ok = await confirmDialog({
+      title: 'Discard your changes?',
+      message: editing
+        ? `Your changes to "${props.product.product}" are not saved yet. They will be lost.`
+        : 'This new product is not saved yet. What you typed will be lost.',
+      confirmText: 'Discard changes',
+      cancelText: 'Keep editing',
+      variant: 'warning',
+    })
+    if (!ok) return
+  }
+  emit('close')
+}
 
 function identityChanged() {
   const original = props.product
@@ -191,14 +219,14 @@ async function save(productAction) {
 </script>
 
 <template>
-  <div v-if="isOpen" class="modal-backdrop" @click.self="$emit('close')">
+  <div v-if="isOpen" class="modal-backdrop" @click.self="requestClose">
     <div class="modal-card product-modal-card">
       <div class="modal-header">
         <div>
           <h2 style="font-size: 1.25rem">{{ product ? 'Edit Product' : 'Add New Product' }}</h2>
           <p class="panel-subtitle">Configure inventory catalog details, stock thresholds, and units.</p>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">
+        <button type="button" class="btn btn-sm btn-secondary" @click="requestClose">
           <X :size="16" />
         </button>
       </div>
@@ -356,7 +384,7 @@ async function save(productAction) {
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" @click="$emit('close')" :disabled="loading">Cancel</button>
+        <button type="button" class="btn btn-secondary" @click="requestClose" :disabled="loading">Cancel</button>
         <button type="submit" form="productForm" class="btn btn-primary" :disabled="loading">
           {{ loading ? 'Saving...' : (product ? 'Update Product' : 'Create Product') }}
         </button>

@@ -1187,12 +1187,17 @@ function num(value) {
   background: var(--bg-subtle);
 }
 
+/* Text on the left (wrapping within its column), the button always on the right */
 .import-guess-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.import-guess-head > div {
+  flex: 1;
+  min-width: 0;
 }
 
 .import-guess-head strong {
@@ -1201,8 +1206,16 @@ function num(value) {
   color: var(--text-main);
 }
 
-.import-guess-head .btn {
+.import-guess-head .btn,
+.import-guess-head .import-guess-done {
   flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .import-guess-head {
+    flex-wrap: wrap;
+  }
 }
 
 .import-guess-done {

@@ -1020,8 +1020,11 @@ class StockcardWorkbookParser
                 $card = $cards[$i];
                 $mismatchNoted = false;
                 // A card that starts before the previous one ends runs alongside it (e.g. a donated lot):
-                // its opening stock is added rather than taken as the new total
-                $parallel = $pos > 0 && $lastDate !== null && $this->firstDate($card) < $lastDate;
+                // its opening stock is added rather than taken as the new total. A card that opens by
+                // carrying forward another card's balance ("Pbrittle 1", "Balance forwarded") continues
+                // that card instead, whatever its dates say (an overlap there is a mistyped date).
+                $continues = ($card['rows'][0]['type'] ?? '') === 'carry';
+                $parallel  = $pos > 0 && ! $continues && $lastDate !== null && $this->firstDate($card) < $lastDate;
                 if ($parallel) {
                     $product['warnings'][] = "{$card['label']} runs alongside an earlier card for the same item, so its opening stock is added to it.";
                 }

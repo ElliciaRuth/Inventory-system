@@ -4,6 +4,7 @@ import LoginView from '../views/LoginView.vue'
 import { useAuthStore } from '../stores/authStore'
 import { onAuthFailure } from '../api/client'
 import { toast } from '../composables/useToast'
+import { allowLeaving } from '../composables/useSignOutReminder'
 
 // The sign-in page and the dashboard come with the app; every other page is downloaded
 // the first time it is opened, so the first load stays small
@@ -286,6 +287,7 @@ router.onError((error, to) => {
   } catch {
     return // Storage blocked: without the marker a reload could repeat, so leave it to the user
   }
+  allowLeaving()
   window.location.assign(to.fullPath)
 })
 
