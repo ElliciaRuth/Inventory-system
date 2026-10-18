@@ -8,7 +8,7 @@ import ProductModal from '../components/ProductModal.vue'
 import AppPagination from '../components/AppPagination.vue'
 import ImportStockcardsModal from '../components/ImportStockcardsModal.vue'
 import { Pencil, Trash2, FileSpreadsheet, Archive, ArchiveRestore, History } from 'lucide-vue-next'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import { toast, errorMessage } from '../composables/useToast'
 
 const authStore = useAuthStore()
@@ -165,8 +165,11 @@ function openArchive(prod) {
   archiveError.value = ''
 }
 
-function closeArchive() {
-  if (!archiveBusy.value) archiving.value = null
+// A typed reason is only thrown away after asking
+async function closeArchive() {
+  if (archiveBusy.value) return
+  if (archiveReason.value.trim() && !(await confirmDiscardChanges('The reason you typed will be lost. The product is not archived.'))) return
+  archiving.value = null
 }
 
 async function confirmArchive() {

@@ -3,7 +3,7 @@ import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
 import { X, AlertTriangle, Layers, ScanLine } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { triggerAutoReload } from '../composables/useAutoReload'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import ProductSearch from './ProductSearch.vue'
 
 const props = defineProps({
@@ -291,8 +291,20 @@ watch(() => form.transaction_type_id, () => {
 
 const reasonOptions = computed(() => options.value.adjustmentReasons?.[typeName.value] || [])
 
+// Set by anything the user types, picks or scans in the form (not by the defaults filled in
+// when the window opens), so Cancel, the X and a click outside only ask when there is something to lose
+const touched = ref(false)
+watch(() => props.isOpen, (open) => open && (touched.value = false))
+
+async function requestClose() {
+  if (loading.value) return
+  if (touched.value && !(await confirmDiscardChanges('This transaction is not recorded yet. What you entered will be lost.'))) return
+  emit('close')
+}
+
 // A scanned batch barcode picks the product and, where one is needed, its sub-product
 function onScanned(batch) {
+  touched.value = true
   errorMessage.value = ''
   if (batch?.copy_id && needsCopy.value) {
     // Wait for the product watcher above to clear the old sub-product first
@@ -424,14 +436,14 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div v-if="isOpen" class="modal-backdrop" @click.self="$emit('close')">
-    <div class="modal-card" style="max-width: 640px;">
+  <div v-if="isOpen" class="modal-backdrop" @click.self="requestClose">
+    <div class="modal-card" style="max-width: 640px;" @input="touched = true" @change="touched = true">
       <div class="modal-header">
         <div>
           <h2 style="font-size: 1.25rem">Stock Movement / Transaction</h2>
           <p class="panel-subtitle">Record deliveries, issues, lending, returns and adjustments.</p>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" @click="$emit('close')">
+        <button type="button" class="btn btn-sm btn-secondary" @click="requestClose">
           <X :size="16" />
         </button>
       </div>
@@ -449,9 +461,10 @@ async function handleSubmit() {
               <small class="sm-scan-hint"><ScanLine :size="12" /> type, pick, or scan a batch barcode</small>
             </label>
             <ProductSearch
-              v-model="form.product_id"
+              :model-value="form.product_id"
               :items="options.items"
               :scan-barcodes="true"
+              @update:model-value="form.product_id = $event; touched = true"
               @scanned="onScanned"
               @scan-error="errorMessage = $event"
             />
@@ -643,7 +656,7 @@ async function handleSubmit() {
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" @click="$emit('close')" :disabled="loading">Cancel</button>
+        <button type="button" class="btn btn-secondary" @click="requestClose" :disabled="loading">Cancel</button>
         <button type="submit" form="stockForm" class="btn btn-primary" :disabled="loading">
           {{ loading ? 'Saving...' : 'Record Transaction' }}
         </button>

@@ -1,13 +1,13 @@
 # BSU Integrated Inventory Monitoring System
 
-[![Version](https://img.shields.io/badge/version-2.7.1-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Version](https://img.shields.io/badge/version-2.7.2-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![Release](https://img.shields.io/badge/release-October%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![CodeIgniter](https://img.shields.io/badge/CodeIgniter-4.7-EF4423.svg?logo=codeigniter&logoColor=white)](https://codeigniter.com/)
 [![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 
-> **Current Version:** `v2.7.1` (Production Release — October 2026)
+> **Current Version:** `v2.7.2` (Production Release — October 2026)
 
 An integrated inventory, stock-card, and stock-out monitoring system engineered specifically for Benguet State University (BSU) production and operating units, including the **Bakery Project**, the **Food Processing Center (FPC)**, and administrative offices.
 
@@ -95,8 +95,8 @@ The system enforces strict Role-Based Access Control (RBAC) partitioned by offic
 | **Reports (Batch Inventory, Summary)** | No | Yes | Yes | No |
 | **Export (PDF, Word, CSV / Excel)** | No | Yes | Yes | No |
 | **Barcode Generation & SVG Download** | Read/Lookup | Generate & View | Generate & View | No |
-| **Import Appendix 58 from Excel (Keep Mode)** | No | Yes | Yes | No |
-| **Import Appendix 58 (Replace Mode / Wipe)** | No | With an office manager's password | Yes (own password required) | No |
+| **Import from Excel: Appendix 58 stock cards or Summary Report (Keep Mode)** | No | Yes | Yes | No |
+| **Import from Excel (Replace Mode / Wipe)** | No | With an office manager's password | Yes (own password required) | No |
 | **Office Settings (Entities, Units, Types)** | No | No | Yes | No |
 | **Office User Management (Activate/Deactivate)** | No | No | Yes (Office Users) | Yes (Global Users) |
 | **Edit User Accounts (name, username, role, office, temporary password)** | No | No | No | Yes |
@@ -331,9 +331,14 @@ Imports multi-sheet historical `.xlsx` workbooks adhering to government Appendix
      - Otherwise the item name ("label", "sticker") and then the file name decide; the fallback is Raw Materials. Categories can be changed in the preview.
    - **Spelling Correction:** Misspelled words in item names (*"SRAWBERRY" $\rightarrow$ "STRAWBERRY"*) are corrected against the other names in the file and the existing products, using a Levenshtein distance that counts swapped neighbouring letters as one edit.
    - **Carry-Forward Line Elimination:** Automatically detects and skips continuation card headers (*"Balance forwarded"*, *"RPCI count"*, *"FPC RM 19A"*).
+   - **Continuation vs. Parallel Cards:** Cards for the same item (office, name, unit) become one product, oldest first. A card that starts before the previous one ends *runs alongside* it (e.g. a donated lot): its opening stock is added and its balance column is checked against its own lot only. A card whose **first row carries forward** another card's balance (its stock no. or *"Balance forwarded"*) always **continues** that card, even when the dates overlap: the overlap is then a mistyped date, not a second lot.
 3. **Two-Stage Execution:**
    - **Stage 1 (Interactive Preview):** Generates an in-memory plan with a secure 24-hour token. Custodians can inspect beginning balances, transaction rows, and edit cells directly in the preview dialog.
-   - **Strict Preview Validation:** `StockcardImportService::issues()` lists everything in the preview that has to be corrected first, each with its card, row and kind: `negative` (negative balances, issues larger than the stock), `missing` (no item name, unit, office or date), `balance` (an Excel balance that doesn't match the entries), `date` (assumed years, missing days, dates earlier than the row before) and `other` (rows skipped or read with a guess, cards not imported). While any remain, the preview shows a red *Cannot proceed with import* banner with a count per kind, highlights the affected products, cards and rows (red for negative/missing, orange for the rest) and locks the Import button; `POST api/import/stockcards/commit` refuses with `422` (and the list in `errors.issues`) before any password is asked. Sheets that are not stock cards at all (no Date / Receipt / Issue / Balance header, or no entries) and automatic spelling fixes don't count.
+   - **Problems and Guesses:** `StockcardImportService::issues()` lists every message with its card, row, kind and a `severity`:
+     - **error** (*Problems to fix*, red): negative balances or issues larger than the stock, an Excel balance that doesn't match the entries, cards or products that can't be read (no item name, office or valid date). They are corrected in the preview or the file, or their products are left out (`skip_errors`). A problem with the whole file can't be left out.
+     - **assumption** (*Guesses to confirm*, orange) with a `group`: `date` (missing day or year, a year that looked wrong, a future date), `order` (a row dated before the row above), `column` (a reference in the Date column, a count typed under Issue), `merged` (a card running alongside another), `correction` (a carried-forward figure that differs from the entries, balanced by a receipt or adjustment) and `unit` (cards without a unit use *pcs*). Each group is accepted with one click (`accept`); a group whose number of guesses changes after a correction asks again.
+     - `StockcardImportService::importCheck()` applies the same rules on `POST api/import/stockcards/commit`, before any password is asked, and answers `422` with the reason and the list in `errors.issues`. The result and the audit log list the products left out.
+     - Sheets that are not stock cards at all (no Date / Receipt / Issue / Balance header, or no entries) and automatic spelling fixes are only listed.
    - **Stage 2 (Commit):**
      - **Keep Mode:** Appends new transactions. Generates a unique SHA-256 `stock_import_fingerprint` per transaction row, making re-runs idempotent by skipping previously imported lines.
      - **Replace Mode (Wipe):** Requires a manager's password: a manager types their own, a custodian needs the password of an active manager of their office (5 wrong passwords per 15 minutes, then blocked). A backup of each affected office is made first; if it fails, nothing is deleted or imported.
@@ -442,7 +447,7 @@ Any attempt to tamper with historical audit entries (even via direct MySQL conso
 **Location:** [`backend/app/Models/ProductModel.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Models/ProductModel.php), [`backend/app/Controllers/Api/ProductController.php`](file:///c:/xampp/htdocs/BSU_Inventory_System/backend/app/Controllers/Api/ProductController.php)
 
 #### Stock Code
-The product form has an optional **Stock Code** field. A typed code is saved as entered and must be unique within the office (`409` otherwise). Left blank, it is generated as `{OFFICE}-{product no., 4 digits}` (e.g. `FPC-0042`). Changing a product's number also renews its code when the code was still the generated one; a typed code is kept.
+The product's **Stock Code** is one required text field, `product_no` (`VARCHAR(100)`, e.g. `FPC RM 02A`), copied to `stock_no` (which the stock card, exports and barcodes print). It must be unique within the office (`409` otherwise). Editing a product only changes its code when the code itself is changed, so saving other fields never rewrites it (a product restored from an older backup may still have a separate `stock_no`; it is then shown next to the code). Migration `UseStockCodeAsProductNo` copied each existing product's stock code into `product_no`.
 
 The product form no longer has a *Measurement / Spec* field: the unit of measure and the description cover it. The `measurement` column stays in `product_table` (old values, backups and stockcard imports keep working) but is no longer shown or changed from the form.
 
@@ -474,6 +479,8 @@ The notification system computes dynamic alerts across 7 operational categories:
 5. **Pending User Registrations (`info`):** New accounts waiting for Manager / Technical Staff activation.
 6. **Pending Stock-Out Requests (`warning`):** Staff requests awaiting custodian decision.
 7. **Stock-Out Outcomes (`success` / `danger`):** Notifies staff of approved requests or custodian rejection reasons within the past 14 days.
+
+**Live refresh:** every successful change through the API (except sign-in, downloads, previews and a staff member's own draft list) counts one change in `sync_version` (`App\Filters\SyncVersionFilter`, scopes `office:N`, `shared`, `global`). The app asks `GET api/sync` every 3 seconds while the tab is visible (a few bytes) and, when the value changes, refreshes the open page and the bell; new stock-out requests, decisions and sign-ups also pop up. Pages refresh quietly (no loading state) and not while there are unsaved edits. A full reload every minute catches what changes by itself, such as batches reaching their expiry date.
 
 ---
 
@@ -667,6 +674,8 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 
 ## 4. Day-to-Day Operations & Operational Workflows
 
+> For the people using the system: a plain-language user manual with screenshots is in [`docs/BSU-Inventory-User-Manual.pdf`](docs/BSU-Inventory-User-Manual.pdf), and in the app under **Help & User Guide**.
+
 ### 4.1 Account Setup & First Login Workflow
 1. User logs in with temporary or seeded credentials.
 2. System intercepts session and routes user to `/account-setup`.
@@ -720,11 +729,21 @@ Closing the import window during the preview (the X, or a click outside it) asks
 2. Open **Export Summary**, choose the months, product type and paper size.
 3. To download as is, click **PDF Print** or **MS Word**.
 4. To change the report first, click **Preview & Edit Report**, edit it, click **Save Changes**, then download. Exporting with unsaved changes asks to save first.
+5. Edits in the editor change the downloaded copy only, never the stock: they are kept while the page is open and sent with the export. To correct a figure, use Edit Mode on the Summary Report or the Stock Card, then **Rebuild Report from Data**.
 
 ### 4.9 Disaster Recovery: Backup & Restore
 1. Open **Office Settings $\rightarrow$ Data Backup & Restore**.
 2. Click **Create Backup**. Choose desired modules (Office Setup, Inventory Records, Users, System Settings) and optional encryption password. Download `.zip` or `.bsubackup`.
 3. To restore: Click **Restore Backup**, upload archive, inspect manifest and row counts, enter decryption password if required, and confirm. The system generates an automatic pre-restore safety snapshot before applying changes.
+
+### 4.10 Importing a Summary Report from Excel
+**Location:** [`backend/app/Libraries/SummaryReportParser.php`](backend/app/Libraries/SummaryReportParser.php), [`backend/app/Services/SummaryImportService.php`](backend/app/Services/SummaryImportService.php)
+
+1. Open **Summary Report** and click **Import from Excel** (custodians and managers). The workbook has one sheet per product type with the columns Beginning Inventory, Produced/Purchases, Used/Sold, Breakage and Ending Inventory; the month is read from a line such as *Inventory for the month of SEPTEMBER 2026*, or chosen as **Report month**.
+2. Click **Preview** (`POST api/import/summary/preview`) and check the products, quantities, costs and month.
+3. Choose **Keep existing data** or **Delete existing inventory first** (a manager's password; a backup is made first) and click **Import** (`POST api/import/summary/commit`).
+4. The beginning inventory is recorded as a receipt on the last day of the previous month (so the report shows it as beginning inventory); purchases on the 15th, used on the 20th and breakage (reason *Spoiled*) on the 25th. Used and breakage are taken from the product's stock oldest first, across all its prices.
+5. A row that uses more than is on hand stops the import with the product, sheet and row, and nothing is written. Every transaction carries a fingerprint, so importing the same file again with *Keep existing data* adds nothing.
 
 ---
 
@@ -964,7 +983,8 @@ The script stops before changing anything when the version is not higher than th
 
 | Version | Release Date | Summary of Major Changes |
 |---|---|---|
-| **`v2.7.1`** *(Current)* | October 2026 | **Fixes & Safeguards:**<br>• Stock card import: a card that opens by carrying forward another card's balance (e.g. "Pbrittle 1", "Balance forwarded") is a continuation of that card even when the dates overlap. It was treated as a separate lot, and its balance check reported a false problem (e.g. *Excel balance is 59, the entries add up to -36*); the stock imported is unchanged.<br>• Stock card import: the *Accept* buttons of the guess groups stay on the right of their text.<br>• Product form: Cancel, the X or a click outside asks *Discard your changes?* when something was changed; *Add New Product* opens empty each time.<br>• Closing the tab or window while signed in asks first (the browser's own *Leave site?* dialog), a reminder to sign out on shared computers. |
+| **`v2.7.2`** *(Current)* | October 2026 | **Safeguards:**<br>• Every form window asks *Discard your changes?* before Cancel, the X or a click outside throws away what was entered: Stock Movement / Transaction (once anything is typed, picked or scanned), Edit Stockcard Entry, the stock card editor in the import preview, both Excel imports (once a file is chosen), the Settings and Admin office add / edit windows, and the archive and reject windows (once a reason is typed). Nothing is asked when nothing was changed.<br>**Removed:**<br>• Closing the tab or window while signed in no longer asks first (the browser's *Leave site?* dialog added in 2.7.1). |
+| **`v2.7.1`** | October 2026 | **Fixes & Safeguards:**<br>• Stock card import: a card that opens by carrying forward another card's balance (e.g. "Pbrittle 1", "Balance forwarded") is a continuation of that card even when the dates overlap. It was treated as a separate lot, and its balance check reported a false problem (e.g. *Excel balance is 59, the entries add up to -36*); the stock imported is unchanged.<br>• Stock card import: the *Accept* buttons of the guess groups stay on the right of their text.<br>• Product form: Cancel, the X or a click outside asks *Discard your changes?* when something was changed; *Add New Product* opens empty each time.<br>• Closing the tab or window while signed in asks first (the browser's own *Leave site?* dialog), a reminder to sign out on shared computers. |
 | **`v2.7.0`** | October 2026 | **Live Updates & Speed:**<br>• Pages and the bell refresh by themselves within seconds of anyone's change (`GET api/sync` change counters, table `sync_version`); new stock-out requests, decisions and sign-ups pop up. The full background reloads run once a minute as a safety net, and background refreshes no longer flash "Loading".<br>• Each page is downloaded the first time it is opened: the first load is about half the size.<br>**Stock Card Import:**<br>• *Problems to fix* (negative stock, balances that don't add up, unreadable cards) are separated from *Guesses to confirm* (date guesses, dates out of order, values in the wrong column, merged cards, stock corrections, units filled in). Guesses are accepted with one click per group or *Accept all guesses*; products with problems can be left out and the rest imported. The server checks the same rules (`accept`, `skip_errors`).<br>• Dates written as `2026-09-02` are read.<br>**Stock Codes:**<br>• The product's Stock Code is one field (`product_no`, text). Migration `UseStockCodeAsProductNo` copies each existing product's stock code into it. Editing a product never rewrites its stock code unless the code itself is changed (it was overwritten with the old number before).<br>• Batch Barcodes searches by stock code; a code is shown once where product number and stock code are the same.<br>**Fixes:**<br>• Adding a product with a text stock code failed.<br>• Technical staff: the dead *Settings* menu link is gone; waiting sign-ups show on User Management.<br>• The browser tab shows the BSU seal instead of the default Vite icon.<br>• Conflict markers left by a merge in the product form, the Summary Report and its import window.<br>**Help:** new guide topics for importing a Summary Report and editing it before download; user manual (`docs/`) updated with screenshots.<br>**Installer:** three new migrations (`ChangeProductNoToVarchar`, `CreateSyncVersion`, `UseStockCodeAsProductNo`); update over 2.6.0 with the new `BSU-Inventory-Setup.exe`. |
 | **`v2.6.0`** | October 2026 | **Summary Report Import from Excel:**<br>• **Summary Report → Import from Excel** (custodians and managers): a workbook with one sheet per product type and the columns Beginning Inventory, Purchases, Used, Breakage and Ending Inventory. Preview first; then keep the existing data (rows imported before are skipped) or delete the office's inventory first (manager's password, automatic backup).<br>• The beginning inventory is recorded as the balance carried into the month; used and breakage are taken from the product's stock oldest first, across all its prices. A row that uses more than is on hand stops the import with the product, sheet and row, and nothing is saved.<br>• The import window has the same layout as *Import Stock Cards from Excel*.<br>**Smaller changes:**<br>• Export Stockcard: filter by product type.<br>**Fixes:**<br>• Fresh installations: the audit log stayed empty (the `audit_log.ip_address` column was missing). Migration `RestoreAuditLogIpAddress` adds it where it is missing.<br>• Generated barcode images (`backend/public/barcodes/*.svg`) are no longer kept in Git; a missing image is drawn on the fly.<br>**Installer:** one new migration; update over 2.5.0 with the new `BSU-Inventory-Setup.exe`. |
 | **`v2.5.0`** | October 2026 | **Strict Excel Import Preview:**<br>• A preview with any warning can't be imported: negative stock, missing names, units, offices or dates, balances that don't add up, guessed or out-of-order dates, skipped rows and cards.<br>• Red *Cannot proceed with import* banner with a count per kind (e.g. *3 rows have negative stock*) and a **Cancel & Re-upload** button.<br>• *Warnings to resolve*: every warning under its card and row; the products, card buttons and rows in the card editor are highlighted red (negative stock, missing data) or orange (the rest).<br>• The Import button and options stay locked until 0 warnings remain; the server refuses the import too.<br>• Sheets that aren't stock cards (no stock card columns, or empty) are listed as ignored and don't block.<br>**Office Settings:**<br>• Managers can no longer edit user accounts: the Users list keeps Activate / Deactivate only, and `POST api/settings/users` answers `403` below technical staff. Name, username, role, office and temporary passwords are changed by technical staff.<br>**Smaller changes:**<br>• Closing the import window during the preview (X or a click outside) asks *Discard this import?* first.<br>• Transaction Log and the dashboard's recent activity show stock-out quantities in red (stock-in stays green). |
@@ -979,4 +999,4 @@ The script stops before changing anything when the version is not higher than th
 
 ---
 
-*Benguet State University Integrated Inventory Monitoring System v2.7.1 · Engineered for BSU Operating & Production Units.*
+*Benguet State University Integrated Inventory Monitoring System v2.7.2 · Engineered for BSU Operating & Production Units.*

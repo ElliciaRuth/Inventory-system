@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, isBackgroundReload, deduplicateById, triggerAutoReload } from '../composables/useAutoReload'
 import StatCard from '../components/StatCard.vue'
 import AppPagination from '../components/AppPagination.vue'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import { toast, errorMessage } from '../composables/useToast'
 
 const authStore = useAuthStore()
@@ -40,6 +40,7 @@ const modalType = ref('user_office_table')
 const modalTitle = ref('')
 const editId = ref(0)
 const officeFormName = ref('')
+const officeFormOriginal = ref('') // the name as the window opened, to tell whether it was changed
 const modalLoading = ref(false)
 const actionMessage = ref('')
 
@@ -181,6 +182,7 @@ async function handleDeleteRecord(type, id, label, record = {}) {
 function openAddOfficeModal() {
   editId.value = 0
   officeFormName.value = ''
+  officeFormOriginal.value = ''
   modalType.value = 'user_office_table'
   modalTitle.value = 'Add User Office'
   isModalOpen.value = true
@@ -189,9 +191,17 @@ function openAddOfficeModal() {
 function openEditOfficeModal(office) {
   editId.value = Number(office.user_office_id)
   officeFormName.value = office.user_office_name
+  officeFormOriginal.value = office.user_office_name
   modalType.value = 'user_office_table'
   modalTitle.value = 'Edit User Office'
   isModalOpen.value = true
+}
+
+// Cancel, the X and a click outside: a changed name is only thrown away after asking
+async function closeOfficeModal() {
+  if (modalLoading.value) return
+  if (officeFormName.value.trim() !== officeFormOriginal.value.trim() && !(await confirmDiscardChanges())) return
+  isModalOpen.value = false
 }
 
 async function handleSaveOffice() {
@@ -608,11 +618,11 @@ onMounted(() => {
     </section>
 
     <!-- Modal for Adding / Editing Office -->
-    <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
+    <div v-if="isModalOpen" class="modal-backdrop" @click.self="closeOfficeModal">
       <div class="modal-card" style="max-width: 480px;">
         <div class="modal-header">
           <h2 style="font-size: 1.25rem;">{{ modalTitle }}</h2>
-          <button type="button" class="btn btn-sm btn-secondary" @click="isModalOpen = false">✕</button>
+          <button type="button" class="btn btn-sm btn-secondary" @click="closeOfficeModal">✕</button>
         </div>
         <div class="modal-body">
           <form @submit.prevent="handleSaveOffice" id="officeForm">
@@ -629,7 +639,7 @@ onMounted(() => {
           </form>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" @click="isModalOpen = false">Cancel</button>
+          <button type="button" class="btn btn-secondary" @click="closeOfficeModal">Cancel</button>
           <button type="submit" form="officeForm" class="btn btn-primary" :disabled="modalLoading">
             {{ modalLoading ? 'Saving...' : 'Save Office' }}
           </button>

@@ -7,7 +7,7 @@ import {
 import { importApi } from '../api/import'
 import StockcardCardEditor from './StockcardCardEditor.vue'
 import { triggerAutoReload } from '../composables/useAutoReload'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import { useAuthStore } from '../stores/authStore'
 
 const props = defineProps({
@@ -264,10 +264,13 @@ async function reupload() {
   fileInput.value?.click()
 }
 
-// The X, a click outside and Cancel: a preview (and any corrections made in it) is only
-// thrown away after asking; nothing has been imported yet at that point
+// The X, a click outside and Cancel: a chosen file or a preview (and any corrections made in it)
+// is only thrown away after asking; nothing has been imported yet at that point
 async function close() {
   if (busy.value) return
+  if (step.value === 'choose' && file.value) {
+    if (!(await confirmDiscardChanges(`Nothing has been imported yet. The chosen file (${file.value.name}) will have to be chosen again.`))) return
+  }
   if (step.value === 'preview') {
     const corrections = Number(plan.value?.edits || 0)
     const ok = await confirmDialog({

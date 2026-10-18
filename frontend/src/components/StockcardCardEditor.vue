@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { X, AlertTriangle, Plus, Eraser, Undo2, Info } from 'lucide-vue-next'
 import { importApi } from '../api/import'
+import { confirmDiscardChanges } from '../composables/useConfirm'
 
 // Correct one Excel stock card before importing. Edits go to the server, which checks the
 // whole file again; the Excel file itself is never changed.
@@ -117,6 +118,13 @@ function addRow() {
   nextRow += 1
 }
 
+// The X, a click outside and Cancel: corrections not applied yet are only thrown away after asking
+async function requestClose() {
+  if (saving.value) return
+  if (edits.value.length && !(await confirmDiscardChanges('The corrections to this card are not applied yet. They will be lost.'))) return
+  emit('close')
+}
+
 async function apply() {
   if (!edits.value.length || saving.value) return
   saving.value = true
@@ -133,14 +141,14 @@ async function apply() {
 </script>
 
 <template>
-  <div class="modal-backdrop editor-backdrop" @click.self="!saving && emit('close')">
+  <div class="modal-backdrop editor-backdrop" @click.self="requestClose">
     <div class="modal-card editor-card">
       <div class="modal-header">
         <div>
           <h2 style="font-size: 1.15rem;">Correct card: {{ label }}</h2>
           <p class="panel-subtitle">Fix misinputs here; the file is checked again when you apply. Your Excel file is not changed.</p>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" :disabled="saving" @click="emit('close')">
+        <button type="button" class="btn btn-sm btn-secondary" :disabled="saving" @click="requestClose">
           <X :size="16" />
         </button>
       </div>
@@ -228,7 +236,7 @@ async function apply() {
         <span class="editor-muted" style="margin-right: auto;">
           {{ edits.length ? `${edits.length} change${edits.length === 1 ? '' : 's'}` : 'No changes yet' }}
         </span>
-        <button type="button" class="btn btn-secondary" :disabled="saving" @click="emit('close')">Cancel</button>
+        <button type="button" class="btn btn-secondary" :disabled="saving" @click="requestClose">Cancel</button>
         <button type="button" class="btn btn-primary" :disabled="!edits.length || saving" @click="apply">
           {{ saving ? 'Checking the file…' : 'Apply corrections' }}
         </button>

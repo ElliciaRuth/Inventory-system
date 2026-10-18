@@ -8,7 +8,6 @@ import SplashScreen from './components/SplashScreen.vue'
 import { useThemeStore } from './stores/themeStore'
 import { useIdleTimeout } from './composables/useIdleTimeout'
 import { useLiveSync } from './composables/useLiveSync'
-import { useSignOutReminder } from './composables/useSignOutReminder'
 
 const route = useRoute()
 const themeStore = useThemeStore()
@@ -17,8 +16,6 @@ const themeStore = useThemeStore()
 useIdleTimeout()
 // Pages and notifications refresh by themselves when someone changes something
 useLiveSync()
-// Closing the tab or window while signed in asks first: a reminder to sign out
-useSignOutReminder()
 
 const alertCount = ref(0)
 // Standalone pages without the navbar

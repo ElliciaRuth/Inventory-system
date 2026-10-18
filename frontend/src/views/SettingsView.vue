@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/authStore'
 import { toast, errorMessage } from '../composables/useToast'
 import BackupPanel from '../components/BackupPanel.vue'
 import AppPagination from '../components/AppPagination.vue'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 
 const authStore = useAuthStore()
 
@@ -39,7 +39,8 @@ const thresholds = reactive({ expiry_warning_days: 30, expiry_danger_days: 7 })
 const signatories = ref([])
 
 // Add / edit modal
-const modal = reactive({ open: false, type: '', id: 0, values: {}, saving: false, error: '' })
+const modal = reactive({ open: false, type: '', id: 0, values: {}, initial: '', saving: false, error: '' })
+const modalSnapshot = () => JSON.stringify(Object.entries(modal.values).map(([key, value]) => [key, String(value ?? '').trim()]))
 
 const recordTypes = computed(() => Object.keys(data.value.definitions).filter((t) => t !== 'users'))
 
@@ -137,6 +138,14 @@ function openModal(type, row = null) {
     values[field] = field === 'password' ? '' : row?.[field] ?? ''
   }
   Object.assign(modal, { open: true, type, id: row ? Number(row[def.pk]) : 0, values, saving: false, error: '' })
+  modal.initial = modalSnapshot()
+}
+
+// Cancel, the X and a click outside: changes are only thrown away after asking
+async function closeModal() {
+  if (modal.saving) return
+  if (modalSnapshot() !== modal.initial && !(await confirmDiscardChanges())) return
+  modal.open = false
 }
 
 // A record's visible fields as label/value rows (email partly hidden)
@@ -433,11 +442,11 @@ useAutoReload(load)
     </template>
 
     <!-- Add / edit modal -->
-    <div v-if="modal.open" class="modal-backdrop" @click.self="modal.open = false">
+    <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
       <div class="modal-card" style="max-width: 520px;">
         <div class="modal-header">
           <h2 style="font-size: 1.2rem;">{{ modal.id ? 'Edit' : 'Add' }} {{ SECTION_TITLES[modal.type] || modal.type }}</h2>
-          <button type="button" class="btn btn-sm btn-secondary" @click="modal.open = false">✕</button>
+          <button type="button" class="btn btn-sm btn-secondary" @click="closeModal">✕</button>
         </div>
         <form class="modal-body" @submit.prevent="saveModal">
           <div v-if="modal.error" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
@@ -482,7 +491,7 @@ useAutoReload(load)
             </template>
           </div>
           <div class="modal-footer" style="padding: 0; border: 0;">
-            <button type="button" class="btn btn-secondary" @click="modal.open = false">Cancel</button>
+            <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
             <button type="submit" class="btn btn-primary" :disabled="modal.saving">{{ modal.saving ? 'Saving…' : 'Save' }}</button>
           </div>
         </form>

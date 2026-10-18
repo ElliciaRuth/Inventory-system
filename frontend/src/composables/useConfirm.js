@@ -50,6 +50,20 @@ export function alertDialog(options = {}) {
   return confirmDialog({ confirmText: 'OK', variant: 'info', ...options, alert: true })
 }
 
+/**
+ * Asked before a form window throws away what was entered (Cancel, the X, a click outside).
+ *   if (isDirty.value && !(await confirmDiscardChanges())) return
+ */
+export function confirmDiscardChanges(message = 'What you entered is not saved yet. It will be lost.') {
+  return confirmDialog({
+    title: 'Discard your changes?',
+    message,
+    confirmText: 'Discard changes',
+    cancelText: 'Keep editing',
+    variant: 'warning',
+  })
+}
+
 export function settleConfirm(result) {
   confirmState.open = false
   resolver?.(result)

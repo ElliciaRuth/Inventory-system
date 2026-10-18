@@ -5,7 +5,7 @@ import { stockoutApi } from '../api/stockout'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload, triggerAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import AppPagination from '../components/AppPagination.vue'
 
 const authStore = useAuthStore()
@@ -125,8 +125,10 @@ function reject(item) {
   rejectError.value = ''
 }
 
-function closeReject() {
+// A typed reason is only thrown away after asking
+async function closeReject() {
   if (busy.value) return
+  if (rejectReason.value.trim() && !(await confirmDiscardChanges('The reason you typed will be lost. The item is not rejected.'))) return
   rejecting.value = null
 }
 

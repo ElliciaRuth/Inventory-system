@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { stockoutApi } from '../api/stockout'
 import { useAutoReload, triggerAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 
 const requests = ref([])
 const loading = ref(true)
@@ -92,8 +92,10 @@ function reject(item, request) {
   rejectError.value = ''
 }
 
-function closeReject() {
+// A typed reason is only thrown away after asking
+async function closeReject() {
   if (busy.value) return
+  if (rejectReason.value.trim() && !(await confirmDiscardChanges('The reason you typed will be lost. The item is not rejected.'))) return
   rejecting.value = null
 }
 

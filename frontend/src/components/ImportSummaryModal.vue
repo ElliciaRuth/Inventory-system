@@ -6,6 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { importApi } from '../api/import'
 import { triggerAutoReload } from '../composables/useAutoReload'
+import { confirmDiscardChanges } from '../composables/useConfirm'
 import { useAuthStore } from '../stores/authStore'
 
 const props = defineProps({
@@ -62,8 +63,14 @@ function reset() {
 
 watch(() => props.isOpen, (open) => { if (open) reset() })
 
-function close() {
+// The X, a click outside and Cancel: a chosen file or a preview is only thrown away after asking;
+// nothing has been imported yet at that point
+async function close() {
   if (busy.value) return
+  if (step.value === 'preview' || (step.value === 'choose' && file.value)) {
+    const name = plan.value?.file_name || file.value?.name
+    if (!(await confirmDiscardChanges(`Nothing has been imported yet. The ${step.value === 'preview' ? 'preview' : 'chosen file'}${name ? ` (${name})` : ''} will be lost, and the file has to be chosen again.`))) return
+  }
   emit('close')
 }
 

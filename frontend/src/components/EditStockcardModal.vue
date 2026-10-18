@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { ArrowDownToLine, ArrowUpFromLine, Info, Trash2, AlertCircle, Check, X } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 import { typeLabel, rowTransactionIds } from '../utils/transactionTypes'
 
 const props = defineProps({
@@ -78,6 +78,27 @@ const isSplitRow = computed(() => transactionIds.value.length > 1)
 const originalReference = computed(() => (props.transaction?.reference && props.transaction.reference !== 'N/A' ? props.transaction.reference : ''))
 const originalOffice = computed(() => (props.transaction?.office && props.transaction.office !== 'Direct' ? props.transaction.office : ''))
 
+// Only what changed is sent, for all the row's entries in one all-or-nothing save
+const edit = computed(() => {
+  const changes = { transaction_ids: transactionIds.value }
+  if (Math.abs(Number(quantity.value) - originalQty.value) >= 0.000001) changes.qty = Number(quantity.value)
+  if (Math.abs(Number(unitCost.value) - originalUnitCost.value) >= 0.005) changes.unit_cost = Number(unitCost.value)
+  if (reference.value.trim() !== originalReference.value) changes.reference = reference.value.trim()
+  if (office.value.trim() !== originalOffice.value) changes.office = office.value.trim()
+  if (originalTypeId.value !== null && Number(typeId.value) !== originalTypeId.value) {
+    changes.type = Number(typeId.value) === 1 ? 'receipt' : 'issue'
+  }
+  return changes
+})
+const isDirty = computed(() => Object.keys(edit.value).length > 1)
+
+// Cancel, the X and a click outside: changes are only thrown away after asking
+async function requestClose() {
+  if (isSubmitting.value || isDeleting.value) return
+  if (isDirty.value && !successMessage.value && !(await confirmDiscardChanges('Your changes to this entry are not saved yet. They will be lost.'))) return
+  emit('close')
+}
+
 async function handleSave() {
   if (!props.transaction) return
   errorMessage.value = ''
@@ -92,16 +113,7 @@ async function handleSave() {
     return
   }
 
-  // Only what changed is sent, for all the row's entries in one all-or-nothing save
-  const edit = { transaction_ids: transactionIds.value }
-  if (Math.abs(Number(quantity.value) - originalQty.value) >= 0.000001) edit.qty = Number(quantity.value)
-  if (Math.abs(Number(unitCost.value) - originalUnitCost.value) >= 0.005) edit.unit_cost = Number(unitCost.value)
-  if (reference.value.trim() !== originalReference.value) edit.reference = reference.value.trim()
-  if (office.value.trim() !== originalOffice.value) edit.office = office.value.trim()
-  if (originalTypeId.value !== null && Number(typeId.value) !== originalTypeId.value) {
-    edit.type = Number(typeId.value) === 1 ? 'receipt' : 'issue'
-  }
-  if (Object.keys(edit).length === 1) {
+  if (!isDirty.value) {
     errorMessage.value = 'Nothing was changed.'
     return
   }
@@ -124,7 +136,7 @@ async function handleSave() {
   isSubmitting.value = true
 
   try {
-    const res = await stockApi.saveLedgerEdits({ edits: [edit] })
+    const res = await stockApi.saveLedgerEdits({ edits: [edit.value] })
     if (res.status || res.ok) {
       successMessage.value = 'Transaction updated successfully.'
       setTimeout(() => {
@@ -188,7 +200,7 @@ async function handleDelete() {
 </script>
 
 <template>
-  <div v-if="isOpen && transaction" class="modal-backdrop" @click.self="$emit('close')">
+  <div v-if="isOpen && transaction" class="modal-backdrop" @click.self="requestClose">
     <div class="modal-card edit-stockcard-modal" @click.stop>
       <!-- Modal Header -->
       <div class="modal-header">
@@ -198,7 +210,7 @@ async function handleDelete() {
             Correction for Transaction #{{ transaction.transaction_id }} ({{ transaction.date ? transaction.date.slice(0, 10) : 'Date N/A' }})
           </p>
         </div>
-        <button type="button" class="btn btn-icon btn-secondary" @click="$emit('close')">
+        <button type="button" class="btn btn-icon btn-secondary" @click="requestClose">
           <X :size="16" />
         </button>
       </div>
@@ -357,7 +369,7 @@ async function handleDelete() {
           type="button"
           class="btn btn-secondary"
           :disabled="isSubmitting || isDeleting"
-          @click="$emit('close')"
+          @click="requestClose"
         >
           Cancel
         </button>

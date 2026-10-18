@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { X, AlertTriangle, Zap, Package, PlusCircle } from 'lucide-vue-next'
 import { productsApi } from '../api/products'
 import { triggerAutoReload } from '../composables/useAutoReload'
-import { confirmDialog } from '../composables/useConfirm'
+import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -132,15 +132,9 @@ async function requestClose() {
   if (loading.value) return
   if (isDirty.value) {
     const editing = Boolean(props.product?.product_id)
-    const ok = await confirmDialog({
-      title: 'Discard your changes?',
-      message: editing
-        ? `Your changes to "${props.product.product}" are not saved yet. They will be lost.`
-        : 'This new product is not saved yet. What you typed will be lost.',
-      confirmText: 'Discard changes',
-      cancelText: 'Keep editing',
-      variant: 'warning',
-    })
+    const ok = await confirmDiscardChanges(editing
+      ? `Your changes to "${props.product.product}" are not saved yet. They will be lost.`
+      : 'This new product is not saved yet. What you typed will be lost.')
     if (!ok) return
   }
   emit('close')
