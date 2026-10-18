@@ -236,6 +236,7 @@ export const TOPICS = [
       'Open Menu → Stockcard Ledger and click "Import from Excel".',
       'Choose the Excel file. The system reads every stock card and shows a preview.',
       'Problems to fix (red): stock or data that is wrong, such as negative stock or a balance that doesn\'t add up. Click a card to correct its rows, fix the Excel file and click "Cancel & Re-upload", or tick "Leave out the products with problems" to import the rest.',
+      'If a "Recheck these dates" window opens, a mistyped date would make the stock negative in the stock card and the Summary Report (for example, an issue dated before the stock it takes from). It lists each card with the rows and dates to check. Click a card to correct the date, or fix it in the Excel file.',
       'Guesses to confirm (orange): things the system already filled in, such as a missing day or a merged card. Check them and click "Accept" for each group, or "Accept all guesses".',
       'Choose how to import and click Import.',
     ],

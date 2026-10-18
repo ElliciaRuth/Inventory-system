@@ -56,6 +56,7 @@ const assumptions = computed(() => issues.value.filter((i) => i.severity === 'as
 const fileErrors = computed(() => errors.value.filter((i) => !i.card))
 
 const ISSUE_KINDS = [
+  { kind: 'report', one: 'row would show negative stock in the summary report', many: 'rows would show negative stock in the summary report' },
   { kind: 'negative', one: 'row has negative stock', many: 'rows have negative stock' },
   { kind: 'missing', one: 'card or product not readable', many: 'cards or products not readable' },
   { kind: 'balance', one: "balance doesn't add up", many: "balances don't add up" },
@@ -84,6 +85,28 @@ function byCard(list) {
     .map(([card, items]) => ({ card, list: [...items].sort((x, y) => (x.row ?? 0) - (y.row ?? 0)) }))
 }
 const errorsByCard = computed(() => byCard(errors.value))
+
+// The stock card and the summary report add the entries up by date, not in row order: a mistyped
+// date can put the stock (and a month's beginning qty) below zero although the card adds up.
+// A pop-up names each such row as soon as the preview shows it, and again when the list changes.
+const reportErrors = computed(() => errors.value.filter((i) => i.kind === 'report'))
+const showReportWarning = ref(false)
+let reportWarned = ''
+watch(reportErrors, (list) => {
+  const key = list.map((i) => i.message).join('\n')
+  if (key && key !== reportWarned) showReportWarning.value = true
+  reportWarned = key
+})
+// "Row 99 (2026-06-21), row 92 (2026-08-06)": the dates to recheck, read from the message
+function reportDates(i) {
+  const m = i.message.match(/dated (\S+),.*Recheck the date of this row(?: and (.*))?\.$/)
+  if (!m) return i.message.replace(`${i.card} row ${i.row}: `, '')
+  return `Row ${i.row} (${m[1]})${m[2] ? `, ${m[2]}` : ''}`
+}
+function correctFromWarning(card) {
+  showReportWarning.value = false
+  editingCard.value = card
+}
 
 // Leave out the products that have errors and import the rest
 const skipErrors = ref(false)
@@ -247,6 +270,8 @@ function reset() {
   setAllType.value = ''
   skipErrors.value = false
   accepted.value = {}
+  showReportWarning.value = false
+  reportWarned = ''
   result.value = null
   editingCard.value = null
   if (fileInput.value) fileInput.value.value = ''
@@ -853,6 +878,42 @@ function num(value) {
       </form>
     </div>
 
+    <!-- Dates that would put the stock below zero in the stock card and the summary report -->
+    <div v-if="showReportWarning && reportErrors.length" class="modal-backdrop import-password-backdrop" @click.self="showReportWarning = false">
+      <div class="modal-card import-report-card" role="alertdialog" aria-labelledby="importReportTitle" aria-describedby="importReportText">
+        <div class="import-password-head">
+          <span class="import-password-icon import-report-icon"><AlertTriangle :size="22" /></span>
+          <h2 id="importReportTitle">Recheck these dates</h2>
+          <p id="importReportText">
+            {{ reportErrors.length === 1 ? 'This card' : `These ${reportErrors.length} cards` }} would show
+            <strong>negative stock</strong> in the stock card and the summary report. A date is probably mistyped.
+          </p>
+        </div>
+
+        <div class="import-password-body import-report-body">
+          <table class="import-report-table">
+            <thead>
+              <tr><th>Card</th><th>Dates to recheck</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(i, n) in reportErrors" :key="n">
+                <td>
+                  <button type="button" class="import-card-link is-danger" title="Open this card to correct it" @click="correctFromWarning(i.card)">
+                    <PencilLine :size="12" /> {{ i.card }}
+                  </button>
+                </td>
+                <td>{{ reportDates(i) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" autofocus @click="showReportWarning = false">OK</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Correcting one card's misinputs -->
     <StockcardCardEditor
       v-if="editingCard && token"
@@ -1444,6 +1505,48 @@ function num(value) {
 .import-password-head {
   padding: 1.5rem 1.5rem 0.5rem;
   text-align: center;
+}
+
+.import-report-card {
+  max-width: 520px;
+  width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+
+.import-report-icon {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.import-report-body {
+  overflow-y: auto;
+}
+
+.import-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.import-report-table th {
+  padding: 0 0.5rem 0.4rem;
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.import-report-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.import-report-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .import-password-icon {

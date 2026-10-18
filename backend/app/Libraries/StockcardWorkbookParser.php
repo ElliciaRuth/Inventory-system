@@ -1098,6 +1098,9 @@ class StockcardWorkbookParser
                 $product['status'] = 'skipped';
                 $product['reason'] = 'No receipts or issues to import.';
             }
+            if ($product['status'] === 'ok' && ($negative = $this->negativeByDate($product)) !== null) {
+                $product['warnings'][] = $negative;
+            }
 
             $products[] = $product;
         }
@@ -1105,6 +1108,46 @@ class StockcardWorkbookParser
         usort($products, static fn ($a, $b) => [$a['office'], strtolower($a['name'])] <=> [$b['office'], strtolower($b['name'])]);
 
         return $products;
+    }
+
+    /**
+     * The stock card and the summary report add the entries up by date, not in the card's row
+     * order. A mistyped date (an issue dated before the receipt it takes from) adds up on the card
+     * but shows negative stock there and in the summary report's beginning qty. Reported where the
+     * stock first goes below zero, with the rows whose dates are out of order around it.
+     */
+    private function negativeByDate(array $product): ?string
+    {
+        $moves = $product['movements'];
+        // Same order as the report: by date, then as imported
+        $order = array_keys($moves);
+        usort($order, static fn ($a, $b) => [$moves[$a]['date'], $a] <=> [$moves[$b]['date'], $b]);
+
+        $balance = 0.0;
+        foreach ($order as $i) {
+            $m        = $moves[$i];
+            $balance += $m['type'] === 'receipt' ? $m['qty'] : -$m['qty'];
+            if ($balance >= -0.0001) {
+                continue;
+            }
+
+            // Receipts above it on the card dated after it, issues below it dated on or before it
+            $suspects = [];
+            foreach ($moves as $j => $other) {
+                $early = $j > $i && $other['type'] !== 'receipt' && $other['date'] <= $m['date'];
+                $late  = $j < $i && $other['type'] === 'receipt' && $other['date'] > $m['date'];
+                if ($early || $late) {
+                    $suspects[] = ($other['card'] === $m['card'] ? '' : $other['card'] . ' ') . "row {$other['row']} ({$other['date']})";
+                }
+            }
+
+            return "{$m['card']} row {$m['row']}: dated {$m['date']}, stock goes negative ({$this->fmt($balance)}) in the summary report. "
+                . 'Recheck the date of this row'
+                . ($suspects === [] ? '' : ' and ' . implode(', ', array_slice($suspects, 0, 2)) . (count($suspects) > 2 ? ' (+' . (count($suspects) - 2) . ' more)' : ''))
+                . '.';
+        }
+
+        return null;
     }
 
     private function firstDate(array $card): string

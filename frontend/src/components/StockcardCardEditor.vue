@@ -50,7 +50,7 @@ const flaggedRows = computed(() => {
 
 // Rows with negative stock or missing data are red; other flagged rows orange
 const severeRows = computed(() => new Set(
-  props.issues.filter((i) => i.row && ['negative', 'missing'].includes(i.kind)).map((i) => Number(i.row))
+  props.issues.filter((i) => i.row && ['report', 'negative', 'missing'].includes(i.kind)).map((i) => Number(i.row))
 ))
 
 const headerFields = computed(() => Object.keys(HEADER_LABELS).filter((f) => card.value?.header?.[f] !== null && card.value?.header?.[f] !== undefined))

@@ -223,7 +223,7 @@ class StockcardImportService
      * or dates. Sheets that are not stock cards at all and automatic spelling fixes don't count.
      *
      * @return list<array{kind: string, card: ?string, row: ?int, message: string}>
-     *   kind: negative | missing | balance | date | other
+     *   kind: report (negative in the summary report, by date) | negative | missing | balance | date | other
      */
     public static function issues(array $plan): array
     {
@@ -365,6 +365,7 @@ class StockcardImportService
     private static function issueKind(string $message): string
     {
         return match (true) {
+            (bool) preg_match('/stock goes negative .* in the summary report/i', $message)                              => 'report',
             (bool) preg_match('/negative|is in stock at that point/i', $message)                                        => 'negative',
             (bool) preg_match('/no item name|no unit of measurement|office|no date|not a date|not a valid date/i', $message) => 'missing',
             (bool) preg_match('/balance|add up to|running balance/i', $message)                                         => 'balance',
