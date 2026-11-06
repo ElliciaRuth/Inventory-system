@@ -14,6 +14,15 @@ class TransactionModel extends Model
     public const STOCK_IN_TYPES  = ['receipt', 'return', 'adjust_in'];
     public const STOCK_OUT_TYPES = ['issue', 'adjust_out', 'borrow'];
 
+    /**
+     * Lending is kept off the stock card: a borrow and the return that settles it are left out of
+     * its rows and of its running balance, so the card keeps counting lent stock as the office's.
+     * The stock on hand (batch_table) still goes down while it is out; the Stock Card shows that
+     * figure and lists the open borrows under it. Use with the transaction alias "t" and the
+     * transaction type alias "tt".
+     */
+    public const NOT_LENDING_SQL = "NOT (tt.transaction_type = 'borrow' OR (tt.transaction_type = 'return' AND t.borrow_id IS NOT NULL))";
+
     protected $table                 = 'transaction_table';
     protected $primaryKey            = 'transaction_id';
     protected $returnType            = 'array';
@@ -161,6 +170,7 @@ class TransactionModel extends Model
                 LEFT JOIN entity_table et ON p.entity_id = et.entity_id
                 WHERE b.product_id = ? {$officeFilter}
                   AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
+                  AND " . self::NOT_LENDING_SQL . "
             ) AS base
             WHERE 1=1 {$searchFilter} {$dateFilter}
             GROUP BY date, transaction_type_id, transaction_type, office, reference,
@@ -204,6 +214,7 @@ class TransactionModel extends Model
             LEFT JOIN reference_table r ON t.reference_id = r.reference_id
             WHERE b.product_id = ? {$countOfficeFilter}
               AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
+              AND " . self::NOT_LENDING_SQL . "
               {$countSearchFilter}
               {$countDateFilter}
             GROUP BY t.transaction_date, t.transaction_type_id, t.office_id, t.reference_id,

@@ -164,7 +164,28 @@ class ExportController extends BaseApiController
     }
 
     /**
-     * POST /api/export/stockcard   { format: pdf|csv|word, product_id?, month_from, month_to, sort_order?, paper_size? }
+     * The stock card's styles for the editor, as a stylesheet (the server's Content-Security-Policy
+     * blocks <style> blocks in the editor). Adds a dashed line between cards: each is its own page.
+     * GET /api/export/stockcard/editor-style
+     */
+    public function stockcardEditorStyle(): ResponseInterface
+    {
+        $css = $this->stockcardCss()
+            . "\nhtml { background: #fff; } body { padding: 12px; }"
+            . "\n.sc-page + .sc-page { border-top: 2px dashed #9ca3af; margin-top: 12px; }\n";
+
+        return $this->response
+            ->setHeader('Content-Type', 'text/css; charset=UTF-8')
+            ->setHeader('Cache-Control', 'private, no-cache')
+            ->setBody($css);
+    }
+
+    /**
+     * POST /api/export/stockcard
+     *   { format: pdf|csv|word|preview, product_id?, type_id?, month_from, month_to, all_time?, sort_order?, paper_size?, html? }
+     *
+     * "preview" returns the stock card pages as JSON for the editor; pdf/word given `html` (the edited
+     * pages) print that instead of building the cards again. all_time=1 covers every month on record.
      */
     public function stockcardDownload()
     {
@@ -178,8 +199,10 @@ class ExportController extends BaseApiController
         $typeId    = (int)         ($input['type_id']    ?? 0);
         $monthFrom = trim((string) ($input['month_from'] ?? ''));
         $monthTo   = trim((string) ($input['month_to']   ?? ''));
+        $allTime   = ! empty($input['all_time']) && $input['all_time'] !== '0' && $input['all_time'] !== 'false';
         $sortOrder = ($input['sort_order'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
         $paperSize = $input['paper_size'] ?? 'long';
+        $html      = is_string($input['html'] ?? null) ? $input['html'] : '';
 
         // Normalise paper size → dompdf paper name + CSS page size
         $paperMap  = [
@@ -190,31 +213,70 @@ class ExportController extends BaseApiController
         $paper = $paperMap[$paperSize] ?? $paperMap['long'];
 
 
-        if (! in_array($format, ['pdf', 'csv', 'word'], true)) {
+        if (! in_array($format, ['pdf', 'csv', 'word', 'preview'], true)) {
             return $this->respondError('Please select a download format.');
         }
-        if ($monthFrom === '' || $monthTo === '') {
-            return $this->respondError('Please select a date range.');
-        }
-        // YYYY-MM only: the months also become part of the download's file name
-        if (! $this->isMonth($monthFrom) || ! $this->isMonth($monthTo)) {
-            return $this->respondError('Please select a valid date range.');
+
+        if ($allTime) {
+            // Every month on record: from the very start up to the end of this month
+            $dateFrom   = '1970-01-01';
+            $dateTo     = date('Y-m-d', strtotime(date('Y-m') . '-01 +1 month'));
+            $periodName = 'All';
+        } else {
+            if ($monthFrom === '' || $monthTo === '') {
+                return $this->respondError('Please select a date range.');
+            }
+            // YYYY-MM only: the months also become part of the download's file name
+            if (! $this->isMonth($monthFrom) || ! $this->isMonth($monthTo)) {
+                return $this->respondError('Please select a valid date range.');
+            }
+
+            $dateFrom = $monthFrom . '-01';
+            $dateTo   = date('Y-m-d', strtotime($monthTo . '-01 +1 month'));
+
+            if ($dateFrom > $dateTo) {
+                return $this->respondError('From Month must be before To Month.');
+            }
+            $periodName = $monthFrom === $monthTo ? $monthFrom : $monthFrom . '_to_' . $monthTo;
         }
 
-        $dateFrom = $monthFrom . '-01';
-        $dateTo   = date('Y-m-d', strtotime($monthTo . '-01 +1 month'));
+        // One product: its stock number names the file
+        $filename = 'Stockcard_' . $periodName;
+        if ($productId > 0) {
+            $stockNo = (string) (db_connect()->table('product_table')->select('stock_no')
+                ->where('product_id', $productId)->where('user_office_id', $this->userOfficeId())
+                ->get(1)->getRowArray()['stock_no'] ?? '');
+            $slug = trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $stockNo), '-');
+            if ($slug !== '') {
+                $filename = 'Stockcard_' . $slug . '_' . $periodName;
+            }
+        }
 
-        if ($dateFrom > $dateTo) {
-            return $this->respondError('From Month must be before To Month.');
+        // Edited in the browser: print what the user sees
+        if (in_array($format, ['pdf', 'word'], true) && trim($html) !== '') {
+            if (strlen($html) > self::MAX_EDITED_REPORT_BYTES) {
+                return $this->respondError('The edited stock card is too large to export. Remove some pictures and try again.');
+            }
+            $pages = $this->sanitizeReportHtml($html);
+
+            return $format === 'word'
+                ? $this->downloadStockcardWord($pages, $filename, $paper)
+                : $this->downloadStockcardPdf($pages, $filename, $paper);
         }
 
         $products = $this->fetchExportData($dateFrom, $dateTo, $productId, $this->userOfficeId(), $sortOrder, $typeId);
-        $filename = 'Stockcard_' . $monthFrom . '_to_' . $monthTo;
+
+        if ($format === 'preview') {
+            return $this->respondSuccess([
+                'html'  => $this->buildStockcardPages($products),
+                'cards' => count($products),
+            ], 'Stock card preview generated');
+        }
 
         return match ($format) {
             'csv'  => $this->downloadCsv($products, $filename),
-            'word' => $this->downloadWord($products, $filename, $paper),
-            'pdf'  => $this->downloadPdf($products, $filename, $paper),
+            'word' => $this->downloadStockcardWord($this->buildStockcardPages($products), $filename, $paper),
+            'pdf'  => $this->downloadStockcardPdf($this->buildStockcardPages($products), $filename, $paper),
         };
     }
 
@@ -260,16 +322,19 @@ class ExportController extends BaseApiController
             ->join('entity_table e',         'p.entity_id = e.entity_id',         'left')
             ->where('t.transaction_date >=', $dateFrom)
             ->where('t.transaction_date <',  $dateTo)
-            ->whereIn('tt.transaction_type', array_merge(TransactionModel::STOCK_IN_TYPES, TransactionModel::STOCK_OUT_TYPES));
+            ->whereIn('tt.transaction_type', array_merge(TransactionModel::STOCK_IN_TYPES, TransactionModel::STOCK_OUT_TYPES))
+            // Lending stays off the stock card (see TransactionModel::NOT_LENDING_SQL)
+            ->where(TransactionModel::NOT_LENDING_SQL, null, false);
 
         if ($userOfficeId > 0) { $builder->where('t.user_office_id', $userOfficeId); }
         if ($productId    > 0) { $builder->where('b.product_id',     $productId); }
         if ($typeId       > 0) { $builder->where('p.type_id',        $typeId); }
 
+        // Oldest first, so each running balance follows the ledger; newest-first is turned around at the end
         $transactions = $builder
             ->orderBy('b.product_id',        'ASC')
-            ->orderBy('t.transaction_date',   $sortOrder)
-            ->orderBy('t.transaction_id',     $sortOrder)
+            ->orderBy('t.transaction_date',   'ASC')
+            ->orderBy('t.transaction_id',     'ASC')
             ->get()->getResultArray();
 
         // Opening balance per product (everything before dateFrom)
@@ -287,6 +352,7 @@ class ExportController extends BaseApiController
                     INNER JOIN batch_table b ON t.batch_id = b.batch_id
                     INNER JOIN transaction_type_table tt ON tt.transaction_type_id = t.transaction_type_id
                     WHERE t.transaction_date < ?
+                      AND ' . TransactionModel::NOT_LENDING_SQL . '
                       AND b.product_id IN (' . $ph . ')'
                 . ($userOfficeId > 0 ? ' AND t.user_office_id = ' . (int) $userOfficeId : '')
                 . ' GROUP BY b.product_id';
@@ -336,6 +402,13 @@ class ExportController extends BaseApiController
             ];
         }
 
+        if ($sortOrder === 'DESC') {
+            foreach ($productMap as &$product) {
+                $product['rows'] = array_reverse($product['rows']);
+            }
+            unset($product);
+        }
+
         return array_values($productMap);
     }
 
@@ -381,32 +454,24 @@ class ExportController extends BaseApiController
             ->setBody($csv);
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Word
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────────────────
+    // Word / PDF of the stock cards (built from data, or as edited in the browser)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private function downloadWord(array $products, string $filename, array $paper): \CodeIgniter\HTTP\Response
+    private function downloadStockcardWord(string $pages, string $filename, array $paper): \CodeIgniter\HTTP\Response
     {
         return $this->response
             ->setHeader('Content-Type', 'application/vnd.ms-word')
             ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '.doc"')
             ->setHeader('Cache-Control', 'no-store')
-            ->setBody($this->buildStockcardHtml($products, $paper['css']));
+            ->setBody($this->wordWithImages($this->wrapStockcardHtml($pages, $paper['css'], wordMode: true)));
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // PDF
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    private function downloadPdf(array $products, string $filename, array $paper): \CodeIgniter\HTTP\Response
+    private function downloadStockcardPdf(string $pages, string $filename, array $paper): \CodeIgniter\HTTP\Response
     {
-        $options = new Options();
-        $options->set('defaultFont', 'DejaVu Sans');
-        $options->set('isHtml5ParserEnabled', true);
-        $options->set('isRemoteEnabled', false);
-
-        $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($this->buildStockcardHtml($products, $paper['css']), 'UTF-8');
+        $this->allowLargePdf();
+        $dompdf = new Dompdf($this->reportPdfOptions());
+        $dompdf->loadHtml($this->wrapStockcardHtml($pages, $paper['css']), 'UTF-8');
         $dompdf->setPaper($paper['dompdf'], 'portrait');
         $dompdf->render();
 
@@ -417,11 +482,12 @@ class ExportController extends BaseApiController
             ->setBody($dompdf->output());
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // HTML template
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────────────────
+    // Stock card template (Appendix 58): one page per product
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private function buildStockcardHtml(array $products, string $cssPageSize = 'A4'): string
+    /** The cards only (no <html>/<style>): what the editor shows and the PDF / Word files wrap */
+    private function buildStockcardPages(array $products): string
     {
         $cards = '';
 
@@ -451,21 +517,20 @@ class ExportController extends BaseApiController
                     . "<td class=\"c-qty\">{$issue}</td>"
                     . "<td class=\"c-off\">{$office}</td>"
                     . "<td class=\"c-qty\">{$balance}</td>"
-                    . '<td class="c-days"></td>'
+                    . '<td class="c-days">&nbsp;</td>'
                     . '</tr>';
             }
 
-            // Pad to 30 rows
+            // Pad to 30 rows, like the printed form
             for ($i = count($p['rows']); $i < 30; $i++) {
-                $rows .= '<tr><td class="c-date">&nbsp;</td><td class="c-ref"></td>'
-                    . '<td class="c-qty"></td><td class="c-qty"></td>'
-                    . '<td class="c-off"></td><td class="c-qty"></td>'
-                    . '<td class="c-days"></td></tr>';
+                $rows .= '<tr><td class="c-date">&nbsp;</td><td class="c-ref">&nbsp;</td>'
+                    . '<td class="c-qty">&nbsp;</td><td class="c-qty">&nbsp;</td>'
+                    . '<td class="c-off">&nbsp;</td><td class="c-qty">&nbsp;</td>'
+                    . '<td class="c-days">&nbsp;</td></tr>';
             }
 
             $cards .= <<<CARD
 <div class="sc-page"{$pb}>
-
   <div class="sc-appendix">Appendix 58</div>
   <div class="sc-title">STOCK CARD</div>
 
@@ -478,10 +543,7 @@ class ExportController extends BaseApiController
     </tr>
   </table>
 
-  <!-- ONE unified table: info rows + header rows + data rows â€” columns always align -->
   <table class="sc-data">
-
-    <!-- Info rows: left=cols1-5 (64%) | right=cols6-7 aligned with Balance -->
     <tr>
       <td class="i-left" colspan="5">Item : {$item}</td>
       <td class="i-right" colspan="2">Stock No. : <strong>{$stockNo}</strong></td>
@@ -493,8 +555,6 @@ class ExportController extends BaseApiController
     <tr>
       <td class="i-left" colspan="7">Unit of Measurement : {$unit}</td>
     </tr>
-
-    <!-- â”€â”€ Column headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
     <tr>
       <th rowspan="2" style="width:15%">Date</th>
       <th rowspan="2" style="width:15%">Reference</th>
@@ -509,27 +569,23 @@ class ExportController extends BaseApiController
       <th>Office</th>
       <th>Qty.</th>
     </tr>
-
-    <!-- â”€â”€ Data rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
     {$rows}
-
   </table>
-
 </div>
 CARD;
         }
 
         if ($cards === '') {
-            $cards = '<div class="sc-page"><p style="margin-top:40px;text-align:center;">No transactions found.</p></div>';
+            $cards = '<div class="sc-page"><p style="margin-top:40px;text-align:center;">No transactions found for this period.</p></div>';
         }
 
-        return <<<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Stock Card</title>
-<style>
+        return $cards;
+    }
+
+    /** Stock card styles, shared by the editor preview and the PDF / Word files */
+    private function stockcardCss(): string
+    {
+        return <<<'CSS'
 * { margin:0; padding:0; }
 
 body {
@@ -539,16 +595,12 @@ body {
     background: #fff;
 }
 
-/* â”€â”€ Page wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-   NO width:100% here â€” block elements auto-fill their container.
-   In dompdf's content-box model, padding then correctly SUBTRACTS
-   from the available width rather than adding to it.
-   This gives proper left/right margins without overflow.            */
+/* Page wrapper: no width:100% (in dompdf's content-box model padding would add to it) */
 .sc-page {
     padding: 8mm 16mm 6mm 16mm;
 }
 
-/* Appendix 58 â€” upper right */
+/* Appendix 58, upper right */
 .sc-appendix {
     text-align: right;
     font-style: italic;
@@ -556,7 +608,6 @@ body {
     margin-bottom: 1mm;
 }
 
-/* Title */
 .sc-title {
     text-align: center;
     font-size: 15pt;
@@ -578,13 +629,11 @@ body {
 .fc-lbl     { padding-left: 10px; white-space: nowrap; }
 .fc-val     { font-weight: bold; text-decoration: underline; width: 60px; text-align: center; }
 
-/* Info rows â€” inside .sc-data; !important overrides td{text-align:center} */
+/* Info rows inside .sc-data; !important overrides td{text-align:center} */
 .sc-data td.i-left  { text-align: left !important; padding: 3px 6px; font-size: 12pt; }
-.sc-data td.i-rlbl  { text-align: left !important; padding: 3px 5px; font-size: 11pt; white-space: normal; vertical-align: middle; }
-.sc-data td.i-rval  { text-align: center !important; padding: 3px 5px; font-size: 12pt; font-weight: bold; vertical-align: middle; }
 .sc-data td.i-right { text-align: left !important; padding: 3px 6px; font-size: 12pt; }
 
-/* Transaction data table */
+/* Transaction table */
 .sc-data {
     width: 100%;
     border-collapse: collapse;
@@ -600,24 +649,53 @@ body {
     overflow: hidden;
     word-break: break-word;
 }
-.sc-data thead th {
+.sc-data th {
     font-weight: bold;
     font-size: 10pt;
     vertical-align: middle;
 }
 
-/* Cell alignment */
 .c-date { text-align: left; }
 .c-ref  { text-align: center; }
 .c-qty  { text-align: right; padding-right: 4px; }
 .c-off  { text-align: center; }
 .c-days { text-align: center; }
+CSS;
+    }
 
+    private function wrapStockcardHtml(string $pages, string $cssPageSize = '8.5in 13in', bool $wordMode = false): string
+    {
+        // Word passes a block's page-break-before on to every paragraph inside it (and skips it
+        // when the block starts with a table), so the break moves to Word's own marker
+        if ($wordMode) {
+            $pages = preg_replace_callback(
+                '#<(div|p|table)\b[^>]*page-break-before:\s*always[^>]*>#i',
+                static fn(array $m): string => '<p style="page-break-before:always;margin:0;font-size:1pt;line-height:1pt">&nbsp;</p>'
+                    . preg_replace('#page-break-before:\s*always;?#i', '', $m[0]),
+                $pages
+            ) ?? $pages;
+        }
+        $xmlNs = $wordMode
+            ? '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>'
+              . '<w:Zoom>90</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->'
+            : '';
+
+        $css = $this->stockcardCss();
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="en" xmlns:w="urn:schemas-microsoft-com:office:word">
+<head>
+<meta charset="UTF-8">
+<title>Stock Card</title>
+{$xmlNs}
+<style>
+{$css}
 @page { size: {$cssPageSize} portrait; margin: 8mm; }
 </style>
 </head>
 <body>
-{$cards}
+{$pages}
 </body>
 </html>
 HTML;
@@ -775,6 +853,7 @@ HTML;
 
     private function downloadSummaryPdf(string $pages, string $filename, array $paper): \CodeIgniter\HTTP\Response
     {
+        $this->allowLargePdf();
         $dompdf = new Dompdf($this->reportPdfOptions());
         $this->registerReportFonts($dompdf);
         $dompdf->loadHtml($this->wrapSummaryHtml($pages, $paper['css']), 'UTF-8');
@@ -1063,6 +1142,31 @@ HTML;
      * them); otherwise the heading falls back to a serif font. Registered fonts are kept in
      * writable/, so this is done once.
      */
+    /**
+     * Dompdf keeps the whole document in memory while it lays it out: about 4-5 MB per stock card,
+     * so a whole office (100+ cards) needs more than the usual 512 MB and up to a minute or two.
+     * Raised for this request only, never lowered.
+     */
+    private function allowLargePdf(): void
+    {
+        $toBytes = static function (string $v): int {
+            $v = trim($v);
+            if ($v === '' || $v === '-1') {
+                return -1;
+            }
+            $n = (int) $v;
+
+            return match (strtolower(substr($v, -1))) {
+                'g' => $n * 1024 ** 3, 'm' => $n * 1024 ** 2, 'k' => $n * 1024, default => $n,
+            };
+        };
+        $current = $toBytes((string) ini_get('memory_limit'));
+        if ($current !== -1 && $current < 1536 * 1024 ** 2) {
+            @ini_set('memory_limit', '1536M');
+        }
+        @set_time_limit(300);
+    }
+
     private function reportPdfOptions(): Options
     {
         $options = new Options();

@@ -15,7 +15,6 @@ import fpcLogo from '../assets/images/fpc-logo.png'
 import {
   LayoutDashboard,
   Boxes,
-  FileSpreadsheet,
   Package,
   ShoppingBag,
   Barcode,
@@ -350,7 +349,6 @@ const menuColumns = computed(() => {
         color: '#14b8a6',
         items: [
           { label: 'Stockcard Ledger', to: '/stockcard', icon: Boxes },
-          { label: 'Export Stockcard', to: '/export/stockcard', icon: FileSpreadsheet },
           { label: 'Physical Count', to: '/stock/count', icon: ClipboardCheck },
           { label: 'Borrowed Items', to: '/stock/borrows', icon: Handshake },
         ],
@@ -360,7 +358,6 @@ const menuColumns = computed(() => {
         color: '#8b5cf6',
         items: [
           { label: 'Summary Report', to: '/reports/summary', icon: BarChart3 },
-          { label: 'Export Summary', to: '/export/summary', icon: FileSpreadsheet },
         ],
       },
     ],

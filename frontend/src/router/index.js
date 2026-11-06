@@ -65,17 +65,19 @@ const routes = [
     path: '/export/stockcard',
     name: 'export-stockcard',
     component: ExportStockcardView,
-    meta: { title: 'Export Stock Card - BSU Inventory', minLevel: 2 },
+    // Opened from the Export buttons of the Stockcard Ledger (one item, or a whole category)
+    meta: { title: 'Preview & Edit Stock Card - BSU Inventory', minLevel: 2 },
   },
   {
+    // Opened from the Export button of a product type card on the Summary Report
     path: '/export/summary',
     name: 'export-summary',
     component: ExportSummaryView,
-    meta: { title: 'Export Summary - BSU Inventory', minLevel: 2, maxLevel: 3 },
+    meta: { title: 'Preview & Edit Report - BSU Inventory', minLevel: 2, maxLevel: 3 },
   },
   {
     path: '/export',
-    redirect: '/export/stockcard',
+    redirect: '/stockcard',
   },
   {
     path: '/products/barcodes',

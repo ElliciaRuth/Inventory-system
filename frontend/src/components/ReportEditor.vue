@@ -62,5 +62,9 @@ const editorInit = computed(() => ({
 </script>
 
 <template>
-  <Editor v-model="html" license-key="gpl" :init="editorInit" @init="emit('init')" />
+  <!-- TinyMCE puts its editor box next to the element it starts from, so it needs a parent of its own:
+       without this wrapper, Vue removing or moving the component would leave that box behind -->
+  <div class="report-editor">
+    <Editor v-model="html" license-key="gpl" :init="editorInit" @init="emit('init')" />
+  </div>
 </template>

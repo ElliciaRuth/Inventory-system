@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import {
   Download, ArrowLeftRight, Pencil, FileSpreadsheet, AlertTriangle, AlertOctagon, Clock, Archive,
   ArrowDownWideNarrow, ArrowUpNarrowWide, Search, ChevronLeft, ChevronRight, Loader2, PencilLine,
-  Trash2, Undo2,
+  Trash2, Undo2, Handshake, CalendarClock,
 } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
@@ -30,6 +30,12 @@ const items = ref([])
 const selectedItemId = ref(Number(route.query.item_id) || 0)
 const itemInfo = ref({})
 const batches = ref([]) // this product's batches that have an expiration date
+// Lending is kept off the stock card's rows; the stock on hand still goes down while it is out
+const stockOnHand = ref(0)
+const borrowed = ref([]) // open borrows of this product: who has it, how much is still out
+const lentQty = computed(() => borrowed.value.reduce((sum, b) => sum + Number(b.outstanding_qty || 0), 0))
+const todayIso = new Date().toISOString().slice(0, 10)
+const isOverdue = (b) => b.due_date && String(b.due_date).slice(0, 10) < todayIso
 
 // ── Expiry warnings ──
 // Tiers follow the product's own settings; the last 3 days always count as critical
@@ -94,14 +100,15 @@ const currentPage = ref(1)
 const total = ref(0)
 const pageSize = ref(15)
 const loading = ref(true)
-const filterType = ref('latest')
-const filterYear = ref(0)
-const filterMonth = ref('')
+// The period, order and category may come in the address (Back from the export page keeps them)
+const filterType = ref(route.query.order === 'oldest' ? 'oldest' : 'latest')
+const filterYear = ref(/^\d{4}$/.test(String(route.query.year || '')) ? Number(route.query.year) : 0)
+const filterMonth = ref(/^(0[1-9]|1[0-2])$/.test(String(route.query.month || '')) ? String(route.query.month) : '')
 const search = ref('')
 
 // ── Item navigator (left sidebar): category filter, search, items grouped by category ──
 const UNCATEGORIZED = 'Uncategorized'
-const navCategory = ref('')
+const navCategory = ref(String(route.query.category || ''))
 const navQuery = ref('')
 const navCollapsed = ref(false)
 const navList = ref(null)
@@ -131,6 +138,44 @@ const navGroups = computed(() => {
   }
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, list]) => ({ name, items: list }))
 })
+
+// ── Export: the export page takes the period, order and item / category chosen here ──
+// A month of "All years" is not one range, so it cannot be exported
+const exportBlocked = computed(() => {
+  if (changeCount.value > 0) return 'Save or discard your changes first'
+  if (filterMonth.value && !filterYear.value) return 'Pick a year too: a month of all years cannot be exported'
+  return ''
+})
+
+function exportQuery() {
+  const query = { order: filterType.value }
+  if (filterMonth.value) query.month = filterMonth.value
+  if (filterYear.value) query.year = filterYear.value
+  if (selectedItemId.value) query.back_item = selectedItemId.value
+  if (navCategory.value) query.category = navCategory.value
+  return query
+}
+
+const itemExportLink = computed(() => ({
+  name: 'export-stockcard',
+  query: { ...exportQuery(), scope: 'item', product_id: selectedItemId.value, product: itemInfo.value.item_name || '' },
+}))
+
+// Every item of the navigator's category (all items when no category is chosen)
+const categoryTypeId = computed(() => {
+  if (!navCategory.value) return 0
+  const item = items.value.find((i) => categoryOf(i) === navCategory.value)
+  return Number(item?.type_id) || 0
+})
+const categoryExportBlocked = computed(() => {
+  if (exportBlocked.value) return exportBlocked.value
+  if (navCategory.value === UNCATEGORIZED || (navCategory.value && !categoryTypeId.value)) return 'Items without a category cannot be exported together'
+  return ''
+})
+const categoryExportLink = computed(() => ({
+  name: 'export-stockcard',
+  query: { ...exportQuery(), scope: 'category', type_id: categoryTypeId.value },
+}))
 
 function itemMeta(item) {
   const stock = `${qtyText(item.stock_on_hand)} ${item.unit || ''}`.trim()
@@ -438,6 +483,8 @@ async function loadStockcard({ quiet = false } = {}) {
       items.value = deduplicateById(res.data.items || [], 'product_id')
       itemInfo.value = res.data.itemInfo || {}
       batches.value = res.data.batches || []
+      stockOnHand.value = Number(res.data.stockOnHand || 0)
+      borrowed.value = res.data.borrowed || []
       stockcard.value = deduplicateById(res.data.stockcard || [], 'transaction_id')
       totalPages.value = res.data.totalPages || 1
       total.value = res.data.total || 0
@@ -526,14 +573,6 @@ onMounted(() => {
       </div>
 
       <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-        <router-link
-          to="/export/stockcard"
-          class="btn btn-secondary"
-          title="Export formatted stock card as PDF or Word"
-        >
-          <Download :size="15" />
-          <span>Export Stock Card</span>
-        </router-link>
         <button
           v-if="authStore.levelId === 2 || authStore.levelId === 3"
           type="button"
@@ -590,6 +629,17 @@ onMounted(() => {
               />
               <span class="input-cam"><CameraScanButton @scanned="onCameraScan" /></span>
             </div>
+            <component
+              :is="categoryExportBlocked ? 'button' : 'router-link'"
+              :to="categoryExportBlocked ? undefined : categoryExportLink"
+              :type="categoryExportBlocked ? 'button' : undefined"
+              :disabled="categoryExportBlocked ? true : undefined"
+              class="btn btn-secondary btn-sm sc-nav-export"
+              :title="categoryExportBlocked || `Preview and download the stock cards of ${navCategory || 'all items'}${periodLabel ? ` for ${periodLabel}` : ''}`"
+            >
+              <Download :size="14" />
+              <span>Export {{ navCategory ? navCategory : 'All Items' }}</span>
+            </component>
           </div>
 
           <div ref="navList" class="sc-nav-list">
@@ -667,6 +717,20 @@ onMounted(() => {
               </div>
             </div>
 
+            <div v-if="selectedItemId" class="sc-field">
+              <span class="sc-label">Export</span>
+              <component
+                :is="exportBlocked ? 'button' : 'router-link'"
+                :to="exportBlocked ? undefined : itemExportLink"
+                :type="exportBlocked ? 'button' : undefined"
+                :disabled="exportBlocked ? true : undefined"
+                class="btn btn-secondary sc-export-btn"
+                :title="exportBlocked || `Preview and download this stock card${periodLabel ? ` for ${periodLabel}` : ''}`"
+              >
+                <Download :size="15" /> Export
+              </component>
+            </div>
+
             <div v-if="canEdit && selectedItemId && !itemInfo.archived_at" class="sc-field">
               <span class="sc-label">Edit</span>
               <button
@@ -710,6 +774,32 @@ onMounted(() => {
           <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Entity & Fund Cluster</span>
           <div style="font-size: 0.85rem; color: var(--text-main); font-weight: 600;">
             {{ itemInfo.entity_name }} (Fund {{ itemInfo.fund_cluster || '06' }})
+          </div>
+        </div>
+
+        <!-- Stock on hand, and what is lent out (borrows are not on the stock card's rows) -->
+        <div class="sc-onhand" :class="{ 'has-lent': borrowed.length }">
+          <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Stock on Hand</span>
+          <div class="sc-onhand-qty">{{ qtyText(stockOnHand) }} <span>{{ itemInfo.unit_name }}</span></div>
+
+          <div v-if="borrowed.length" class="sc-lent">
+            <p class="sc-lent-head">
+              <Handshake :size="14" />
+              <strong>{{ qtyText(lentQty) }} {{ itemInfo.unit_name }} lent out</strong>
+              <router-link to="/stock/borrows" class="sc-lent-link">Borrowed Items</router-link>
+            </p>
+            <ul class="sc-lent-list">
+              <li v-for="b in borrowed" :key="b.borrow_id">
+                <span class="sc-lent-who">
+                  {{ b.borrower_name }}<template v-if="b.borrower_unit"> · {{ b.borrower_unit }}</template>
+                </span>
+                <span class="sc-lent-qty">{{ qtyText(b.outstanding_qty) }} {{ itemInfo.unit_name }}</span>
+                <span v-if="b.due_date" class="sc-lent-due" :class="{ 'is-overdue': isOverdue(b) }">
+                  <CalendarClock :size="12" /> {{ isOverdue(b) ? 'Overdue since' : 'Due' }} {{ shortDate(b.due_date) }}
+                </span>
+              </li>
+            </ul>
+            <p class="sc-lent-note">Lent stock is not on the stock card below: its Balance still counts it.</p>
           </div>
         </div>
 
@@ -1276,6 +1366,96 @@ onMounted(() => {
   scroll-margin-top: 84px;
 }
 
+/* Stock on hand, with the borrows that are still out listed under it */
+.sc-onhand.has-lent {
+  grid-column: span 2;
+}
+
+.sc-onhand-qty {
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: var(--text-main);
+}
+
+.sc-onhand-qty span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sc-lent {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font-size: 0.82rem;
+}
+
+.sc-lent-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.35rem;
+  color: var(--color-info);
+}
+
+.sc-lent-head strong {
+  color: var(--text-main);
+}
+
+.sc-lent-link {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.sc-lent-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sc-lent-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+}
+
+.sc-lent-who {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.sc-lent-qty {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.sc-lent-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-muted);
+}
+
+.sc-lent-due.is-overdue {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.sc-lent-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+}
+
 /* ── Phones and tablets in portrait: item details in two columns ── */
 @media (max-width: 900px) {
   .sc-info {
@@ -1284,7 +1464,8 @@ onMounted(() => {
     padding: 1rem;
   }
 
-  .sc-info > div:first-child {
+  .sc-info > div:first-child,
+  .sc-info > .sc-onhand.has-lent {
     grid-column: 1 / -1;
   }
 
@@ -1907,6 +2088,25 @@ onMounted(() => {
   padding-top: 0;
   padding-bottom: 0;
   background-color: var(--bg-surface);
+}
+
+/* Export buttons: the item's (header) and the category's (navigator) */
+.sc-export-btn {
+  height: 44px;
+  padding-inline: 1rem;
+  font-weight: 700;
+}
+
+.sc-nav-export {
+  width: 100%;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.sc-nav-export span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Month + year read as one control */

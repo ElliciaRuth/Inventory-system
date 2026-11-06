@@ -52,6 +52,8 @@ class StockController extends BaseApiController
         $itemInfo   = [];
         $batches    = [];
         $stockcard  = [];
+        $onHand     = 0.0;
+        $borrowed   = [];
         $totalPages = 1;
         $total      = 0;
 
@@ -64,6 +66,21 @@ class StockController extends BaseApiController
             $stockcard  = $history['rows'] ?? [];
             $total      = (int) ($history['total'] ?? 0);
             $totalPages = max(1, (int) ceil($total / $limit));
+
+            // Lent stock is not on the card's rows, but it is not on the shelf either
+            $onHand   = $this->transactionModel->currentStock($productId, $officeId);
+            $borrowed = array_map(static fn (array $b): array => [
+                'borrow_id'       => (int) $b['borrow_id'],
+                'borrower_name'   => $b['borrower_name'],
+                'borrower_unit'   => $b['borrower_unit'] ?? '',
+                'outstanding_qty' => (float) $b['outstanding_qty'],
+                'quantity'        => (float) $b['quantity'],
+                'status'          => $b['status'],
+                'due_date'        => $b['due_date'],
+                'borrowed_at'     => $b['borrowed_at'],
+                'unit_cost'       => (float) ($b['unit_cost'] ?? 0),
+                'copy_label'      => $b['copy_label'] ?? '',
+            ], (new InventoryService(db_connect()))->borrows($officeId, $productId, 'open'));
         }
 
         return $this->respondSuccess([
@@ -72,6 +89,8 @@ class StockController extends BaseApiController
             'batches'    => $batches,
             'items'      => $this->productModel->listForSelect($officeId, $productId),
             'stockcard'  => $stockcard,
+            'stockOnHand' => $onHand,
+            'borrowed'   => $borrowed,
             'total'      => $total,
             'page'       => $page,
             'totalPages' => $totalPages,
@@ -161,7 +180,7 @@ class StockController extends BaseApiController
             $productId = (int) $payload['product_id'];
             $updatedStock = $this->transactionModel->currentStock($productId, $officeId);
 
-            $this->auditMovement($result, $updatedStock);
+            $this->auditMovement($result, $updatedStock, $payload);
 
             return $this->respondSuccess([
                 'product_id'    => $productId,
@@ -599,15 +618,18 @@ class StockController extends BaseApiController
     /**
      * One audit entry per stock movement, e.g. "Issued 5 kg of Flour from B-FPC-20261009-0128-01".
      */
-    private function auditMovement(array $result, float $stockAfter): void
+    private function auditMovement(array $result, float $stockAfter, array $payload = []): void
     {
-        $product = db_connect()->table('product_table p')
-            ->select('p.product, COALESCE(ut.unit, "") AS unit', false)
+        $db      = db_connect();
+        $product = $db->table('product_table p')
+            ->select('p.product, p.stock_no, COALESCE(ut.unit, "") AS unit', false)
             ->join('unit_table ut', 'ut.unit_id = p.unit_id', 'left')
             ->where('p.product_id', $result['product_id'])
-            ->get(1)->getRowArray() ?? ['product' => 'product', 'unit' => ''];
+            ->get(1)->getRowArray() ?? ['product' => 'product', 'stock_no' => '', 'unit' => ''];
 
-        $qty     = rtrim(rtrim(number_format((float) $result['quantity'], 2, '.', ''), '0'), '.');
+        $num     = static fn ($v): string => rtrim(rtrim(number_format((float) $v, 2, '.', ''), '0'), '.') ?: '0';
+        $withUnit = static fn ($v): string => trim($num($v) . ' ' . $product['unit']);
+        $qty     = $num($result['quantity']);
         $what    = trim("{$qty} {$product['unit']}") . ' of ' . $product['product'];
         $batches = implode(', ', array_column($result['batches'], 'batch_no'));
         $reason  = ($result['reason'] ?? '') !== '' ? " ({$result['reason']})" : '';
@@ -622,11 +644,59 @@ class StockController extends BaseApiController
             default      => ucfirst($result['type']) . ": {$what}",
         };
 
-        AuditLog::record('stock.' . $result['type'], 'product', (int) $result['product_id'], $summary, [
-            'batches'     => $result['batches'],
-            'borrow_id'   => $result['borrow_id'] ?? null,
-            'stock_after' => $stockAfter,
-        ]);
+        // Everything about the movement, in reading order (empty values are left out of the log view)
+        $type      = $result['type'];
+        $typeNames = [
+            'receipt' => 'Stock In (Receipt)', 'issue' => 'Stock Out (Issue)', 'borrow' => 'Lend (Borrow)',
+            'return' => 'Return of Borrowed Stock', 'adjust_out' => 'Adjust Out', 'adjust_in' => 'Adjust In',
+        ];
+        $text = static fn (string $key): string => trim((string) ($payload[$key] ?? ''));
+
+        $subProduct = '';
+        $copyId     = (int) ($payload['copy_id'] ?? 0);
+        if ($copyId > 0) {
+            $copy = $db->table('product_copy_table')->select('unit_cost, label')->where('copy_id', $copyId)->get(1)->getRowArray();
+            if ($copy) {
+                $subProduct = '₱' . number_format((float) $copy['unit_cost'], 2) . (($copy['label'] ?? '') !== '' ? " ({$copy['label']})" : '');
+            }
+        }
+
+        $taken      = (float) $result['quantity'];
+        $usagePct   = (int) ($payload['usage_pct'] ?? 100);
+        if ($type === 'issue' && $usagePct > 0 && $usagePct < 100) {
+            $taken = $taken * $usagePct / 100;
+        }
+        $signed      = in_array($type, ['receipt', 'return', 'adjust_in'], true) ? $taken : -$taken;
+        $stockBefore = $stockAfter - $signed;
+
+        $details = [
+            'movement'           => $typeNames[$type] ?? ucfirst(str_replace('_', ' ', $type)),
+            'product'            => $product['product'],
+            'stock_no'           => $product['stock_no'] ?? '',
+            'quantity'           => $withUnit($result['quantity']),
+            'usage'              => $type === 'issue' && $usagePct < 100 ? "{$usagePct}% (" . $withUnit($taken) . ' taken from stock)' : null,
+            'reason'             => $result['reason'] ?? null,
+            'sub_product'        => $subProduct ?: null,
+            'unit_cost'          => $type === 'receipt' && isset($payload['unit_cost']) ? (float) $payload['unit_cost'] : null,
+            'date_received'      => $type === 'receipt' ? ($text('transaction_date') ?: date('Y-m-d')) : null,
+            'manufacturing_date' => $type === 'receipt' ? ($text('manufacturing_date') ?: null) : null,
+            'expiration_date'    => $type === 'receipt' ? ($text('expiration_date') ?: null) : null,
+            'borrower'           => $result['borrower'] ?? null,
+            'due_date'           => $type === 'borrow' ? ($text('due_date') ?: null) : null,
+            'borrow_notes'       => $type === 'borrow' ? ($text('borrow_notes') ?: null) : null,
+            'borrow_settled'     => $type === 'return' && isset($result['borrow_id']) ? ! empty($result['settled']) : null,
+            'office'             => $text('office') ?: null,
+            'reference'          => $text('reference') ?: null,
+            'stock_before'       => $withUnit($stockBefore),
+            'stock_after'        => $withUnit($stockAfter),
+            'borrow_id'          => $result['borrow_id'] ?? null,
+            'batches'            => $result['batches'],
+        ];
+
+        AuditLog::record('stock.' . $type, 'product', (int) $result['product_id'], $summary, array_filter(
+            $details,
+            static fn ($v) => $v !== null && $v !== '' && $v !== []
+        ));
     }
 
     private function productName(int $productId): string

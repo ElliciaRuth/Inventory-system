@@ -1,490 +1,439 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { exportApi, triggerBlobDownload } from '../api/export'
+import { toast, errorMessage } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
+import { useThemeStore } from '../stores/themeStore'
 import {
-  BarChart3, ArrowLeft, AlertTriangle, CheckCircle2, Filter, Package, CalendarDays, Settings,
-  FileText, File, ArrowUpDown, ArrowUpNarrowWide, ArrowDownWideNarrow, ClipboardList, FilePen, Info, ArrowRight, LayoutGrid,
+  AlertTriangle,
+  ArrowDownWideNarrow,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpDown,
+  ArrowUpNarrowWide,
+  Calendar,
+  Check,
+  ClipboardList,
+  File,
+  FilePen,
+  FileText,
+  Info,
+  Layers,
+  Package,
+  PencilLine,
+  RefreshCw,
+  Save,
+  Settings,
 } from 'lucide-vue-next'
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+// Opened from the Stockcard Ledger, which passes what is already chosen there:
+//   ?scope=item&product_id=&product=          one item's card
+//   ?scope=category&type_id=&category=        every item of a category (type_id 0: all items)
+//   &month=MM&year=YYYY&order=latest|oldest   the ledger's period and order
+const route = useRoute()
 const router = useRouter()
+const q = route.query
+const scope = q.scope === 'category' ? 'category' : 'item'
+const productId = Number(q.product_id) || 0
+const productName = String(q.product || '')
+const typeId = Number(q.type_id) || 0
+const categoryName = String(q.category || '')
+const month = /^(0[1-9]|1[0-2])$/.test(String(q.month || '')) ? String(q.month) : ''
+const year = /^\d{4}$/.test(String(q.year || '')) ? String(q.year) : ''
+const ledgerOrder = q.order === 'oldest' ? 'oldest' : 'latest'
 
-// Filter Form State
-const products = ref([])
-const productTypes = ref([])
-const selectedProductId = ref('0')
-const selectedTypeId = ref('0')
-const monthFrom = ref('')
-const monthTo = ref('')
-const paperSize = ref('long')
-const sortOrder = ref('ASC')
+// The ledger's period as a range: a month of a year, a whole year, or everything on record
+const period = (() => {
+  if (month && year) return { month_from: `${year}-${month}`, month_to: `${year}-${month}`, label: `${MONTH_NAMES[Number(month) - 1]} ${year}` }
+  if (year) return { month_from: `${year}-01`, month_to: `${year}-12`, label: `January – December ${year}` }
+  if (month) return null // a month of any year cannot be printed as one range
+  return { all_time: 1, label: 'All months on record' }
+})()
 
-// UI State
-const loadingOptions = ref(true)
-const isDownloadingPdf = ref(false)
-const isDownloadingWord = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
+const form = reactive({
+  product_id: scope === 'item' ? productId : 0,
+  type_id: scope === 'category' ? typeId : 0,
+  month_from: period?.month_from || '',
+  month_to: period?.month_to || '',
+  all_time: period?.all_time || 0,
+  sort_order: ledgerOrder === 'oldest' ? 'ASC' : 'DESC',
+  paper_size: 'long',
+})
 
-// Initialize default dates (current month for both From and To)
-function initDefaultDates() {
-  const now = new Date()
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  monthFrom.value = currentMonth
-  monthTo.value = currentMonth
+const scopeLabel = computed(() => {
+  if (scope === 'item') return productName || 'Selected item'
+  return categoryName ? `All items in ${categoryName}` : 'All items'
+})
+
+// Back to the ledger as it was: same item, period, order and category
+const backLink = computed(() => {
+  const query = {}
+  if (Number(q.back_item) > 0) query.item_id = Number(q.back_item)
+  else if (productId) query.item_id = productId
+  if (month) query.month = month
+  if (year) query.year = year
+  query.order = ledgerOrder
+  if (categoryName) query.category = categoryName
+  return { name: 'stockcard', query }
+})
+
+const PAPER_SIZES = [
+  ['long', 'Long', '8.5″ × 13″ Folio', FileText],
+  ['short', 'Short', '8.5″ × 11″ Letter', File],
+  ['a4', 'A4', '8.27″ × 11.69″ (210 × 297 mm)', File],
+]
+const ORDERS = [
+  ['ASC', 'Ascending', 'Oldest first (Ledger flow)', ArrowUpNarrowWide],
+  ['DESC', 'Descending', 'Newest first', ArrowDownWideNarrow],
+]
+const paperLabel = computed(() => {
+  const [, name, size] = PAPER_SIZES.find(([v]) => v === form.paper_size) || PAPER_SIZES[0]
+  return `${name} (${size.replace(' Folio', '').replace(' Letter', '').replace(/ \(.*\)/, '')})`
+})
+const orderLabel = computed(() => (form.sort_order === 'ASC' ? 'Ascending (Oldest first)' : 'Descending (Newest first)'))
+
+const downloading = ref('')
+const formError = ref('')
+
+// ── The stock cards, editable (TinyMCE, downloaded only when this page opens) ──
+const ReportEditor = defineAsyncComponent(() => import('../components/ReportEditor.vue'))
+const themeStore = useThemeStore()
+
+const loadingPreview = ref(false)
+const previewError = ref('')
+const loadedOnce = ref(false)   // the editor stays mounted from then on; a rebuild only swaps its content
+const cardCount = ref(0)
+let replacing = false           // content set by the page itself, not typed by the user
+const reportHtml = ref('')
+const savedHtml = ref('')
+const savedAt = ref(null)
+const editorReady = ref(false)
+const edited = ref(false)
+const builtOrder = ref(form.sort_order) // the order the cards on screen were built in
+
+watch(reportHtml, () => {
+  if (editorReady.value && !replacing) edited.value = true
+})
+
+const unsaved = computed(() => reportHtml.value !== savedHtml.value)
+const hasReport = computed(() => loadedOnce.value && !previewError.value)
+
+// Set once the user has confirmed leaving, so the leave guard below does not ask a second time
+let leaving = false
+// Downloaded and not changed since: nothing is lost by going back
+const downloadedClean = ref(false)
+watch(reportHtml, () => {
+  if (editorReady.value && !replacing) downloadedClean.value = false
+})
+
+useUnsavedChanges(() => edited.value && !leaving, {
+  message: 'Your edits to the stock card are kept only on this page. Download it first if you need them.',
+})
+
+function saveEdits(quiet = false) {
+  savedHtml.value = reportHtml.value
+  savedAt.value = new Date()
+  if (!quiet) toast('Changes saved. PDF and Word use this version.')
 }
 
-async function loadOptions() {
-  loadingOptions.value = true
-  errorMessage.value = ''
-  try {
-    const res = await exportApi.getStockcardOptions()
-    if (res && res.status && res.data) {
-      products.value = res.data.products || []
-      productTypes.value = res.data.product_types || []
-    }
-  } catch (err) {
-    console.error('Failed to load product list', err)
-    errorMessage.value = err.response?.data?.message || 'Failed to load product list. Please check connection.'
-  } finally {
-    loadingOptions.value = false
+const savedLabel = computed(() =>
+  savedAt.value ? `Saved at ${savedAt.value.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet'
+)
+
+// Pictures are kept inside the card (data: URIs) so the PDF needs no files
+function pickImage(callback) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg,image/gif'
+  input.onchange = () => {
+    const file = input.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => callback(reader.result, { alt: file.name })
+    reader.readAsDataURL(file)
   }
+  input.click()
 }
 
-// Filtered product list — only show products of the selected type
-const filteredProducts = computed(() => {
-  if (!selectedTypeId.value || selectedTypeId.value === '0') return products.value
-  return products.value.filter(p => String(p.type_id) === selectedTypeId.value)
-})
+const editorInit = computed(() => ({
+  height: 760,
+  menubar: 'edit view insert format table',
+  plugins: 'advlist lists link image table charmap searchreplace visualblocks code fullscreen pagebreak',
+  toolbar:
+    'undo redo | blocks fontsize | bold italic underline | forecolor backcolor | ' +
+    'alignleft aligncenter alignright | bullist numlist | table image pagebreak | removeformat | code fullscreen',
+  font_size_formats: '8pt 9pt 10pt 11pt 12pt 14pt 15pt 18pt',
+  // The Appendix 58 styles, served by the server (inline styles are blocked by its CSP)
+  content_css: [exportApi.stockcardEditorStyleUrl()],
+  visual: false,
+  pagebreak_separator: '<div style="page-break-before:always;"></div>',
+  invalid_elements: 'script,iframe,object,embed,form',
+  convert_urls: false,
+  paste_data_images: true,
+  automatic_uploads: false,
+  images_file_types: 'png,jpg,jpeg,gif',
+  file_picker_types: 'image',
+  file_picker_callback: (callback) => pickImage(callback),
+  promotion: false,
+  branding: false,
+  setup: (editor) => editor.addShortcut('meta+s', 'Save changes', () => saveEdits()),
+}))
 
-// When type changes, reset product selection to "All"
-watch(() => selectedTypeId.value, () => {
-  selectedProductId.value = '0'
-})
-
-// Quick Period Presets
-function setPreset(preset) {
-  const now = new Date()
-  const curY = now.getFullYear()
-  const curM = String(now.getMonth() + 1).padStart(2, '0')
-  monthTo.value = `${curY}-${curM}`
-
-  if (preset === 'current') {
-    monthFrom.value = `${curY}-${curM}`
-  } else if (preset === 'last3') {
-    const d3 = new Date(now.getFullYear(), now.getMonth() - 2, 1)
-    monthFrom.value = `${d3.getFullYear()}-${String(d3.getMonth() + 1).padStart(2, '0')}`
-  } else if (preset === 'ytd') {
-    monthFrom.value = `${curY}-01`
-  }
-}
-
-// Format period for display in preview
-const formattedPeriod = computed(() => {
-  if (!monthFrom.value && !monthTo.value) return '—'
-  const fmt = (val) => {
-    if (!val) return '—'
-    const [y, m] = val.split('-')
-    if (!y || !m) return val
-    const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1)
-    return date.toLocaleString('default', { month: 'short', year: 'numeric' })
-  }
-
-  if (monthFrom.value === monthTo.value) {
-    return fmt(monthFrom.value)
-  }
-  return `${fmt(monthFrom.value)} – ${fmt(monthTo.value)}`
-})
-
-// Selected product label for preview
-const selectedProductLabel = computed(() => {
-  if (!selectedProductId.value || selectedProductId.value === '0') {
-    return '— All Products —'
-  }
-  const found = products.value.find(p => String(p.product_id) === String(selectedProductId.value))
-  return found ? found.product : 'Selected Product'
-})
-
-// Selected type label for preview
-const selectedTypeLabel = computed(() => {
-  if (!selectedTypeId.value || selectedTypeId.value === '0') return ''
-  const found = productTypes.value.find(t => String(t.type_id) === selectedTypeId.value)
-  return found ? found.type : ''
-})
-
-// Paper size description for preview
-const paperSizeLabel = computed(() => {
-  if (paperSize.value === 'short') return 'Short (8.5″ × 11″ Letter)'
-  if (paperSize.value === 'a4') return 'A4 (210 × 297 mm)'
-  return 'Long (8.5″ × 13″ Folio)'
-})
-
-// Sort order description for preview
-const sortOrderLabel = computed(() => {
-  return sortOrder.value === 'DESC' ? 'Descending (Newest first)' : 'Ascending (Oldest first)'
-})
-
-// Download Handler
-async function handleDownload(format) {
-  errorMessage.value = ''
-  successMessage.value = ''
-
-  if (!monthFrom.value || !monthTo.value) {
-    errorMessage.value = 'Please select both From Month and To Month.'
+async function loadReport() {
+  if (!period) {
+    previewError.value = 'A month without a year cannot be exported. Go back and pick a year too.'
     return
   }
-
-  if (monthFrom.value > monthTo.value) {
-    errorMessage.value = 'From Month must be earlier than or equal to To Month.'
+  if (scope === 'item' && !productId) {
+    previewError.value = 'No item was chosen. Go back and open an item first.'
     return
   }
-
-  const isPdf = format === 'pdf'
-  if (isPdf) isDownloadingPdf.value = true
-  else isDownloadingWord.value = true
-
-  const payload = {
-    format,
-    product_id: parseInt(selectedProductId.value, 10) || 0,
-    type_id: parseInt(selectedTypeId.value, 10) || 0,
-    month_from: monthFrom.value,
-    month_to: monthTo.value,
-    paper_size: paperSize.value,
-    sort_order: sortOrder.value,
-  }
-
+  loadingPreview.value = true
+  previewError.value = ''
   try {
-    const response = await exportApi.downloadStockcard(payload)
-
-    // Check if response is error disguised in blob
-    if (response.data && response.data.type && response.data.type.includes('application/json')) {
-      const text = await response.data.text()
-      try {
-        const json = JSON.parse(text)
-        errorMessage.value = json.message || 'Export failed.'
-        return
-      } catch {
-        // Not JSON
-      }
-    }
-
-    // Determine filename
-    let filename = `Stockcard_${monthFrom.value}_to_${monthTo.value}.${isPdf ? 'pdf' : 'doc'}`
-    const disposition = response.headers['content-disposition']
-    if (disposition && disposition.indexOf('filename=') !== -1) {
-      const match = disposition.match(/filename="?([^";]+)"?/)
-      if (match && match[1]) {
-        filename = match[1]
-      }
-    }
-
-    // Trigger download
-    triggerBlobDownload(response.data, filename)
-    successMessage.value = `Successfully downloaded ${filename}`
+    const res = await exportApi.previewStockcard(form)
+    replacing = true
+    reportHtml.value = res.data?.html || ''
+    savedHtml.value = reportHtml.value
+    savedAt.value = null
+    cardCount.value = Number(res.data?.cards) || 0
+    builtOrder.value = form.sort_order
+    loadedOnce.value = true
+    await nextTick()
+    edited.value = false
   } catch (err) {
-    console.error('Download error:', err)
-    if (err.response && err.response.data instanceof Blob) {
-      try {
-        const errorText = await err.response.data.text()
-        const errorJson = JSON.parse(errorText)
-        errorMessage.value = errorJson.message || 'Failed to generate document.'
-      } catch {
-        errorMessage.value = 'Failed to generate export file. Please check server logs.'
-      }
-    } else {
-      errorMessage.value = err.response?.data?.message || err.message || 'Failed to generate export file.'
-    }
+    previewError.value = errorMessage(err, 'Failed to load the stock card.')
   } finally {
-    isDownloadingPdf.value = false
-    isDownloadingWord.value = false
+    replacing = false
+    loadingPreview.value = false
   }
 }
 
-onMounted(() => {
-  initDefaultDates()
-  loadOptions()
-})
+async function confirmDropEdits(title) {
+  if (!edited.value) return true
+  return confirmDialog({
+    title,
+    message: 'The stock card is built again from the ledger. The changes you made will be lost.',
+    confirmText: 'Rebuild',
+    variant: 'warning',
+  })
+}
+
+async function rebuildReport() {
+  if (!(await confirmDropEdits('Rebuild the stock card?'))) return
+  await loadReport()
+}
+
+// The order changes the rows themselves, so the cards are built again (paper size only affects the file)
+async function setOrder(value) {
+  if (value === form.sort_order || loadingPreview.value) return
+  if (!(await confirmDropEdits('Change the date order?'))) return
+  form.sort_order = value
+  await loadReport()
+}
+
+async function download(format, ext) {
+  if (loadingPreview.value || !hasReport.value) return
+
+  if (unsaved.value) {
+    const ok = await confirmDialog({
+      title: 'Save your changes before exporting',
+      message: 'The stock card has changes that are not saved yet. Exports use the saved version, so save first to include them.',
+      confirmText: 'Save and export',
+      cancelText: 'Keep editing',
+      variant: 'warning',
+    })
+    if (!ok) return
+    saveEdits(true)
+  }
+
+  formError.value = ''
+  downloading.value = format
+  try {
+    const res = await exportApi.downloadStockcard({ ...form, format, html: savedHtml.value })
+    let filename = `Stockcard.${ext}`
+    const match = (res.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
+    if (match) filename = match[1]
+    triggerBlobDownload(res.data, filename)
+    toast(`Downloaded ${filename}`)
+    downloadedClean.value = !unsaved.value
+  } catch (err) {
+    // A failed download answers with a JSON message inside the blob
+    let message = ''
+    if (err.response?.data instanceof Blob) {
+      try {
+        message = JSON.parse(await err.response.data.text()).message || ''
+      } catch {
+        message = ''
+      }
+    }
+    formError.value = message || errorMessage(err, 'Failed to generate the file.')
+  } finally {
+    downloading.value = ''
+  }
+}
+
+// Back to the ledger: ask first, unless there is nothing to lose (not built, or just downloaded unchanged)
+async function goBack() {
+  if (hasReport.value && !downloadedClean.value) {
+    const ok = await confirmDialog({
+      title: 'Discard this export?',
+      message: edited.value
+        ? 'The stock card has not been downloaded and your edits will be lost.'
+        : 'The stock card has not been downloaded yet. You can export it again from the Stockcard Ledger.',
+      confirmText: 'Discard export',
+      cancelText: 'Stay here',
+      variant: 'warning',
+    })
+    if (!ok) return
+  }
+  leaving = true
+  try {
+    await router.push(backLink.value)
+  } finally {
+    leaving = false
+  }
+}
+
+onMounted(loadReport)
 </script>
 
 <template>
   <div class="export-page">
-    <!-- Page Hero Header -->
     <div class="page-hero">
       <div>
-        <p class="hero-eyebrow">
-          <BarChart3 :size="14" /> Reports & Audit
-        </p>
-        <h1 class="hero-title">Export Stock Card</h1>
-        <p class="hero-subtitle">
-          Generate an audited, official perpetual inventory stock card (Appendix 58). Download as a print-ready PDF or an editable Word (.doc) document.
-        </p>
+        <p class="hero-eyebrow">Audited Inventory Ledger</p>
+        <h1 class="hero-title">Preview &amp; Edit Stock Card</h1>
+        <p class="hero-subtitle">Check the Appendix 58 stock card, change anything you need, then choose the paper size and download it.</p>
+        <div class="es-chips">
+          <span class="es-chip"><component :is="scope === 'item' ? Package : Layers" :size="13" /> {{ scopeLabel }}</span>
+          <span class="es-chip"><Calendar :size="13" /> {{ period?.label || 'No period' }}</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary" @click="goBack"><ArrowLeft :size="15" /> Back to Stockcard</button>
+    </div>
+
+    <!-- 1. The stock cards themselves -->
+    <section class="panel es-card">
+      <div class="es-section-head">
+        <div>
+          <h2 class="es-section-title"><PencilLine :size="17" /> Stock Card Preview</h2>
+          <p class="es-hint">
+            Laid out like the printed Appendix 58.
+            <template v-if="cardCount > 1">{{ cardCount }} cards, each on its own page (dashed lines).</template>
+          </p>
+        </div>
+        <div v-if="loadedOnce" class="es-editor-actions">
+          <span class="es-save-state" :class="{ 'is-unsaved': unsaved }" aria-live="polite">
+            <component :is="unsaved ? AlertTriangle : Check" :size="14" />
+            {{ unsaved ? 'Unsaved changes' : savedLabel }}
+          </span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingPreview || !!downloading" title="Build the stock card again from the ledger" @click="rebuildReport">
+            <RefreshCw :size="14" :class="{ 'es-spin': loadingPreview }" /> {{ loadingPreview ? 'Rebuilding…' : 'Rebuild from Data' }}
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="!unsaved || loadingPreview" title="Save changes (Ctrl+S)" @click="saveEdits()">
+            <Save :size="14" /> Save Changes
+          </button>
+        </div>
       </div>
 
-      <div>
-        <router-link to="/stockcard" class="btn btn-secondary">
-          <ArrowLeft :size="15" /> Back to Stockcard Ledger
-        </router-link>
+      <div v-if="previewError && loadedOnce" class="es-error">
+        <AlertTriangle :size="15" />
+        <span>{{ previewError }} The stock card below was not changed.</span>
       </div>
-    </div>
 
-    <!-- Alert / Flash Messages -->
-    <div v-if="errorMessage" class="login-error-banner" style="margin-bottom: 24px;">
-      <AlertTriangle :size="16" /> {{ errorMessage }}
-    </div>
+      <!-- One stable box: the editor is mounted once and never swapped out -->
+      <div class="es-editor-wrap" :class="{ 'is-empty': !loadedOnce }">
+        <ReportEditor
+          v-if="loadedOnce"
+          v-model="reportHtml"
+          :dark="themeStore.current === 'dark'"
+          :init="editorInit"
+          @init="editorReady = true"
+        />
 
-    <div v-if="successMessage" class="login-success-banner" style="margin-bottom: 24px;">
-      <CheckCircle2 :size="16" /> {{ successMessage }}
-    </div>
+        <div v-if="!loadedOnce && previewError && !loadingPreview" class="es-state">
+          <AlertTriangle :size="22" class="es-state-icon is-error" />
+          <strong>The stock card could not be loaded</strong>
+          <span>{{ previewError }}</span>
+          <div class="es-state-actions">
+            <router-link :to="backLink" class="btn btn-secondary btn-sm"><ArrowLeft :size="14" /> Back to Stockcard</router-link>
+            <button v-if="period" type="button" class="btn btn-secondary btn-sm" @click="loadReport"><RefreshCw :size="14" /> Try Again</button>
+          </div>
+        </div>
 
-    <!-- Main Two-Column Export Layout -->
+        <Transition name="es-fade">
+          <div v-if="loadingPreview || (loadedOnce && !editorReady)" class="es-loading" :class="{ 'is-over': loadedOnce }">
+            <RefreshCw :size="22" class="es-state-icon es-spin" />
+            <span>{{ loadedOnce && editorReady ? 'Rebuilding the stock card…' : 'Building the stock card…' }}</span>
+          </div>
+        </Transition>
+      </div>
+    </section>
+
+    <!-- 2. How it is printed and downloaded -->
+    <div v-if="formError" class="es-error es-error-block"><AlertTriangle :size="15" /> {{ formError }}</div>
+
     <div class="ex-layout">
-      <!-- ── LEFT COLUMN: Filter & Output Options ── -->
-      <div class="ex-main">
-        <!-- Panel 1: Filter -->
-        <div class="panel ex-panel">
-          <div class="panel-header ex-panel-header">
-            <div class="ex-header-title-wrap">
-              <span class="ex-panel-icon"><Filter :size="20" /></span>
-              <div>
-                <h2 class="ex-panel-title">Filter Selection</h2>
-                <p class="ex-panel-sub">Choose product scope and date range for the stock card ledger</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="ex-panel-body">
-            <!-- Product Type Field -->
-            <div class="form-group">
-              <label class="form-label ex-field-label" for="export_type">
-                <LayoutGrid :size="15" class="ex-label-icon" /> Product Type
-              </label>
-              <select
-                id="export_type"
-                v-model="selectedTypeId"
-                class="form-select ex-select"
-                :disabled="loadingOptions"
-              >
-                <option value="0">— All Product Types —</option>
-                <option v-for="t in productTypes" :key="t.type_id" :value="String(t.type_id)">
-                  {{ t.type }}
-                </option>
-              </select>
-            </div>
-
-            <!-- Product Field -->
-            <div class="form-group">
-              <label class="form-label ex-field-label" for="export_product">
-                <Package :size="15" class="ex-label-icon" /> Target Product
-              </label>
-              <select
-                id="export_product"
-                v-model="selectedProductId"
-                class="form-select ex-select"
-                :disabled="loadingOptions"
-              >
-                <option value="0">— All Products in Office —</option>
-                <option
-                  v-for="p in filteredProducts"
-                  :key="p.product_id"
-                  :value="String(p.product_id)"
-                >
-                  {{ p.product }}
-                </option>
-              </select>
-              <small v-if="loadingOptions" style="color: var(--text-subtle); font-size: 12px;">
-                Loading available products...
-              </small>
-            </div>
-
-            <!-- Date Range Fields -->
-            <div class="ex-two-col">
-              <div class="form-group">
-                <label class="form-label ex-field-label" for="month_from">
-                  <CalendarDays :size="15" class="ex-label-icon" /> From Month
-                </label>
-                <input
-                  id="month_from"
-                  v-model="monthFrom"
-                  type="month"
-                  class="form-input ex-input"
-                  required
-                />
-              </div>
-
-              <div class="form-group">
-                <label class="form-label ex-field-label" for="month_to">
-                  <CalendarDays :size="15" class="ex-label-icon" /> To Month
-                </label>
-                <input
-                  id="month_to"
-                  v-model="monthTo"
-                  type="month"
-                  class="form-input ex-input"
-                  required
-                />
-              </div>
-            </div>
-
-            <!-- Quick Presets -->
-            <div class="ex-presets">
-              <span class="ex-presets-lbl">Quick Presets:</span>
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                @click="setPreset('current')"
-              >
-                Current Month
-              </button>
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                @click="setPreset('last3')"
-              >
-                Last 3 Months
-              </button>
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                @click="setPreset('ytd')"
-              >
-                Year to Date
-              </button>
+      <div class="panel ex-panel">
+        <div class="panel-header ex-panel-header">
+          <div class="ex-header-title-wrap">
+            <span class="ex-panel-icon"><Settings :size="20" /></span>
+            <div>
+              <h2 class="ex-panel-title">Output Options</h2>
+              <p class="ex-panel-sub">Configure document sheet size and chronological order</p>
             </div>
           </div>
         </div>
 
-        <!-- Panel 2: Output Options -->
-        <div class="panel ex-panel">
-          <div class="panel-header ex-panel-header">
-            <div class="ex-header-title-wrap">
-              <span class="ex-panel-icon"><Settings :size="20" /></span>
-              <div>
-                <h2 class="ex-panel-title">Output Options</h2>
-                <p class="ex-panel-sub">Configure document sheet size and chronological order</p>
+        <div class="ex-panel-body">
+          <div class="ex-two-col">
+            <div class="form-group">
+              <span class="form-label ex-field-label"><FileText :size="15" class="ex-label-icon" /> Paper Size</span>
+              <div class="ex-card-radio-group" role="radiogroup" aria-label="Paper size">
+                <label v-for="[value, name, size, icon] in PAPER_SIZES" :key="value" class="ex-card-radio" :class="{ 'is-selected': form.paper_size === value }">
+                  <input v-model="form.paper_size" type="radio" name="paper_size" :value="value" />
+                  <div class="ex-card-radio-body">
+                    <component :is="form.paper_size === value ? FileText : icon" :size="20" class="ex-card-radio-icon" />
+                    <div class="ex-card-radio-text">
+                      <strong>{{ name }}</strong>
+                      <small>{{ size }}</small>
+                    </div>
+                  </div>
+                </label>
               </div>
             </div>
-          </div>
 
-          <div class="ex-panel-body">
-            <div class="ex-two-col">
-              <!-- Paper Size Selection -->
-              <div class="form-group">
-                <label class="form-label ex-field-label">
-                  <FileText :size="15" class="ex-label-icon" /> Paper Size
+            <div class="form-group">
+              <span class="form-label ex-field-label"><ArrowUpDown :size="15" class="ex-label-icon" /> Date Order</span>
+              <div class="ex-card-radio-group" role="radiogroup" aria-label="Date order">
+                <label
+                  v-for="[value, name, hint, icon] in ORDERS"
+                  :key="value"
+                  class="ex-card-radio"
+                  :class="{ 'is-selected': form.sort_order === value, 'is-disabled': loadingPreview }"
+                >
+                  <input type="radio" name="sort_order" :value="value" :checked="form.sort_order === value" :disabled="loadingPreview" @change="setOrder(value)" />
+                  <div class="ex-card-radio-body">
+                    <component :is="icon" :size="20" class="ex-card-radio-icon" />
+                    <div class="ex-card-radio-text">
+                      <strong>{{ name }}</strong>
+                      <small>{{ hint }}</small>
+                    </div>
+                  </div>
                 </label>
-                <div class="ex-card-radio-group">
-                  <label
-                    class="ex-card-radio"
-                    :class="{ 'is-selected': paperSize === 'long' }"
-                  >
-                    <input
-                      v-model="paperSize"
-                      type="radio"
-                      name="paper_size"
-                      value="long"
-                    />
-                    <div class="ex-card-radio-body">
-                      <FileText :size="20" class="ex-card-radio-icon" />
-                      <div class="ex-card-radio-text">
-                        <strong>Long</strong>
-                        <small>8.5″ × 13″ Folio</small>
-                      </div>
-                    </div>
-                  </label>
-
-                  <label
-                    class="ex-card-radio"
-                    :class="{ 'is-selected': paperSize === 'short' }"
-                  >
-                    <input
-                      v-model="paperSize"
-                      type="radio"
-                      name="paper_size"
-                      value="short"
-                    />
-                    <div class="ex-card-radio-body">
-                      <File :size="20" class="ex-card-radio-icon" />
-                      <div class="ex-card-radio-text">
-                        <strong>Short</strong>
-                        <small>8.5″ × 11″ Letter</small>
-                      </div>
-                    </div>
-                  </label>
-
-                  <label
-                    class="ex-card-radio"
-                    :class="{ 'is-selected': paperSize === 'a4' }"
-                  >
-                    <input
-                      v-model="paperSize"
-                      type="radio"
-                      name="paper_size"
-                      value="a4"
-                    />
-                    <div class="ex-card-radio-body">
-                      <File :size="20" class="ex-card-radio-icon" />
-                      <div class="ex-card-radio-text">
-                        <strong>A4</strong>
-                        <small>8.27″ × 11.69″ (210 × 297 mm)</small>
-                      </div>
-                    </div>
-                  </label>
-                </div>
               </div>
-
-              <!-- Date Ordering Selection -->
-              <div class="form-group">
-                <label class="form-label ex-field-label">
-                  <ArrowUpDown :size="15" class="ex-label-icon" /> Date Order
-                </label>
-                <div class="ex-card-radio-group">
-                  <label
-                    class="ex-card-radio"
-                    :class="{ 'is-selected': sortOrder === 'ASC' }"
-                  >
-                    <input
-                      v-model="sortOrder"
-                      type="radio"
-                      name="sort_order"
-                      value="ASC"
-                    />
-                    <div class="ex-card-radio-body">
-                      <ArrowUpNarrowWide :size="20" class="ex-card-radio-icon" />
-                      <div class="ex-card-radio-text">
-                        <strong>Ascending</strong>
-                        <small>Oldest first (Ledger flow)</small>
-                      </div>
-                    </div>
-                  </label>
-
-                  <label
-                    class="ex-card-radio"
-                    :class="{ 'is-selected': sortOrder === 'DESC' }"
-                  >
-                    <input
-                      v-model="sortOrder"
-                      type="radio"
-                      name="sort_order"
-                      value="DESC"
-                    />
-                    <div class="ex-card-radio-body">
-                      <ArrowDownWideNarrow :size="20" class="ex-card-radio-icon" />
-                      <div class="ex-card-radio-text">
-                        <strong>Descending</strong>
-                        <small>Newest first</small>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-              </div>
+              <small class="es-hint">Changing the order rebuilds the preview.</small>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ── RIGHT COLUMN: Sidebar Preview & Downloads ── -->
       <div class="ex-sidebar">
-        <!-- Live Preview Summary Card -->
         <div class="ex-preview-card">
           <div class="ex-preview-header">
             <ClipboardList :size="17" />
@@ -493,76 +442,60 @@ onMounted(() => {
           <div class="ex-preview-body">
             <div class="ex-preview-row">
               <span class="ex-preview-lbl">Product</span>
-              <span class="ex-preview-val" :title="selectedProductLabel">
-                {{ selectedProductLabel }}
-              </span>
-            </div>
-            <div v-if="selectedTypeId !== '0'" class="ex-preview-row">
-              <span class="ex-preview-lbl">Type</span>
-              <span class="ex-preview-val">{{ selectedTypeLabel }}</span>
+              <span class="ex-preview-val" :title="scopeLabel">{{ scopeLabel }}</span>
             </div>
             <div class="ex-preview-row">
               <span class="ex-preview-lbl">Period</span>
-              <span class="ex-preview-val">{{ formattedPeriod }}</span>
+              <span class="ex-preview-val">{{ period?.label || '—' }}</span>
             </div>
             <div class="ex-preview-row">
               <span class="ex-preview-lbl">Paper Size</span>
-              <span class="ex-preview-val">{{ paperSizeLabel }}</span>
+              <span class="ex-preview-val">{{ paperLabel }}</span>
             </div>
             <div class="ex-preview-row">
               <span class="ex-preview-lbl">Date Order</span>
-              <span class="ex-preview-val">{{ sortOrderLabel }}</span>
+              <span class="ex-preview-val">{{ orderLabel }}</span>
             </div>
             <div class="ex-preview-divider"></div>
             <div class="ex-preview-meta">
               <span>Standard: <strong>Appendix 58</strong></span>
-              <span>Running balances & office issue logs</span>
+              <span>Running balances &amp; office issue logs</span>
             </div>
           </div>
         </div>
 
-        <!-- Download Buttons Card -->
         <div class="ex-download-card">
           <p class="ex-download-title">Download Formats</p>
 
-          <!-- PDF Button -->
-          <button
-            type="button"
-            class="ex-dl-btn ex-dl-pdf"
-            :disabled="isDownloadingPdf || isDownloadingWord"
-            @click="handleDownload('pdf')"
-          >
+          <button type="button" class="ex-dl-btn ex-dl-pdf" :disabled="!!downloading || loadingPreview || !hasReport" @click="download('pdf', 'pdf')">
             <span class="ex-dl-icon">
-              <span v-if="isDownloadingPdf" class="spinner"></span>
+              <span v-if="downloading === 'pdf'" class="spinner"></span>
               <FileText v-else :size="24" />
             </span>
             <span class="ex-dl-info">
               <strong>PDF Document</strong>
-              <small>{{ isDownloadingPdf ? 'Generating PDF...' : 'Print-ready Appendix 58' }}</small>
+              <small>{{ downloading === 'pdf' ? 'Generating PDF…' : 'Print-ready Appendix 58' }}</small>
             </span>
             <ArrowRight :size="18" class="ex-dl-arrow" />
           </button>
 
-          <!-- Word Button -->
-          <button
-            type="button"
-            class="ex-dl-btn ex-dl-word"
-            :disabled="isDownloadingPdf || isDownloadingWord"
-            @click="handleDownload('word')"
-          >
+          <button type="button" class="ex-dl-btn ex-dl-word" :disabled="!!downloading || loadingPreview || !hasReport" @click="download('word', 'doc')">
             <span class="ex-dl-icon">
-              <span v-if="isDownloadingWord" class="spinner"></span>
+              <span v-if="downloading === 'word'" class="spinner"></span>
               <FilePen v-else :size="24" />
             </span>
             <span class="ex-dl-info">
               <strong>Word Document</strong>
-              <small>{{ isDownloadingWord ? 'Generating Word...' : 'Editable .doc with tables' }}</small>
+              <small>{{ downloading === 'word' ? 'Generating Word…' : 'Editable .doc with tables' }}</small>
             </span>
             <ArrowRight :size="18" class="ex-dl-arrow" />
           </button>
+
+          <small v-if="hasReport" class="es-hint" :class="{ 'es-hint-warn': unsaved }">
+            {{ unsaved ? 'You have unsaved changes: save them to include them in the download.' : 'Downloads use the saved version of the stock card above.' }}
+          </small>
         </div>
 
-        <!-- Document Info Note -->
         <div class="ex-info-note">
           <p>
             <Info :size="15" class="ex-info-icon" /> <strong>Official Perpetual Record</strong>: The generated Stock Card adheres to government audit standards with automatic pagination, opening balances, verified references, and office transaction logs.
@@ -578,7 +511,188 @@ onMounted(() => {
   animation: fadeIn 0.25s ease-in-out;
 }
 
-/* ── Layout ─────────────────────────────────────────────── */
+/* ── Hero chips: what is being exported ─────────────────── */
+.es-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.es-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* ── Preview card ───────────────────────────────────────── */
+.es-card {
+  padding: 1.75rem 2rem;
+  margin-bottom: 24px;
+}
+
+.es-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.es-section-head > div:first-child {
+  min-width: 0;
+}
+
+.es-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.es-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-subtle);
+}
+
+.es-hint-warn {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.es-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.es-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+.es-save-state.is-unsaved {
+  color: var(--color-warning);
+}
+
+.es-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 1rem;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.es-error-block {
+  margin-bottom: 24px;
+}
+
+.es-editor-wrap {
+  position: relative;
+  min-height: 360px;
+}
+
+.es-editor-wrap.is-empty {
+  display: flex;
+  flex-direction: column;
+}
+
+.es-editor-wrap.is-empty > .es-state,
+.es-editor-wrap.is-empty > .es-loading {
+  flex: 1;
+}
+
+.es-state,
+.es-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 360px;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.es-loading {
+  font-weight: 600;
+}
+
+.es-state strong {
+  color: var(--text-main);
+}
+
+.es-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.es-state-icon {
+  color: var(--color-primary);
+}
+
+.es-state-icon.is-error {
+  color: var(--color-danger);
+}
+
+/* Over the open editor while it starts or rebuilds: the card stays in place underneath */
+.es-loading.is-over {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-height: 0;
+  border-style: solid;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.es-spin {
+  animation: spin 1s linear infinite;
+}
+
+.es-fade-enter-active,
+.es-fade-leave-active {
+  transition: opacity var(--transition-normal);
+}
+
+.es-fade-enter-from,
+.es-fade-leave-to {
+  opacity: 0;
+}
+
+/* ── Options + sidebar ──────────────────────────────────── */
 .ex-layout {
   display: grid;
   grid-template-columns: 1fr 340px;
@@ -586,15 +700,7 @@ onMounted(() => {
   align-items: start;
 }
 
-@media (max-width: 960px) {
-  .ex-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ── Panel Header & Body ────────────────────────────────── */
 .ex-panel {
-  margin-bottom: 24px;
   border-radius: 20px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -641,12 +747,8 @@ onMounted(() => {
 
 .ex-panel-body {
   padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 
-/* ── Field Row Layout ──────────────────────────────────── */
 .ex-field-label {
   display: flex;
   align-items: center;
@@ -659,7 +761,6 @@ onMounted(() => {
 
 .ex-label-icon {
   color: var(--color-primary);
-  vertical-align: -2px;
   flex-shrink: 0;
 }
 
@@ -674,41 +775,11 @@ onMounted(() => {
   gap: 20px;
 }
 
-@media (max-width: 580px) {
-  .ex-two-col {
-    grid-template-columns: 1fr;
-  }
-  .ex-panel-header {
-    padding: 14px 16px;
-  }
-  .ex-panel-body {
-    padding: 16px;
-  }
+.ex-two-col .form-group {
+  margin: 0;
 }
 
-.ex-select,
-.ex-input {
-  height: 46px;
-  font-size: 14px;
-  border-radius: 12px;
-}
-
-/* ── Presets ────────────────────────────────────────────── */
-.ex-presets {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: -6px;
-}
-
-.ex-presets-lbl {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-/* ── Radio Card Buttons (Paper Size & Date Order) ───────── */
+/* Radio cards (paper size, date order) */
 .ex-card-radio-group {
   display: flex;
   flex-direction: column;
@@ -716,12 +787,26 @@ onMounted(() => {
 }
 
 .ex-card-radio {
+  position: relative;
   display: block;
   cursor: pointer;
 }
 
+/* Hidden but still reachable with the keyboard */
 .ex-card-radio input {
-  display: none;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ex-card-radio:has(input:focus-visible) .ex-card-radio-body {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.ex-card-radio.is-disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .ex-card-radio-body {
@@ -735,7 +820,7 @@ onMounted(() => {
   transition: all var(--transition-fast);
 }
 
-.ex-card-radio:hover .ex-card-radio-body {
+.ex-card-radio:not(.is-disabled):hover .ex-card-radio-body {
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   transform: translateY(-1px);
@@ -769,7 +854,7 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
-/* ── Sidebar ────────────────────────────────────────────── */
+/* Sidebar */
 .ex-sidebar {
   display: flex;
   flex-direction: column;
@@ -778,14 +863,6 @@ onMounted(() => {
   top: 92px;
 }
 
-/* Single column: the sidebar follows the options instead of sticking over them */
-@media (max-width: 960px) {
-  .ex-sidebar {
-    position: static;
-  }
-}
-
-/* Preview Card */
 .ex-preview-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -850,7 +927,6 @@ onMounted(() => {
   color: var(--text-subtle);
 }
 
-/* Download Card */
 .ex-download-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -909,8 +985,6 @@ onMounted(() => {
 }
 
 .ex-dl-icon {
-  font-size: 1.6rem;
-  line-height: 1;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -936,13 +1010,10 @@ onMounted(() => {
 }
 
 .ex-dl-arrow {
-  font-size: 18px;
-  font-weight: 700;
   opacity: 0.8;
   margin-left: auto;
 }
 
-/* Spinner */
 .spinner {
   display: inline-block;
   width: 22px;
@@ -959,7 +1030,6 @@ onMounted(() => {
   }
 }
 
-/* Info Note */
 .ex-info-note {
   padding: 14px 18px;
   border-radius: 14px;
@@ -972,5 +1042,41 @@ onMounted(() => {
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0;
+}
+
+@media (max-width: 960px) {
+  .ex-layout {
+    grid-template-columns: 1fr;
+  }
+  .ex-sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .es-card {
+    padding: 1.25rem;
+  }
+  .es-section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .es-editor-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 580px) {
+  .ex-two-col {
+    grid-template-columns: 1fr;
+  }
+  .ex-panel-header {
+    padding: 14px 16px;
+  }
+  .ex-panel-body {
+    padding: 16px;
+  }
 }
 </style>

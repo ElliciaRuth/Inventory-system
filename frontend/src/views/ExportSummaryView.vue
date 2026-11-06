@@ -1,44 +1,86 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { exportApi, triggerBlobDownload } from '../api/export'
 import { toast, errorMessage } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
 import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 import { useThemeStore } from '../stores/themeStore'
-import { ArrowLeft, ArrowRight, AlertTriangle, Check, File, FileText, PencilLine, RefreshCw, Save, X } from 'lucide-vue-next'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Calendar,
+  Check,
+  Download,
+  File,
+  FileText,
+  Layers,
+  PencilLine,
+  RefreshCw,
+  Save,
+  Search,
+} from 'lucide-vue-next'
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+// Opened from a product type card of the Summary Report: ?type_id=&month=YYYY-MM[&search=][&back_type=]
+const route = useRoute()
+const router = useRouter()
 const thisMonth = new Date().toISOString().slice(0, 7)
+const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(route.query.month || '')) ? String(route.query.month) : thisMonth
+const typeId = Number(route.query.type_id) > 0 ? Number(route.query.type_id) : 0
+const search = String(route.query.search || '').trim()
 
-const form = reactive({ month_from: thisMonth, month_to: thisMonth, type_id: 0, paper_size: 'long' })
+const form = reactive({ month_from: month, month_to: month, type_id: typeId, search, paper_size: 'long' })
+
+const periodLabel = `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`
 const productTypes = ref([])
+const typeLabel = computed(() => {
+  if (!typeId) return 'All Product Types'
+  return productTypes.value.find((t) => Number(t.type_id) === typeId)?.type || 'Product type'
+})
+
+// Back to the Summary Report as it was: same month, year, product type filter and search
+const backLink = computed(() => {
+  const query = { month: month.slice(5, 7), year: month.slice(0, 4) }
+  if (Number(route.query.back_type) > 0) query.type_id = Number(route.query.back_type)
+  if (search) query.search = search
+  return { name: 'summary-report', query }
+})
+
 const downloading = ref('')
 const formError = ref('')
 
-// ── Edit before export (TinyMCE) ──────────────────────────────────────────
-// Downloaded only when the editor is first opened
+// ── The report, editable (TinyMCE, downloaded only when this page opens) ──
 const ReportEditor = defineAsyncComponent(() => import('../components/ReportEditor.vue'))
 const themeStore = useThemeStore()
 
-const editing = ref(false)      // downloads use the edited report while true
 const loadingPreview = ref(false)
+const previewError = ref('')
+const loadedOnce = ref(false)   // the editor stays mounted from then on; a rebuild only swaps its content
+let replacing = false           // content set by the page itself, not typed by the user
 const reportHtml = ref('')      // what the editor shows, changing as the user types
 const savedHtml = ref('')       // the version downloads use, set by Save Changes
 const savedAt = ref(null)
 const editorReady = ref(false)
 const edited = ref(false)
-const previewFor = ref('')      // the selection the editor's report was built from
-
-const selectionKey = computed(() => `${form.month_from}|${form.month_to}|${form.type_id}`)
-const previewStale = computed(() => editing.value && previewFor.value !== selectionKey.value)
 
 watch(reportHtml, () => {
-  if (editorReady.value) edited.value = true
+  if (editorReady.value && !replacing) edited.value = true
 })
 
-const unsaved = computed(() => editing.value && reportHtml.value !== savedHtml.value)
+const unsaved = computed(() => reportHtml.value !== savedHtml.value)
 
 // Edits live only on this page until downloaded, so leaving asks first (saved or not)
-useUnsavedChanges(() => editing.value && edited.value, {
+// Set once the user has confirmed leaving, so the leave guard below does not ask a second time
+let leaving = false
+// Downloaded and not changed since: nothing is lost by going back
+const downloadedClean = ref(false)
+watch(reportHtml, () => {
+  if (editorReady.value && !replacing) downloadedClean.value = false
+})
+
+useUnsavedChanges(() => edited.value && !leaving, {
   message: 'Your edits to the report are kept only on this page. Download the report first if you need them.',
 })
 
@@ -95,59 +137,41 @@ const editorInit = computed(() => ({
   setup: (editor) => editor.addShortcut('meta+s', 'Save changes', () => saveEdits()),
 }))
 
-function validateRange() {
-  formError.value = ''
-  if (!form.month_from || !form.month_to) {
-    formError.value = 'Please select a date range.'
-    return false
-  }
-  if (form.month_from > form.month_to) {
-    formError.value = 'From Month must be before To Month.'
-    return false
-  }
-  return true
-}
-
-async function confirmDropEdits(title, confirmText) {
-  if (!edited.value) return true
-  return confirmDialog({
-    title,
-    message: 'The changes you made to the report will be lost.',
-    confirmText,
-    variant: 'warning',
-  })
-}
-
-async function openEditor() {
-  if (!validateRange()) return
-  if (editing.value && !(await confirmDropEdits('Rebuild the report?', 'Rebuild'))) return
-
+async function loadReport() {
   loadingPreview.value = true
+  previewError.value = ''
   try {
     const res = await exportApi.previewSummary(form)
+    // A freshly built report is not an edit: the editor takes the new content without counting it as typing
+    replacing = true
     reportHtml.value = res.data?.html || ''
     savedHtml.value = reportHtml.value
     savedAt.value = null
-    previewFor.value = selectionKey.value
-    editing.value = true
-    // A rebuilt report is not an edit
+    loadedOnce.value = true
     await nextTick()
     edited.value = false
   } catch (err) {
-    formError.value = errorMessage(err, 'Failed to load the report.')
+    previewError.value = errorMessage(err, 'Failed to load the report.')
   } finally {
+    replacing = false
     loadingPreview.value = false
   }
 }
 
-async function closeEditor() {
-  if (!(await confirmDropEdits('Discard your edits?', 'Discard'))) return
-  editing.value = false
-  editorReady.value = false
-  edited.value = false
-  reportHtml.value = ''
-  savedHtml.value = ''
-  savedAt.value = null
+const hasReport = computed(() => loadedOnce.value && !previewError.value)
+
+// Start over from the recorded figures, dropping the edits
+async function rebuildReport() {
+  if (edited.value) {
+    const ok = await confirmDialog({
+      title: 'Rebuild the report?',
+      message: 'The report is built again from the recorded figures. The changes you made will be lost.',
+      confirmText: 'Rebuild',
+      variant: 'warning',
+    })
+    if (!ok) return
+  }
+  await loadReport()
 }
 
 const FORMATS = [
@@ -166,13 +190,13 @@ async function loadOptions() {
   try {
     const res = await exportApi.getSummaryOptions()
     productTypes.value = res.data?.productTypes || []
-  } catch (err) {
-    toast(errorMessage(err, 'Failed to load product types.'), 'error')
+  } catch {
+    // Only the type's name is missing from the heading
   }
 }
 
 async function download(format, ext) {
-  if (!validateRange()) return
+  if (loadingPreview.value || !hasReport.value) return
 
   // Exports use the saved version: unsaved edits would silently be left out
   if (unsaved.value) {
@@ -187,16 +211,16 @@ async function download(format, ext) {
     saveEdits(true)
   }
 
+  formError.value = ''
   downloading.value = format
   try {
-    const payload = { ...form, format }
-    if (editing.value) payload.html = savedHtml.value
-    const res = await exportApi.downloadSummary(payload)
-    let filename = `SummaryReport_${form.month_from}_to_${form.month_to}.${ext}`
+    const res = await exportApi.downloadSummary({ ...form, format, html: savedHtml.value })
+    let filename = `SummaryReport_${form.month_from}.${ext}`
     const match = (res.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
     if (match) filename = match[1]
     triggerBlobDownload(res.data, filename)
     toast(`Downloaded ${filename}`)
+    downloadedClean.value = !unsaved.value
   } catch (err) {
     formError.value = errorMessage(err, 'Failed to generate the report.')
   } finally {
@@ -204,123 +228,145 @@ async function download(format, ext) {
   }
 }
 
-onMounted(loadOptions)
+// Back to the report: ask first, unless there is nothing to lose (not built, or just downloaded unchanged)
+async function goBack() {
+  if (hasReport.value && !downloadedClean.value) {
+    const ok = await confirmDialog({
+      title: 'Discard this export?',
+      message: edited.value
+        ? 'The report has not been downloaded and your edits will be lost.'
+        : 'The report has not been downloaded yet. You can export it again from the Summary Report.',
+      confirmText: 'Discard export',
+      cancelText: 'Stay here',
+      variant: 'warning',
+    })
+    if (!ok) return
+  }
+  leaving = true
+  try {
+    await router.push(backLink.value)
+  } finally {
+    leaving = false
+  }
+}
+
+onMounted(() => {
+  loadOptions()
+  loadReport()
+})
 </script>
 
 <template>
   <div>
     <div class="page-hero">
       <div>
-        <p class="hero-eyebrow">Reports & Audit</p>
-        <h1 class="hero-title">Export Summary Report</h1>
-        <p class="hero-subtitle">Download the monthly inventory summary (beginning, purchase, used, spoiled, ending) for a range of months.</p>
+        <p class="hero-eyebrow">Reports</p>
+        <h1 class="hero-title">Preview &amp; Edit Report</h1>
+        <p class="hero-subtitle">Check the summary report, change anything you need, then choose the paper size and download it.</p>
+        <div class="es-chips">
+          <span class="es-chip"><Layers :size="13" /> {{ typeLabel }}</span>
+          <span class="es-chip"><Calendar :size="13" /> {{ periodLabel }}</span>
+          <span v-if="search" class="es-chip"><Search :size="13" /> “{{ search }}”</span>
+        </div>
       </div>
-      <router-link to="/reports/summary" class="btn btn-secondary"><ArrowLeft :size="15" /> Back to Report</router-link>
+      <button type="button" class="btn btn-secondary" @click="goBack"><ArrowLeft :size="15" /> Back to Report</button>
     </div>
 
+    <!-- 1. The report itself -->
     <section class="panel es-card">
-      <div v-if="formError" class="es-error"><AlertTriangle :size="15" /> {{ formError }}</div>
-
-      <div class="es-grid">
-        <!-- Left: what goes in the report -->
-        <div class="es-col">
-          <div class="form-group">
-            <label class="form-label" for="es-from">Date Period (From / To)</label>
-            <div class="es-period">
-              <input id="es-from" v-model="form.month_from" type="month" class="form-input es-month" aria-label="From month" />
-              <ArrowRight :size="16" class="es-arrow" aria-hidden="true" />
-              <input v-model="form.month_to" type="month" class="form-input es-month" aria-label="To month" />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="es-type">Product Type Filter</label>
-            <select id="es-type" v-model.number="form.type_id" class="form-select">
-              <option :value="0">— All Product Types —</option>
-              <option v-for="t in productTypes" :key="t.type_id" :value="Number(t.type_id)">{{ t.type }}</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <span class="form-label">Edit Before Download <small class="es-hint">(optional)</small></span>
-            <button type="button" class="btn btn-secondary es-edit-btn" :disabled="loadingPreview || !!downloading" @click="openEditor">
-              <component :is="editing ? RefreshCw : PencilLine" :size="15" />
-              {{ loadingPreview ? 'Loading report…' : editing ? 'Rebuild Report from Data' : 'Preview & Edit Report' }}
-            </button>
-            <small class="es-hint">Fix wording, add remarks or signatories, then download the edited copy.</small>
-          </div>
-        </div>
-
-        <!-- Right: how it is printed and downloaded -->
-        <div class="es-col es-col-right">
-          <div class="form-group">
-            <span class="form-label">
-              <FileText :size="15" class="es-label-icon" /> Paper Size &amp; Layout <small class="es-hint">(PDF / Word)</small>
-            </span>
-            <div class="es-paper-group" role="radiogroup" aria-label="Paper size">
-              <label v-for="[value, name, size] in PAPER_SIZES" :key="value" class="es-paper" :class="{ 'is-on': form.paper_size === value }">
-                <input v-model="form.paper_size" type="radio" name="paper_size" :value="value" />
-                <component :is="form.paper_size === value ? FileText : File" :size="20" class="es-paper-icon" aria-hidden="true" />
-                <span class="es-paper-text">
-                  <strong>{{ name }}</strong>
-                  <small>{{ size }}</small>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <span class="form-label">Export Target File Format</span>
-            <div class="es-formats">
-              <button
-                v-for="[format, label, ext] in FORMATS"
-                :key="format"
-                type="button"
-                class="btn es-format"
-                :class="format === 'pdf' ? 'btn-primary' : 'btn-secondary'"
-                :disabled="!!downloading"
-                @click="download(format, ext)"
-              >
-                {{ downloading === format ? 'Generating…' : label }}
-              </button>
-            </div>
-            <small v-if="editing" class="es-hint" :class="{ 'es-hint-warn': unsaved }">
-              {{ unsaved ? 'You have unsaved changes: save them to include them in the download.' : 'Downloads use the saved version of your edited report.' }}
-            </small>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="editing" class="panel es-card es-editor-card">
-      <div class="es-editor-head">
+      <div class="es-section-head">
         <div>
-          <h2 class="es-editor-title"><PencilLine :size="17" /> Edit Report</h2>
-          <p class="es-hint">Each dashed line marks a new page. Use the page-break button to start one yourself.</p>
+          <h2 class="es-section-title"><PencilLine :size="17" /> Report Preview</h2>
+          <p class="es-hint">Laid out like the printed copy. Each dashed line is a new page; the page-break button starts one.</p>
         </div>
-        <div class="es-editor-actions">
+        <div v-if="loadedOnce" class="es-editor-actions">
           <span class="es-save-state" :class="{ 'is-unsaved': unsaved }" aria-live="polite">
             <component :is="unsaved ? AlertTriangle : Check" :size="14" />
             {{ unsaved ? 'Unsaved changes' : savedLabel }}
           </span>
-          <button type="button" class="btn btn-secondary btn-sm" @click="closeEditor"><X :size="14" /> Discard Edits</button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="!unsaved" title="Save changes (Ctrl+S)" @click="saveEdits()">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingPreview || !!downloading" title="Build the report again from the recorded figures" @click="rebuildReport">
+            <RefreshCw :size="14" :class="{ 'es-spin': loadingPreview }" /> {{ loadingPreview ? 'Rebuilding…' : 'Rebuild from Data' }}
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="!unsaved || loadingPreview" title="Save changes (Ctrl+S)" @click="saveEdits()">
             <Save :size="14" /> Save Changes
           </button>
         </div>
       </div>
 
-      <div v-if="previewStale" class="es-stale">
+      <!-- A failed rebuild keeps the report that is already open -->
+      <div v-if="previewError && loadedOnce" class="es-error">
         <AlertTriangle :size="15" />
-        <span>The period or product type changed since this report was built. Downloads still use the report below. Click <strong>Rebuild Report from Data</strong> to start over with the new selection.</span>
+        <span>{{ previewError }} The report below was not changed.</span>
       </div>
 
-      <ReportEditor
-        v-model="reportHtml"
-        :dark="themeStore.current === 'dark'"
-        :init="editorInit"
-        @init="editorReady = true"
-      />
+      <!-- One stable box: the editor is mounted once and never swapped out, so it cannot lose its place -->
+      <div class="es-editor-wrap" :class="{ 'is-empty': !loadedOnce }">
+        <ReportEditor
+          v-if="loadedOnce"
+          v-model="reportHtml"
+          :dark="themeStore.current === 'dark'"
+          :init="editorInit"
+          @init="editorReady = true"
+        />
+
+        <div v-if="!loadedOnce && previewError" class="es-state">
+          <AlertTriangle :size="22" class="es-state-icon is-error" />
+          <strong>The report could not be loaded</strong>
+          <span>{{ previewError }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadReport"><RefreshCw :size="14" /> Try Again</button>
+        </div>
+
+        <!-- Loading: fills the empty box at first, then lies over the open editor while it starts or rebuilds -->
+        <Transition name="es-fade">
+          <div v-if="loadingPreview || (loadedOnce && !editorReady)" class="es-loading" :class="{ 'is-over': loadedOnce }">
+            <RefreshCw :size="22" class="es-state-icon es-spin" />
+            <span>{{ loadedOnce && editorReady ? 'Rebuilding the report…' : 'Building the report…' }}</span>
+          </div>
+        </Transition>
+      </div>
+    </section>
+
+    <!-- 2. How it is printed and downloaded -->
+    <section class="panel es-card es-options">
+      <div v-if="formError" class="es-error"><AlertTriangle :size="15" /> {{ formError }}</div>
+
+      <div class="es-grid">
+        <div class="form-group es-col">
+          <span class="form-label">
+            <FileText :size="15" class="es-label-icon" /> Paper Size &amp; Layout <small class="es-hint">(PDF / Word)</small>
+          </span>
+          <div class="es-paper-group" role="radiogroup" aria-label="Paper size">
+            <label v-for="[value, name, size] in PAPER_SIZES" :key="value" class="es-paper" :class="{ 'is-on': form.paper_size === value }">
+              <input v-model="form.paper_size" type="radio" name="paper_size" :value="value" />
+              <component :is="form.paper_size === value ? FileText : File" :size="20" class="es-paper-icon" aria-hidden="true" />
+              <span class="es-paper-text">
+                <strong>{{ name }}</strong>
+                <small>{{ size }}</small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group es-col es-col-right">
+          <span class="form-label"><Download :size="15" class="es-label-icon" /> Export Target File Format</span>
+          <div class="es-formats">
+            <button
+              v-for="[format, label, ext] in FORMATS"
+              :key="format"
+              type="button"
+              class="btn es-format"
+              :class="format === 'pdf' ? 'btn-primary' : 'btn-secondary'"
+              :disabled="!!downloading || loadingPreview || !hasReport"
+              @click="download(format, ext)"
+            >
+              {{ downloading === format ? 'Generating…' : label }}
+            </button>
+          </div>
+          <small class="es-hint" :class="{ 'es-hint-warn': unsaved }">
+            {{ unsaved ? 'You have unsaved changes: save them to include them in the download.' : 'Downloads use the saved version of the report above.' }}
+          </small>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -328,6 +374,31 @@ onMounted(loadOptions)
 <style scoped>
 .es-card {
   padding: 1.75rem 2rem;
+}
+
+.es-options {
+  margin-top: 1.5rem;
+}
+
+/* Type, month and search the report was opened for */
+.es-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.es-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .es-error {
@@ -343,10 +414,160 @@ onMounted(loadOptions)
   font-weight: 600;
 }
 
-/* Two columns split by a thin divider; stacked on narrow screens */
+.es-hint {
+  font-weight: 400;
+  color: var(--text-subtle);
+}
+
+.es-hint-warn {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+/* Report heading with its actions (kept on one line beside the text) */
+.es-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.es-section-head > div:first-child {
+  min-width: 0;
+}
+
+.es-section-head .es-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.es-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.es-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+/* The editor's box: holds the editor, or the loading / error message before it opens */
+.es-editor-wrap {
+  position: relative;
+  min-height: 360px;
+}
+
+.es-editor-wrap.is-empty {
+  display: flex;
+  flex-direction: column;
+}
+
+.es-editor-wrap.is-empty > .es-state,
+.es-editor-wrap.is-empty > .es-loading {
+  flex: 1;
+}
+
+.es-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 360px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Over the open editor while it starts or rebuilds: the report stays in place underneath */
+.es-loading.is-over {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-height: 0;
+  border-style: solid;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.es-fade-enter-active,
+.es-fade-leave-active {
+  transition: opacity var(--transition-normal);
+}
+
+.es-fade-enter-from,
+.es-fade-leave-to {
+  opacity: 0;
+}
+
+.es-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+.es-save-state.is-unsaved {
+  color: var(--color-warning);
+}
+
+/* Loading / failed report */
+.es-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 320px;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.es-state strong {
+  color: var(--text-main);
+}
+
+.es-state-icon {
+  color: var(--color-primary);
+}
+
+.es-state-icon.is-error {
+  color: var(--color-danger);
+}
+
+.es-spin {
+  animation: es-spin 1s linear infinite;
+}
+
+@keyframes es-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Paper size and format side by side, split by a thin divider; stacked on narrow screens */
 .es-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
 }
 
 .es-col {
@@ -354,6 +575,7 @@ onMounted(loadOptions)
   flex-direction: column;
   gap: 0.5rem;
   min-width: 0;
+  margin: 0;
 }
 
 .es-col:first-child {
@@ -365,39 +587,15 @@ onMounted(loadOptions)
   border-left: 1px solid var(--border-subtle);
 }
 
-.es-hint {
-  font-weight: 400;
-  color: var(--text-subtle);
-}
-
-/* From → To */
-.es-period {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.es-month {
-  flex: 1;
-  min-width: 0;
-  font-weight: 700;
-}
-
-.es-arrow {
-  flex-shrink: 0;
-  color: var(--text-subtle);
-}
-
-/* Paper size: radio row, the chosen one bold with a filled dot */
 .es-label-icon {
   color: var(--color-primary);
   vertical-align: -2px;
 }
 
-/* Paper size: stacked cards, the chosen one tinted and outlined */
+/* Paper size: cards in a row, the chosen one tinted and outlined */
 .es-paper-group {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -405,8 +603,8 @@ onMounted(loadOptions)
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: 14px;
   border: 1.5px solid var(--border-subtle);
   background: var(--bg-subtle);
@@ -460,7 +658,7 @@ onMounted(loadOptions)
   color: var(--text-muted);
 }
 
-/* Three equal format buttons */
+/* Two equal format buttons */
 .es-formats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -473,80 +671,24 @@ onMounted(loadOptions)
   font-weight: 700;
 }
 
-.es-edit-btn {
-  justify-content: center;
-}
-
-/* Editor below the form */
-.es-editor-card {
-  margin-top: 1.5rem;
-}
-
-.es-editor-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.es-editor-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 2px;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.es-editor-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.es-save-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-right: 0.25rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-success);
-}
-
-.es-save-state.is-unsaved {
-  color: var(--color-warning);
-}
-
-.es-hint-warn {
-  color: var(--color-warning);
-  font-weight: 600;
-}
-
-.es-stale {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 1rem;
-  padding: 0.65rem 1rem;
-  border-radius: var(--radius-md);
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
-  font-size: 0.85rem;
-}
-
-.es-stale svg {
-  flex-shrink: 0;
-  margin-top: 2px;
+@media (max-width: 1100px) {
+  .es-paper-group {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
   .es-card {
     padding: 1.25rem;
+  }
+  .es-section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .es-editor-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    white-space: normal;
   }
   .es-grid {
     grid-template-columns: 1fr;

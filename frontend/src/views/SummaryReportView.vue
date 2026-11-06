@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { Download, Upload, PencilLine, ExternalLink } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { stockApi } from '../api/stock'
@@ -21,17 +22,34 @@ const YEARS = Array.from({ length: now.getFullYear() - 2019 }, (_, i) => now.get
 const SECTIONS = ['purchase', 'used', 'spoiled']
 
 const authStore = useAuthStore()
+const route = useRoute()
 const isImportOpen = ref(false)
 
+// Filters may come in the address (coming back from Export keeps the month and type that were open)
+const queryMonth = /^(0[1-9]|1[0-2])$/.test(String(route.query.month || '')) ? String(route.query.month) : ''
+const queryYear = YEARS.includes(Number(route.query.year)) ? Number(route.query.year) : 0
 const filters = reactive({
-  search: '',
-  type_id: 0,
-  month: String(now.getMonth() + 1).padStart(2, '0'),
-  year: now.getFullYear(),
+  search: String(route.query.search || ''),
+  type_id: Number(route.query.type_id) > 0 ? Number(route.query.type_id) : 0,
+  month: queryMonth || String(now.getMonth() + 1).padStart(2, '0'),
+  year: queryYear || now.getFullYear(),
 })
 const groupedRows = ref({})
 const productTypes = ref([])
 const loading = ref(true)
+
+// Each product type card exports on its own: the preview & edit page opens for that type and month
+function exportLink(typeName) {
+  const type = productTypes.value.find((t) => t.type === typeName)
+  const query = {
+    type_id: Number(type?.type_id || filters.type_id || 0),
+    month: `${filters.year}-${filters.month}`,
+  }
+  if (filters.search.trim()) query.search = filters.search.trim()
+  // The product type filter of this page, so "Back to Report" returns to the same view
+  if (Number(filters.type_id) > 0) query.back_type = Number(filters.type_id)
+  return { name: 'export-summary', query }
+}
 
 const periodLabel = computed(() => `${MONTH_NAMES[Number(filters.month) - 1]} ${filters.year}`)
 const narrowed = computed(() => filters.search.trim() !== '' || Number(filters.type_id) > 0)
@@ -256,10 +274,6 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
       <div style="display:flex;gap:.5rem;">
-        <router-link to="/export/summary" class="btn btn-secondary">
-          <Download :size="15" />
-          <span>Export Summary</span>
-        </router-link>
         <button
           v-if="authStore.levelId >= 2"
           class="btn btn-secondary"
@@ -335,7 +349,18 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
     </div>
 
     <section v-for="group in groups" :key="group.type" class="panel" style="margin-bottom: 1.5rem;">
-      <div class="panel-header"><h2 class="panel-title">{{ group.type }}</h2></div>
+      <div class="panel-header">
+        <h2 class="panel-title">{{ group.type }}</h2>
+        <router-link
+          v-if="canEdit"
+          :to="exportLink(group.type)"
+          class="btn btn-secondary btn-sm"
+          :title="`Preview, edit and download the ${group.type} report for ${periodLabel}`"
+        >
+          <Download :size="14" />
+          <span>Export</span>
+        </router-link>
+      </div>
       <div class="table-responsive">
         <table class="data-table report-table" :class="{ 'is-editing': editMode }">
           <thead>

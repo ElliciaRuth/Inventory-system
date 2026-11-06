@@ -251,13 +251,13 @@ class InventoryService
                 $result['settled']   = $settled;
             }
         } elseif ($typeName === 'adjust_out') {
-            $result['reason']  = $this->adjustmentReason($reasonId, AdjustmentReasonModel::ADJUST_OUT);
+            $result['reason']  = $this->adjustmentReason($reasonId, (string) ($payload['adjustment_reason'] ?? ''), AdjustmentReasonModel::ADJUST_OUT);
             $result['batches'] = $this->depleteBatches($productId, $qty, $copyId, self::MODE_ADJUST, $resolvedTypeId, 0.0, $reasonId, $entry, true);
         } elseif ($typeName === 'adjust_in') {
             if ($copyId <= 0) {
                 throw new DomainException('Please select a sub-product (price variant) to add the stock to.');
             }
-            $result['reason']    = $this->adjustmentReason($reasonId, AdjustmentReasonModel::ADJUST_IN);
+            $result['reason']    = $this->adjustmentReason($reasonId, (string) ($payload['adjustment_reason'] ?? ''), AdjustmentReasonModel::ADJUST_IN);
             $result['batches'][] = $this->addToLatestBatch($productId, $copyId, $qty, $resolvedTypeId, $reasonId, $entry);
         } else {
             throw new DomainException("Unsupported transaction type: '{$typeName}'.");
@@ -698,15 +698,43 @@ class InventoryService
         return (string) ($row['adjustment_reason'] ?? '');
     }
 
-    /** The chosen reason's name; it must be one of those offered for this kind of adjustment. */
-    private function adjustmentReason(int $reasonId, array $allowed): string
+    /**
+     * The adjustment's reason. A typed reason ($typed) may be one of the suggestions offered for this
+     * kind of adjustment or the user's own words (saved as a new reason); without one, $reasonId must
+     * be one of the suggestions. Sets $reasonId to the reason used and returns its name.
+     */
+    private function adjustmentReason(int &$reasonId, string $typed, array $allowed): string
     {
-        $reason = $this->reasonName($reasonId);
-        if (! in_array($reason, $allowed, true)) {
-            throw new DomainException('Choose the reason for this adjustment: ' . implode(', ', $allowed) . '.');
+        $typed = trim((string) preg_replace('/\s+/u', ' ', $typed));
+        if ($typed === '') {
+            $reason = $this->reasonName($reasonId);
+            if (! in_array($reason, $allowed, true)) {
+                throw new DomainException('Choose or type the reason for this adjustment.');
+            }
+
+            return $reason;
         }
 
-        return $reason;
+        if (mb_strlen($typed) < 2) {
+            throw new DomainException('The reason must be at least 2 characters.');
+        }
+        if (mb_strlen($typed) > 100) {
+            throw new DomainException('The reason must be 100 characters or fewer.');
+        }
+        if (strcasecmp($typed, 'Physical Count') === 0) {
+            throw new DomainException('"Physical Count" is used by stock counts only; type a different reason.');
+        }
+        // A suggestion typed in any letter case keeps its usual spelling
+        foreach ($allowed as $name) {
+            if (mb_strtolower($name) === mb_strtolower($typed)) {
+                $typed = $name;
+                break;
+            }
+        }
+
+        $reasonId = $this->reasonIdByName($typed);
+
+        return $this->reasonName($reasonId) ?: $typed;
     }
 
     private function reasonIdByName(string $name): int

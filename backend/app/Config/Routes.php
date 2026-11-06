@@ -95,6 +95,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], static function (R
 
         // ── Exports — level 2+ ───────────────────────────────────────────────
         $routes->get('export/stockcard/options', 'ExportController::stockcardOptions', ['filter' => 'level:2']);
+        $routes->get('export/stockcard/editor-style', 'ExportController::stockcardEditorStyle', ['filter' => 'level:2']);
         $routes->match(['get', 'post'], 'export/stockcard', 'ExportController::stockcardDownload', ['filter' => 'level:2']);
         $routes->get('export/summary/options', 'ExportController::summaryOptions', ['filter' => 'level:2']);
         $routes->get('export/summary/editor-style', 'ExportController::summaryEditorStyle', ['filter' => 'level:2']);

@@ -258,6 +258,10 @@ export const TOPICS = [
       'Open Menu → Borrowed Items to see what is still out and how much has come back.',
       'When items come back, record the return from that page. It goes back into stock as a stock-in.',
     ],
+    tips: [
+      'Lending lowers the Stock on Hand right away, but the borrow and its return are not written on the stock card (on screen or exported): its Balance keeps counting lent stock as the office’s.',
+      'On the Stockcard Ledger, the item details show the Stock on Hand with the borrows still out listed under it: who has it, how much, and when it is due.',
+    ],
     to: '/stock/borrows',
   },
   {
@@ -333,7 +337,7 @@ export const TOPICS = [
     summary: 'Beginning, purchases, usage, spoilage and ending balance.',
     steps: [
       'Open Menu → Summary Report and choose the product type, month and year. The report updates as soon as you change a filter.',
-      'To download it, click "Export Summary" (see "Edit the Summary Report before downloading").',
+      'To download it, click "Export" at the top right of the product type table you need (see "Edit the Summary Report before downloading").',
       'To bring in a summary kept in Excel, click "Import from Excel" (see "Import a Summary Report from Excel").',
     ],
     tips: [
@@ -369,19 +373,20 @@ export const TOPICS = [
     title: 'Edit the Summary Report before downloading',
     summary: 'Change wording, add remarks or page breaks, then download PDF or Word.',
     steps: [
-      'Open Menu → Export Summary and choose the period (From / To months) and the product type.',
-      'Click "Preview & Edit Report". The report opens in an editor, laid out like the printed copy.',
+      'Open Menu → Summary Report, choose the month and year, and click "Export" at the top right of the table for that product type.',
+      'The "Preview & Edit Report" page opens with that product type and month in an editor, laid out like the printed copy.',
       'Change the wording, add remarks, or adjust the signatories. Each dashed line is a new page; use the page-break button to start a page yourself.',
       'Click "Save Changes" (or press Ctrl+S). Downloads use the saved version.',
       'Choose the paper size (Long, Short or A4) and click "PDF Print" or "MS Word".',
     ],
     tips: [
       'Edits are kept only while this page is open: download before leaving it. The page asks first if you try to leave with edits.',
-      'Changed the period or product type after opening the editor? Click "Rebuild Report from Data" to start over with the new selection, or "Discard Edits" to drop your changes.',
+      'To drop your changes and start again from the recorded figures, click "Rebuild from Data".',
       'The names under Prepared by, Verified by and Noted by come from Office Settings → Report Signatories (managers).',
-      'To download without editing, skip the editor and click "PDF Print" or "MS Word" straight away.',
+      'To download without editing, scroll past the report and click "PDF Print" or "MS Word" straight away.',
+      '"Back to Report" returns to the Summary Report with the same month and filters.',
     ],
-    to: '/export/summary',
+    to: '/reports/summary',
   },
   {
     id: 'export-stockcard',
@@ -391,11 +396,17 @@ export const TOPICS = [
     title: 'Export an official stock card',
     summary: 'Appendix 58 stock card as PDF or Word.',
     steps: [
-      'Open Menu → Export Stockcard.',
-      'Choose the product and the period.',
-      'Download a print-ready PDF or an editable Word (.doc) file.',
+      'Open Menu → Stockcard Ledger and set the Period (month and year, a whole year, or all) and the Order.',
+      'For one item: open it and click "Export" in the Stock Item header. For many: choose a Category Filter in the Item Navigator and click "Export" under the search box (no category exports every item).',
+      'The "Preview & Edit Stock Card" page opens with the Appendix 58 card already built. Change the wording if needed and click "Save Changes" (or press Ctrl+S).',
+      'Choose the Paper Size and Date Order, then click "PDF Document" or "Word Document".',
     ],
-    to: '/export/stockcard',
+    tips: [
+      'A month with "All years" cannot be exported: pick a year too.',
+      'Changing the Date Order builds the card again; "Rebuild from Data" also drops your edits and starts over.',
+      '"Back to Stockcard" returns to the ledger with the same item, period, order and category.',
+    ],
+    to: '/stockcard',
   },
 
   // ── Administration ─────────────────────────────────────────────────────

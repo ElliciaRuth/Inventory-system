@@ -31,9 +31,12 @@ class RequestLimits extends BaseConfig
      * $maxStringLength and the body larger than $maxBodyBytes, up to maxBytes.
      * export/summary: the summary report edited in the browser (its HTML, with the logos
      * inline), checked again by ExportController::MAX_EDITED_REPORT_BYTES.
+     * export/stockcard: the stock cards edited in the browser (about 10 KB per card, so a whole
+     * office's cards run to a few MB), checked again by the same limit.
      */
     public array $largeTextRoutes = [
-        'export/summary' => ['fields' => ['html'], 'maxBytes' => 8 * 1024 * 1024],
+        'export/summary'   => ['fields' => ['html'], 'maxBytes' => 8 * 1024 * 1024],
+        'export/stockcard' => ['fields' => ['html'], 'maxBytes' => 8 * 1024 * 1024],
     ];
 
     // ── Shape of the data ────────────────────────────────────────────────

@@ -6,6 +6,17 @@ export const exportApi = {
     return res.data
   },
 
+  // The stock card's styles for the editor, linked as a stylesheet (the server's CSP blocks inline styles)
+  stockcardEditorStyleUrl() {
+    return `${client.defaults.baseURL}/export/stockcard/editor-style`
+  },
+
+  // The stock card pages (Appendix 58), for editing before download
+  async previewStockcard(payload) {
+    const res = await client.post('/export/stockcard', { ...payload, format: 'preview' })
+    return res.data
+  },
+
   async downloadStockcard(payload) {
     const res = await client.post('/export/stockcard', payload, {
       responseType: 'blob',

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
-import { X, AlertTriangle, Layers, ScanLine } from 'lucide-vue-next'
+import { X, AlertTriangle, CheckCircle2, Layers, ScanLine } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { triggerAutoReload } from '../composables/useAutoReload'
 import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
@@ -49,6 +49,7 @@ const nowText = computed(() =>
 
 const loading = ref(false)
 const errorMessage = ref('')
+const successMessage = ref('')
 const options = ref({
   items: [],
   stockMap: {},
@@ -73,7 +74,9 @@ const form = reactive({
   transaction_date: '',
   manufacturing_date: '',
   expiration_date: '',
+  // Adjust Out / Adjust In: one of the listed reasons; "Others" asks the user to type it
   adjustment_reason_id: '',
+  adjustment_reason_other: '',
   // Borrow (lend to another office)
   borrower_name: '',
   borrower_user_office_id: '',
@@ -227,7 +230,8 @@ watch(
   schedulePlan
 )
 
-async function fetchOptions() {
+// keepSelection: refresh stock figures after a save without changing the chosen product or type
+async function fetchOptions(keepSelection = false) {
   try {
     const res = await stockApi.getOptions()
     if (res.status && res.data) {
@@ -235,7 +239,9 @@ async function fetchOptions() {
       if (!form.transaction_type_id && options.value.transactionTypes.length) {
         form.transaction_type_id = Number(options.value.transactionTypes[0].transaction_type_id)
       }
-      if (props.presetReturn) {
+      if (keepSelection && form.product_id) {
+        // leave the form as the user set it
+      } else if (props.presetReturn) {
         const returnType = options.value.transactionTypes.find((t) => t.transaction_type === 'return')
         form.product_id = Number(props.presetReturn.product_id)
         if (returnType) form.transaction_type_id = Number(returnType.transaction_type_id)
@@ -262,6 +268,7 @@ watch(
   (open) => {
     if (open) {
       errorMessage.value = ''
+      successMessage.value = ''
       form.transaction_date = todayIso()
       fetchOptions()
     }
@@ -287,9 +294,14 @@ watch(() => [form.product_id, form.transaction_type_id], () => {
 // Adjust Out and Adjust In offer different reasons
 watch(() => form.transaction_type_id, () => {
   form.adjustment_reason_id = ''
+  form.adjustment_reason_other = ''
 })
 
 const reasonOptions = computed(() => options.value.adjustmentReasons?.[typeName.value] || [])
+const selectedReason = computed(() =>
+  reasonOptions.value.find((r) => String(r.adjustment_reason_id) === String(form.adjustment_reason_id)) || null
+)
+const isOtherReason = computed(() => (selectedReason.value?.adjustment_reason || '').toLowerCase() === 'others')
 
 // Set by anything the user types, picks or scans in the form (not by the defaults filled in
 // when the window opens), so Cancel, the X and a click outside only ask when there is something to lose
@@ -325,7 +337,15 @@ function validate() {
   if (isIssue.value && !(Number(form.usage_pct) >= 1 && Number(form.usage_pct) <= 100)) {
     return 'Usage % must be between 1 and 100.'
   }
-  if (needsReason.value && !form.adjustment_reason_id) return 'Choose the reason for this adjustment.'
+  if (needsReason.value) {
+    if (!form.adjustment_reason_id) return 'Choose the reason for this adjustment.'
+    if (isOtherReason.value) {
+      const reason = form.adjustment_reason_other.trim()
+      if (!reason) return 'Type the reason for this adjustment.'
+      if (reason.length < 2) return 'The reason must be at least 2 characters.'
+      if (reason.length > 100) return 'The reason must be 100 characters or fewer.'
+    }
+  }
   if (isBorrow.value) {
     if (form.borrower_name.trim().length < 2) return 'Enter the name of the person borrowing.'
     if (!form.borrower_user_office_id) return 'Choose the office that is borrowing.'
@@ -356,6 +376,7 @@ function validate() {
 
 async function handleSubmit() {
   if (loading.value) return
+  successMessage.value = ''
   errorMessage.value = validate()
   if (errorMessage.value) return
 
@@ -374,7 +395,10 @@ async function handleSubmit() {
   }
   if (needsCopy.value) payload.copy_id = Number(form.copy_id)
   if (isIssue.value) payload.usage_pct = Number(form.usage_pct)
-  if (needsReason.value) payload.adjustment_reason_id = Number(form.adjustment_reason_id)
+  if (needsReason.value) {
+    payload.adjustment_reason_id = Number(form.adjustment_reason_id)
+    if (isOtherReason.value) payload.adjustment_reason = form.adjustment_reason_other.trim().replace(/\s+/g, ' ')
+  }
   if (isBorrow.value) {
     payload.borrower_name = form.borrower_name.trim()
     if (form.borrower_user_office_id === OTHER_UNIT) payload.borrower_unit = form.borrower_unit.trim()
@@ -386,7 +410,6 @@ async function handleSubmit() {
 
   const type = options.value.transactionTypes.find((t) => Number(t.transaction_type_id) === Number(form.transaction_type_id))
   const copy = copies.value.find((c) => Number(c.copy_id) === Number(payload.copy_id))
-  const reason = reasonOptions.value.find((r) => String(r.adjustment_reason_id) === String(form.adjustment_reason_id))
   const ok = await confirmDialog({
     title: 'Save this stock movement?',
     message: `${type ? typeLabel(type) : 'Transaction'}: ${qtyText(payload.quantity)} ${selectedItem.value?.unit || ''} of ${selectedItem.value?.product || 'this product'}.`,
@@ -397,7 +420,7 @@ async function handleSubmit() {
       ['Sub-product', copy ? `₱${peso(copy.unit_cost)}${copy.label ? ` (${copy.label})` : ''}` : ''],
       ['Unit cost', payload.unit_cost !== undefined ? `₱${peso(payload.unit_cost)}` : ''],
       ['Date', payload.transaction_date ? shortDate(payload.transaction_date) : ''],
-      ['Reason', reason?.adjustment_reason],
+      ['Reason', payload.adjustment_reason || selectedReason.value?.adjustment_reason],
       ['Borrower', payload.borrower_name],
       ['Reference', payload.reference],
       ['Office / source', payload.office],
@@ -411,8 +434,16 @@ async function handleSubmit() {
     await stockApi.addStock(payload)
     triggerAutoReload('stock-movement')
     emit('saved')
-    emit('close')
-    // Reset transient fields to avoid accidental duplicates if reopened
+    // A return opened from a specific borrow is a one-off; everything else stays open
+    // so the next product can be recorded without reopening the window
+    if (props.presetReturn) {
+      emit('close')
+    } else {
+      successMessage.value = `Recorded: ${type ? typeLabel(type) : 'Transaction'}, ${qtyText(payload.quantity)} ${selectedItem.value?.unit || ''} of ${selectedItem.value?.product || 'product'}. You can record another.`
+      touched.value = false
+      fetchOptions(true)
+    }
+    // Reset transient fields to avoid accidental duplicates
     form.quantity = 1
     form.unit_cost = ''
     form.office = ''
@@ -452,6 +483,10 @@ async function handleSubmit() {
         <div v-if="errorMessage" class="badge badge-danger" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
           <AlertTriangle :size="16" style="flex-shrink: 0;" />
           <span>{{ errorMessage }}</span>
+        </div>
+        <div v-else-if="successMessage" class="badge badge-success" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; padding: 0.65rem 1rem; width: 100%; white-space: normal;">
+          <CheckCircle2 :size="16" style="flex-shrink: 0;" />
+          <span>{{ successMessage }}</span>
         </div>
 
         <form @submit.prevent="handleSubmit" id="stockForm">
@@ -582,12 +617,23 @@ async function handleSubmit() {
 
             <div class="form-group" v-if="needsReason">
               <label class="form-label">Reason *</label>
-              <select v-model="form.adjustment_reason_id" class="form-select">
-                <option value="">— Choose a reason —</option>
+              <!-- "Choose a reason" is a placeholder only: shown while nothing is picked, not offered in the list -->
+              <select v-model="form.adjustment_reason_id" class="form-select" :class="{ 'sm-placeholder': !form.adjustment_reason_id }">
+                <option value="" disabled hidden>Choose a reason</option>
                 <option v-for="r in reasonOptions" :key="r.adjustment_reason_id" :value="String(r.adjustment_reason_id)">
                   {{ r.adjustment_reason }}
                 </option>
               </select>
+              <input
+                v-if="isOtherReason"
+                v-model="form.adjustment_reason_other"
+                type="text"
+                class="form-input"
+                style="margin-top: 0.5rem;"
+                maxlength="100"
+                placeholder="Type the reason"
+                aria-label="Other reason for the adjustment"
+              />
             </div>
 
             <div class="form-group">
@@ -666,6 +712,15 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
+/* A select showing its placeholder looks like the placeholders of the text fields */
+.form-select.sm-placeholder {
+  color: var(--text-muted);
+}
+
+.form-select.sm-placeholder option {
+  color: var(--text-main);
+}
+
 .sm-scan-hint {
   display: inline-flex;
   align-items: center;

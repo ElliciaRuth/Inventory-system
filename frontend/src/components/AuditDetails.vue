@@ -33,6 +33,19 @@ const LABELS = {
   protected: 'Password-protected',
   category_changes: 'Category changes',
   type_overrides: 'Category changes',
+  qty: 'Quantity',
+  stock_no: 'Stock No.',
+  stock_before: 'Stock before',
+  sub_product: 'Sub-product',
+  date_received: 'Date received',
+  due_date: 'Due date',
+  borrow_notes: 'Notes',
+  borrow_settled: 'Borrow settled',
+  usage: 'Usage',
+  expiration_date: 'Expiry date',
+  manufacturing_date: 'Manufacturing date',
+  unit_cost: 'Unit cost',
+  copy_id: 'Sub-product ID',
 }
 
 // Category changes made in an import preview: [{ product, unit, from, to }].
@@ -61,15 +74,72 @@ function label(key) {
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const isScalar = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v)
 
+const isEmpty = (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)
+
+// "2026-11-06" or "2026-11-06 09:19:10" → "Nov 6, 2026" (with the time when there is one)
+function formatDate(value) {
+  const m = String(value).match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2})(?::\d{2})?)?$/)
+  if (!m) return null
+  const d = new Date(`${m[1]}T${m[2] || '00:00'}:00`)
+  if (Number.isNaN(d.getTime())) return null
+  const day = d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+  return m[2] ? `${day}, ${d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}` : day
+}
+
 function format(key, value) {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'number' || /^\d+(\.\d+)?$/.test(String(value))) {
     if (/minutes?$/.test(key)) return `${value} min`
     if (/days$/.test(key)) return `${value} day${Number(value) === 1 ? '' : 's'}`
+    if (/(cost|price|amount)$/.test(key)) return `₱${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
-  return String(value)
+  return formatDate(value) ?? String(value)
 }
+
+// Anything else nested (objects in objects, lists of mixed things) as plain "label: value" lines,
+// with the parent's name in front: never shown as code
+function flatten(value, prefix = '') {
+  if (isScalar(value)) return [{ label: prefix || 'Value', value: format(prefix, value) }]
+  if (Array.isArray(value)) {
+    if (value.every(isScalar)) return [{ label: prefix || 'Values', value: value.map((v) => format(prefix, v)).join(', ') || '—' }]
+    return value.flatMap((item, i) => flatten(item, `${prefix ? `${prefix} ` : ''}#${i + 1}`))
+  }
+  return Object.entries(value)
+    .filter(([, v]) => !isEmpty(v))
+    .flatMap(([k, v]) => {
+      const name = label(k)
+      return isScalar(v) ? [{ label: prefix ? `${prefix} › ${name}` : name, value: format(k, v) }] : flatten(v, prefix ? `${prefix} › ${name}` : name)
+    })
+}
+
+// A list of records with plain values (batches taken, rows imported…) reads as a small table.
+// An "x_id" column is left out when the same thing also has a readable name or number.
+function recordTable(list) {
+  const keys = [...new Set(list.flatMap((row) => Object.keys(row)))]
+  const shown = keys.filter((k) => {
+    const base = k.replace(/_id$/, '')
+    if (base === k) return true
+    return !keys.some((other) => other !== k && [base, `${base}_no`, `${base}_name`, `${base}_number`].includes(other))
+  })
+  // Columns that are empty in every row add nothing
+  const columns = shown.filter((k) => list.some((row) => !isEmpty(row[k])))
+  return {
+    columns: columns.map((k) => ({ key: k, label: label(k), numeric: list.every((row) => isEmpty(row[k]) || typeof row[k] === 'number') })),
+    rows: list.map((row) => Object.fromEntries(columns.map((k) => [k, format(k, row[k])]))),
+  }
+}
+
+// "stock.adjust_out" → "Stock › Adjust out"
+const actionLabel = computed(() =>
+  String(props.log.action || '')
+    .split('.')
+    .map((part) => {
+      const words = part.replace(/_/g, ' ').trim()
+      return words.charAt(0).toUpperCase() + words.slice(1)
+    })
+    .join(' › ')
+)
 
 const details = computed(() => (isPlainObject(props.log.details) ? props.log.details : { value: props.log.details }))
 
@@ -98,6 +168,8 @@ const hasAfter = computed(() => isPlainObject(details.value.after))
 const fields = computed(() =>
   Object.entries(details.value)
     .filter(([key]) => !(key === 'before' && hasBefore.value) && !(key === 'after' && hasAfter.value))
+    // Nothing recorded for it (e.g. no borrow behind a stock movement): leave it out
+    .filter(([key, value]) => !isEmpty(value) || key === 'category_changes' || key === 'type_overrides')
     .map(([key, value]) => {
       const categories = categoryRows(key, value)
       if (categories) {
@@ -112,8 +184,11 @@ const fields = computed(() =>
       if (isPlainObject(value) && Object.values(value).every(isScalar)) {
         return { key, label: label(key), kind: 'list', items: Object.entries(value).map(([k, v]) => ({ label: label(k), value: format(k, v) })) }
       }
+      if (Array.isArray(value) && value.length && value.every((row) => isPlainObject(row) && Object.values(row).every(isScalar))) {
+        return { key, label: label(key), kind: 'records', ...recordTable(value) }
+      }
       if (!isScalar(value)) {
-        return { key, label: label(key), kind: 'json', value: JSON.stringify(value, null, 2) }
+        return { key, label: label(key), kind: 'list', items: flatten(value) }
       }
       return { key, label: label(key), kind: 'text', value: format(key, value) }
     })
@@ -143,7 +218,7 @@ const fields = computed(() =>
     <section v-if="fields.length" class="ad-section">
       <h4 class="ad-heading">Details</h4>
       <dl class="ad-fields">
-        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': ['json', 'list', 'categories'].includes(f.kind) }">
+        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': ['records', 'list', 'categories'].includes(f.kind) }">
           <dt>{{ f.label }}</dt>
           <dd v-if="f.kind === 'pair'" class="ad-pair">
             <span class="ad-pair-old">{{ f.before }}</span>
@@ -176,7 +251,22 @@ const fields = computed(() =>
               </div>
             </div>
           </dd>
-          <dd v-else-if="f.kind === 'json'"><pre class="ad-json">{{ f.value }}</pre></dd>
+          <dd v-else-if="f.kind === 'records'">
+            <div class="ad-records-wrap">
+              <table class="ad-records">
+                <thead>
+                  <tr>
+                    <th v-for="c in f.columns" :key="c.key" :class="{ 'is-num': c.numeric }">{{ c.label }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, i) in f.rows" :key="i">
+                    <td v-for="c in f.columns" :key="c.key" :class="{ 'is-num': c.numeric }">{{ row[c.key] }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </dd>
           <dd v-else>{{ f.value }}</dd>
         </div>
       </dl>
@@ -185,7 +275,7 @@ const fields = computed(() =>
     <!-- The entry itself -->
     <footer class="ad-meta">
       <span><Hash :size="12" /> Entry {{ log.audit_id }}</span>
-      <span><Tag :size="12" /> <code>{{ log.action }}</code></span>
+      <span :title="log.action"><Tag :size="12" /> {{ actionLabel }}</span>
       <span><Clock :size="12" /> {{ when(log.created_at) }}</span>
     </footer>
   </div>
@@ -358,13 +448,46 @@ const fields = computed(() =>
   }
 }
 
-.ad-json {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  font-weight: 400;
-  white-space: pre-wrap;
+/* A list of records (batches taken, …) as a small table */
+.ad-records-wrap {
+  margin-top: 0.25rem;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.ad-records {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+.ad-records th,
+.ad-records td {
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.ad-records th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-muted);
+}
+.ad-records td {
+  font-weight: 600;
+  color: var(--text-main);
+}
+.ad-records tr + tr td {
+  border-top: 1px solid var(--border-subtle);
+}
+.ad-records .is-num {
+  text-align: right;
 }
 
 /* ── Before / after ── */
@@ -429,10 +552,6 @@ const fields = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-}
-.ad-meta code {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
 }
 
 @media (max-width: 640px) {
