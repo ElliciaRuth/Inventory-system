@@ -42,6 +42,12 @@ const LABELS = {
   borrow_notes: 'Notes',
   borrow_settled: 'Borrow settled',
   usage: 'Usage',
+  technical_details: 'Technical details (for IT)',
+  bytes_sent: 'Size sent',
+  limit_bytes: 'Size limit',
+  route: 'Page address',
+  method: 'Request type',
+  bucket: 'Limit',
   expiration_date: 'Expiry date',
   manufacturing_date: 'Manufacturing date',
   unit_cost: 'Unit cost',
@@ -92,6 +98,10 @@ function format(key, value) {
   if (typeof value === 'number' || /^\d+(\.\d+)?$/.test(String(value))) {
     if (/minutes?$/.test(key)) return `${value} min`
     if (/days$/.test(key)) return `${value} day${Number(value) === 1 ? '' : 's'}`
+    if (/bytes$/.test(key)) {
+      const n = Number(value)
+      return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`
+    }
     if (/(cost|price|amount)$/.test(key)) return `₱${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
   return formatDate(value) ?? String(value)
@@ -218,7 +228,7 @@ const fields = computed(() =>
     <section v-if="fields.length" class="ad-section">
       <h4 class="ad-heading">Details</h4>
       <dl class="ad-fields">
-        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': ['records', 'list', 'categories'].includes(f.kind) }">
+        <div v-for="f in fields" :key="f.key" class="ad-field" :class="{ 'is-wide': ['records', 'list', 'categories'].includes(f.kind) || f.key === 'technical_details' }">
           <dt>{{ f.label }}</dt>
           <dd v-if="f.kind === 'pair'" class="ad-pair">
             <span class="ad-pair-old">{{ f.before }}</span>

@@ -285,24 +285,27 @@ const editMode = ref(false)
 // Archived products keep their history read-only
 const editing = computed(() => editMode.value && canEdit.value && !itemInfo.value.archived_at)
 
-// The ledger shows as cards where its columns can't fit: phones and portrait tablets, and while
-// editing up to 1200px (the inputs need more room)
-const narrowScreen = ref(false)
-const mediumScreen = ref(false)
-const asCards = computed(() => narrowScreen.value || (editing.value && mediumScreen.value))
-const narrowQuery = window.matchMedia('(max-width: 900px)')
-const mediumQuery = window.matchMedia('(max-width: 1200px)')
-function updateScreen() {
-  narrowScreen.value = narrowQuery.matches
-  mediumScreen.value = mediumQuery.matches
-}
-updateScreen()
-narrowQuery.addEventListener('change', updateScreen)
-mediumQuery.addEventListener('change', updateScreen)
-onUnmounted(() => {
-  narrowQuery.removeEventListener('change', updateScreen)
-  mediumQuery.removeEventListener('change', updateScreen)
+// The ledger shows as cards wherever its ten columns can't fit, so nothing scrolls sideways.
+// Measured on the table's own box: the item navigator (open or collapsed) and the window size
+// both change it. Editing needs more room (the cells become inputs).
+const TABLE_MIN_WIDTH = 820
+const TABLE_MIN_WIDTH_EDITING = 1100
+const tableWrap = ref(null)
+const tableWidth = ref(window.innerWidth)
+const asCards = computed(() => tableWidth.value < (editing.value ? TABLE_MIN_WIDTH_EDITING : TABLE_MIN_WIDTH))
+const tableObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver(([entry]) => {
+    if (entry) tableWidth.value = entry.contentRect.width
+  })
+  : null
+watch(tableWrap, (el, old) => {
+  if (old) tableObserver?.unobserve(old)
+  if (el) {
+    tableWidth.value = el.clientWidth
+    tableObserver?.observe(el)
+  }
 })
+onUnmounted(() => tableObserver?.disconnect())
 const drafts = reactive({})        // row key → { date, reference, office, qty, cost, expiry }
 const deleting = reactive(new Set()) // row keys marked for deletion
 const saving = ref(false)
@@ -869,20 +872,33 @@ onMounted(() => {
       </div>
 
       <!-- Ledger Table -->
-      <div class="table-responsive">
+      <div ref="tableWrap" class="table-responsive ledger-wrap">
         <table class="data-table ledger-table" :class="{ 'is-editing': editing, 'as-cards': asCards, 'is-refreshing': refreshing && stockcard.length }">
+          <!-- Fixed shares of the panel's width: long text wraps inside its column instead of widening the table -->
+          <colgroup v-if="!asCards">
+            <col :style="{ width: editing ? '13%' : '10%' }" />
+            <col style="width: 12%" />
+            <col />
+            <col style="width: 7%" />
+            <col style="width: 7%" />
+            <col style="width: 8%" />
+            <col :style="{ width: editing ? '10%' : '11%' }" />
+            <col :style="{ width: editing ? '13%' : '12%' }" />
+            <col style="width: 10%" />
+            <col :style="{ width: editing ? '112px' : '58px' }" />
+          </colgroup>
           <thead>
             <tr>
               <th>Date</th>
               <th>Reference / PO</th>
               <th>Office / Source / Purpose</th>
-              <th style="text-align: right; color: var(--color-success);">Receipt Qty</th>
-              <th style="text-align: right; color: var(--color-primary);">Issue Qty</th>
-              <th style="text-align: right;">Balance Qty</th>
+              <th style="text-align: right; color: var(--color-success);" title="Receipt quantity">Receipt</th>
+              <th style="text-align: right; color: var(--color-primary);" title="Issue quantity">Issue</th>
+              <th style="text-align: right;" title="Balance quantity">Balance</th>
               <th style="text-align: right;">Price</th>
               <th>Expiry</th>
-              <th>Action Type</th>
-              <th style="text-align: center;" :style="{ width: editing ? '112px' : '95px' }">Actions</th>
+              <th>Type</th>
+              <th style="text-align: center;"><span class="lg-act-head">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -992,7 +1008,7 @@ onMounted(() => {
                 {{ entry.date ? entry.date.split(' ')[0] : '—' }}
               </td>
               <td class="lg-ref" data-label="Ref">
-                <span class="badge badge-neutral" style="font-family: var(--font-mono);">
+                <span class="badge badge-neutral lg-ref-badge" style="font-family: var(--font-mono);" :title="entry.reference || 'N/A'">
                   {{ entry.reference || 'N/A' }}
                 </span>
               </td>
@@ -1008,7 +1024,7 @@ onMounted(() => {
               <td class="lg-bal" data-label="Balance" style="text-align: right; font-family: var(--font-mono); font-weight: 800; font-size: 0.95rem;">
                 {{ entry.balance }}
               </td>
-              <td class="lg-price" style="text-align: right; white-space: nowrap;">
+              <td class="lg-price" style="text-align: right;">
                 ₱{{ peso(entry.transaction_unit_cost || entry.copy_unit_cost) }}
                 <div v-if="entry.copy_label" style="font-size: 0.75rem; color: var(--text-muted);">{{ entry.copy_label }}</div>
               </td>
@@ -1343,12 +1359,100 @@ onMounted(() => {
   vertical-align: bottom;
 }
 
-@media (min-width: 901px) and (max-width: 1500px) {
-  .ledger-table:not(.is-editing) th,
-  .ledger-table:not(.is-editing) td {
-    padding-left: 0.6rem;
-    padding-right: 0.6rem;
-  }
+/* ── The ledger as a table: it always fits its panel (narrower panels get the cards below) ── */
+.ledger-wrap {
+  overflow-x: hidden;
+}
+
+.ledger-table:not(.as-cards) {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.ledger-table:not(.as-cards) th,
+.ledger-table:not(.as-cards) td {
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ledger-table:not(.as-cards) td {
+  font-size: 0.85rem;
+}
+
+.ledger-table:not(.as-cards) th {
+  letter-spacing: 0.03em;
+}
+
+/* Numbers stay whole: they get the room they need from their column's share */
+.ledger-table:not(.as-cards) .lg-qty,
+.ledger-table:not(.as-cards) .lg-bal,
+.ledger-table:not(.as-cards) .lg-price {
+  overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-table:not(.as-cards) .lg-bal {
+  font-size: 0.88rem !important;
+}
+
+/* Badges wrap inside their column (the movement type) or cut off with the full text on hover (reference) */
+.ledger-table:not(.as-cards) .lg-type .badge {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.ledger-table:not(.as-cards) .lg-ref-badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Expiry: the date, with its status under it */
+.ledger-table:not(.as-cards) .ledger-expiry {
+  white-space: normal;
+}
+
+.ledger-table:not(.as-cards) .ledger-expiry .expiry-chip,
+.ledger-table:not(.as-cards) .ledger-expiry .ledger-expiry-note {
+  display: inline-block;
+  margin-top: 2px;
+  white-space: normal;
+}
+
+/* The Actions column is only as wide as its buttons */
+.ledger-table:not(.as-cards):not(.is-editing) .lg-act-head {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.ledger-table:not(.as-cards) .lg-act .btn {
+  padding: 4px 8px !important;
+  white-space: nowrap;
+}
+
+/* Icon only in the table (the word "Edit" is its tooltip); the cards keep the label */
+.ledger-table:not(.as-cards) .lg-act .lg-act-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ledger-table:not(.as-cards) td.lg-act {
+  overflow-wrap: normal;
 }
 
 /* Item details: a grid that fits the panel */

@@ -242,8 +242,21 @@ class RequestGuard implements FilterInterface
         }
         cache()->save($key, 1, 60);
 
-        AuditLog::record('security.' . $kind, 'request', null, "Blocked request to /api/{$route}: {$message}", $details + [
-            'method' => strtoupper($request->getMethod()),
+        // The summary is for office staff; the technical message and address stay in the details
+        // for IT (the Audit Log page words these entries the same way, see frontend utils/auditText.js)
+        $plain = match ($kind) {
+            'too_complex'       => 'A request was stopped because it carried more information than the system accepts in one go.',
+            'payload_too_large' => 'A request was stopped because the file or data sent was too large.',
+            'malformed'         => 'A request was stopped because the information sent could not be read.',
+            'rate_limited'      => 'Requests were paused for a moment because too many were made in a short time.',
+            'csrf_blocked'      => 'A request that did not come from the BSU Inventory app was refused.',
+            default             => 'A request was blocked by the system.',
+        };
+
+        AuditLog::record('security.' . $kind, 'request', null, $plain . ' Nothing was saved or changed.', $details + [
+            'route'     => $route,
+            'method'    => strtoupper($request->getMethod()),
+            'technical' => "Blocked request to /api/{$route}: {$message}",
         ]);
     }
 }

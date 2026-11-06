@@ -1,12 +1,13 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import { ShieldCheck, Search, ChevronDown, ChevronRight, Lock } from 'lucide-vue-next'
+import { ShieldCheck, Search, ChevronDown, ChevronRight, Lock, Info } from 'lucide-vue-next'
 import { auditApi } from '../api/audit'
 import { useAuthStore } from '../stores/authStore'
 import { useAutoReload } from '../composables/useAutoReload'
 import { toast, errorMessage } from '../composables/useToast'
 import AppPagination from '../components/AppPagination.vue'
 import AuditDetails from '../components/AuditDetails.vue'
+import { plainSecuritySummary, securityTag } from '../utils/auditText'
 
 const authStore = useAuthStore()
 
@@ -76,6 +77,18 @@ const ACTION_LABELS = {
   'security.payload_too_large': 'Data too large',
   'security.too_complex': 'Data too complex',
   'security.malformed': 'Malformed data',
+}
+
+// The Action column's tag: security entries get plain wording (see utils/auditText)
+const actionLabel = (action) => securityTag(action) || ACTION_LABELS[action] || action
+
+// Security entries keep the server's technical text in their details, for IT staff
+function detailsLog(log) {
+  const plain = plainSecuritySummary(log)
+  if (!plain) return log
+  const details = log.details && typeof log.details === 'object' ? log.details : {}
+  const { technical: _ignored, ...rest } = details
+  return { ...log, details: { ...rest, technical_details: plain.technical } }
 }
 
 // Colour per kind of action
@@ -212,14 +225,18 @@ function when(value) {
                   <span v-if="log.office_name" class="audit-muted">{{ log.office_name }}</span>
                 </td>
                 <td data-label="Action">
-                  <span class="audit-tag" :class="`is-${tone(log.action)}`">{{ ACTION_LABELS[log.action] || log.action }}</span>
+                  <span class="audit-tag" :class="`is-${tone(log.action)}`">{{ actionLabel(log.action) }}</span>
                 </td>
-                <td data-label="What happened" class="audit-summary">{{ log.summary }}</td>
+                <td v-if="plainSecuritySummary(log)" data-label="What happened" class="audit-summary">
+                  {{ plainSecuritySummary(log).text }}
+                  <span class="audit-help"><Info :size="13" /> {{ plainSecuritySummary(log).help }}</span>
+                </td>
+                <td v-else data-label="What happened" class="audit-summary">{{ log.summary }}</td>
                 <td data-label="Username" class="audit-username">{{ log.username || '—' }}</td>
               </tr>
               <tr v-if="expanded.has(log.audit_id)" class="audit-details-row">
                 <td colspan="6">
-                  <AuditDetails :log="log" :tone="tone(log.action)" :when="when" />
+                  <AuditDetails :log="detailsLog(log)" :tone="tone(log.action)" :when="when" />
                 </td>
               </tr>
             </template>
@@ -359,6 +376,21 @@ function when(value) {
   font-size: 0.85rem;
   line-height: 1.45;
   min-width: 260px;
+}
+
+/* What to do about a blocked request, under its explanation */
+.audit-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--color-info);
+}
+
+.audit-help svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .audit-username {
