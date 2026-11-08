@@ -272,6 +272,7 @@ class ReportModel extends Model
              INNER JOIN batch_table b ON t.batch_id = b.batch_id
              INNER JOIN transaction_type_table tt ON t.transaction_type_id = tt.transaction_type_id
              WHERE t.transaction_date < ?{$officeFilter}
+               AND " . TransactionModel::ON_STOCK_CARD_SQL . "
              ORDER BY b.product_id ASC, t.transaction_date ASC, t.transaction_id ASC",
             [$monthStart]
         )->getResultArray();
@@ -312,7 +313,9 @@ class ReportModel extends Model
         $builder->join('office_table ot', 't.office_id = ot.office_id', 'left');
         $builder->where('t.transaction_date >=', $monthStart);
         $builder->where('t.transaction_date <', $nextMonth);
-        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return', 'adjust_in']);
+        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'return', 'adjust_in']);
+        // Lending and temporary stock stay off the report, as on the stock card (see TransactionModel::ON_STOCK_CARD_SQL)
+        $builder->where(TransactionModel::ON_STOCK_CARD_SQL, null, false);
 
         if ($userOfficeId > 0) {
             $builder->where('t.user_office_id', $userOfficeId);
@@ -393,8 +396,8 @@ class ReportModel extends Model
     /**
      * Calculate issue (used) or spoiled values for a row.
      * $spoiledTypeId 3 => counts only adjust_out as "spoiled"
-     * $spoiledTypeId 0 => counts issue + borrow as "used"
-     * Return is NOT counted here — it's under purchase.
+     * $spoiledTypeId 0 => counts issue as "used"
+     * Lending (borrow, and the return that settles it) never reaches here: the report leaves it out.
      */
     private function issueValues(
         array $row,
@@ -410,14 +413,14 @@ class ReportModel extends Model
             return [0, 0.0, 0.0];
         }
 
-        // $spoiledTypeId 3 => adjust_out only; 0 => used (issue + borrow)
+        // $spoiledTypeId 3 => adjust_out only; 0 => used (issue)
         if ($spoiledTypeId === 3) {
             if ($typeName !== 'adjust_out') {
                 return [0, 0.0, 0.0];
             }
         } else {
-            // Used column: only issue and borrow (return is under purchase)
-            if (!in_array($typeName, ['issue', 'borrow'], true)) {
+            // Used column: only issue (a borrow is not use: the item is coming back)
+            if ($typeName !== 'issue') {
                 return [0, 0.0, 0.0];
             }
         }
@@ -560,6 +563,7 @@ class ReportModel extends Model
              INNER JOIN batch_table b ON t.batch_id = b.batch_id
              INNER JOIN transaction_type_table tt ON t.transaction_type_id = tt.transaction_type_id
              WHERE t.transaction_date < ?{$officeFilter}{$productFilter}
+               AND " . TransactionModel::ON_STOCK_CARD_SQL . "
              ORDER BY b.product_id ASC, t.transaction_date ASC, t.transaction_id ASC",
             [$before]
         )->getResultArray();
@@ -594,7 +598,9 @@ class ReportModel extends Model
         $builder->join('product_copy_table pc', 'COALESCE(t.copy_id, b.copy_id) = pc.copy_id', 'left');
         $builder->where('t.transaction_date >=', $dateFrom);
         $builder->where('t.transaction_date <', $dateTo);
-        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'borrow', 'return', 'adjust_in']);
+        $builder->whereIn('tt.transaction_type', ['receipt', 'issue', 'adjust_out', 'return', 'adjust_in']);
+        // Lending and temporary stock stay off the report, as on the stock card (see TransactionModel::ON_STOCK_CARD_SQL)
+        $builder->where(TransactionModel::ON_STOCK_CARD_SQL, null, false);
 
         if ($userOfficeId > 0) {
             $builder->where('t.user_office_id', $userOfficeId);

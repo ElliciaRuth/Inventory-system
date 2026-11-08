@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
-import { X, AlertTriangle, CheckCircle2, Layers, ScanLine } from 'lucide-vue-next'
+import { X, AlertTriangle, CheckCircle2, Layers, ScanLine, Clock } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { triggerAutoReload } from '../composables/useAutoReload'
 import { confirmDialog, confirmDiscardChanges } from '../composables/useConfirm'
@@ -74,6 +74,8 @@ const form = reactive({
   transaction_date: '',
   manufacturing_date: '',
   expiration_date: '',
+  // Stock In only: temporary stock is used up first and kept off the stock card and summary report
+  temporary: false,
   // Adjust Out / Adjust In: one of the listed reasons; "Others" asks the user to type it
   adjustment_reason_id: '',
   adjustment_reason_other: '',
@@ -392,6 +394,7 @@ async function handleSubmit() {
     payload.transaction_date = form.transaction_date
     payload.expiration_date = form.expiration_date || ''
     payload.manufacturing_date = form.manufacturing_date || ''
+    if (form.temporary) payload.temporary = true
   }
   if (needsCopy.value) payload.copy_id = Number(form.copy_id)
   if (isIssue.value) payload.usage_pct = Number(form.usage_pct)
@@ -419,6 +422,7 @@ async function handleSubmit() {
       ['Quantity', `${qtyText(payload.quantity)} ${selectedItem.value?.unit || ''}`],
       ['Sub-product', copy ? `₱${peso(copy.unit_cost)}${copy.label ? ` (${copy.label})` : ''}` : ''],
       ['Unit cost', payload.unit_cost !== undefined ? `₱${peso(payload.unit_cost)}` : ''],
+      ['Temporary stock', payload.temporary ? 'Yes: used first, not on the stock card or summary report' : ''],
       ['Date', payload.transaction_date ? shortDate(payload.transaction_date) : ''],
       ['Reason', payload.adjustment_reason || selectedReason.value?.adjustment_reason],
       ['Borrower', payload.borrower_name],
@@ -450,6 +454,7 @@ async function handleSubmit() {
     form.reference = ''
     form.expiration_date = ''
     form.manufacturing_date = ''
+    form.temporary = false
     form.copy_id = ''
     form.borrower_name = ''
     form.borrower_user_office_id = ''
@@ -681,6 +686,14 @@ async function handleSubmit() {
             </div>
           </div>
 
+          <label v-if="isReceipt" class="sm-temp-option" :class="{ 'is-selected': form.temporary }">
+            <input v-model="form.temporary" type="checkbox" />
+            <span>
+              <strong><Clock :size="14" /> Temporary stock</strong>
+              <small>Used up before the rest of the stock. It does not show on the stock card or the summary report.</small>
+            </span>
+          </label>
+
           <div class="form-grid-2">
             <div class="form-group">
               <label class="form-label">Office / Destination</label>
@@ -835,5 +848,40 @@ async function handleSubmit() {
 .sm-plan-warn svg {
   flex-shrink: 0;
   margin-top: 0.15rem;
+}
+.sm-temp-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  cursor: pointer;
+}
+
+.sm-temp-option.is-selected {
+  border-color: var(--color-primary);
+}
+
+.sm-temp-option input {
+  margin-top: 0.2rem;
+  accent-color: var(--color-primary);
+}
+
+.sm-temp-option strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--text-main);
+}
+
+.sm-temp-option small {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 </style>

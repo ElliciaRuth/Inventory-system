@@ -163,11 +163,15 @@ class InventoryService
                 throw new DomainException('Manufacturing date must be on or before the expiration date.');
             }
 
+            // Temporary stock: used up before the other batches, kept off the stock card and summary report
+            $temporary = filter_var($payload['temporary'] ?? false, FILTER_VALIDATE_BOOLEAN);
             $copy    = (new ProductCopyModel())->findOrCreateCopy($productId, $unitCost, $userOfficeId);
-            $batch   = $this->createBatch('B', $userOfficeName, $productId, (int) $copy['copy_id'], $qty, $userOfficeId, $entry, [
+            $batch   = $this->createBatch($temporary ? 'T' : 'B', $userOfficeName, $productId, (int) $copy['copy_id'], $qty, $userOfficeId, $entry, [
                 'manufacturing_date' => $mfgDate,
                 'expiration_date'    => $expDate,
+                'is_temporary'       => $temporary ? 1 : 0,
             ]);
+            $result['temporary'] = $temporary;
 
             $product = $this->db->table('product_table')->where('product_id', $productId)->get(1)->getRowArray();
             if (($product['stock_no'] ?? '') === '' && ($product['product_no'] ?? '') !== '') {
@@ -271,6 +275,8 @@ class InventoryService
     /**
      * Which batches a stock-out of $qty would use, without changing anything.
      *
+     * Temporary batches (is_temporary) come before the others in every mode.
+     *
      *   MODE_ISSUE   unexpired batches only, oldest received first (FIFO)
      *   MODE_ADJUST  expired batches first, then oldest received
      *   MODE_EXPIRED expired batches only, oldest received first
@@ -280,7 +286,7 @@ class InventoryService
     public function planDepletion(int $productId, float $qty, int $userOfficeId, int $copyId = 0, string $mode = self::MODE_ISSUE): array
     {
         $builder = $this->db->table('batch_table')
-            ->select('batch_id, batch_no, copy_id, current_qty, manufacturing_date, expiration_date, date_received,
+            ->select('batch_id, batch_no, copy_id, current_qty, manufacturing_date, expiration_date, date_received, is_temporary,
                       DATEDIFF(expiration_date, CURDATE()) AS days_left', false)
             ->where('product_id', $productId)
             ->where('current_qty >', 0);
@@ -288,7 +294,8 @@ class InventoryService
             $builder->where('user_office_id', $userOfficeId);
         }
         if ($copyId > 0) {
-            $builder->where('copy_id', $copyId);
+            // Temporary stock is used first whatever sub-product (price) it was received at
+            $builder->groupStart()->where('copy_id', $copyId)->orWhere('is_temporary', 1)->groupEnd();
         }
 
         $today      = date('Y-m-d');
@@ -313,6 +320,10 @@ class InventoryService
         usort($batches, static function (array $a, array $b) use ($mode): int {
             if ($mode === self::MODE_ADJUST && $a['expired'] !== $b['expired']) {
                 return $a['expired'] ? -1 : 1;
+            }
+            // Temporary stock (added on a stock card import) is used up before the rest
+            if ((int) $a['is_temporary'] !== (int) $b['is_temporary']) {
+                return (int) $b['is_temporary'] <=> (int) $a['is_temporary'];
             }
             // First in, first out: oldest received first; same day (or no date) in the order recorded
             return [(string) $a['date_received'], (int) $a['batch_id']] <=> [(string) $b['date_received'], (int) $b['batch_id']];
@@ -525,7 +536,8 @@ class InventoryService
                 $batch['take'],
                 $cost,
                 (int) $batch['batch_id'],
-                $copyId > 0 ? $copyId : (int) ($batch['copy_id'] ?? 0),
+                // A temporary batch keeps its own sub-product (see planDepletion)
+                $copyId > 0 && ! (int) $batch['is_temporary'] ? $copyId : (int) ($batch['copy_id'] ?? 0),
                 $entry + ['reason_id' => $reasonId]
             );
 
@@ -552,7 +564,9 @@ class InventoryService
         if ($copyId > 0) {
             $builder->where('copy_id', $copyId);
         }
+        // Never onto temporary stock: what comes back in belongs on the stock card
         $batch = $builder
+            ->where('is_temporary', 0)
             ->orderBy('(expiration_date IS NOT NULL AND expiration_date < CURDATE())', 'ASC', false)
             ->orderBy('date_received', 'DESC')
             ->orderBy('batch_id', 'DESC')

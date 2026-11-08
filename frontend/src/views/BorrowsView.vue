@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Handshake, Search, Undo2, CalendarClock } from 'lucide-vue-next'
 import { stockApi } from '../api/stock'
 import { useAutoReload } from '../composables/useAutoReload'
@@ -10,7 +11,10 @@ import AppPagination from '../components/AppPagination.vue'
 const borrows = ref([])
 const loading = ref(true)
 const tab = ref('open')
-const search = ref('')
+// ?q= lets other pages (the stock card) open this list already searched to one item
+const route = useRoute()
+const search = ref(String(route.query.q || ''))
+watch(() => route.query.q, (q) => { search.value = String(q || ''); page.value = 1 })
 const page = ref(1)
 const pageSize = ref(15)
 

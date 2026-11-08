@@ -516,8 +516,10 @@ class StockcardImportService
      * @param bool                  $replace delete the existing inventory of the file's offices first
      * @param array<string, string> $types    product key => category typed in the preview (detected type when blank)
      * @param list<string>          $leaveOut product keys not imported because they have errors (importCheck)
+     * @param array<string, float>  $temporary product key => temporary stock to add after the file's entries:
+     *                                          taken out first, never shown on the stock card or summary report
      */
-    public function commit(array $plan, bool $replace, array $types, array $user, array $leaveOut = []): array
+    public function commit(array $plan, bool $replace, array $types, array $user, array $leaveOut = [], array $temporary = []): array
     {
         $products = array_values(array_filter(
             $plan['products'],
@@ -544,6 +546,7 @@ class StockcardImportService
             'receipts'           => 0,
             'issues'             => 0,
             'adjustments'        => 0,
+            'temporary'          => [], // product name => temporary stock added
             'already_imported'   => 0,
             'offices'            => $plan['summary']['offices'],
             // Products not imported because they have errors: fix the file and import it again
@@ -607,6 +610,18 @@ class StockcardImportService
                     $this->issue($batches, $copyId, $officeId, $userId, $movement, $meta, $product['name']);
                     $result[$movement['type'] === 'adjust_out' ? 'adjustments' : 'issues']++;
                 }
+            }
+
+            // Temporary stock goes in after the file's entries, as of today
+            $tempQty = round((float) ($temporary[$product['key']] ?? 0), 2);
+            if ($tempQty > 0) {
+                $this->receive($productId, $copyId, $officeId, $userId, [
+                    'date'   => date('Y-m-d'),
+                    'qty'    => $tempQty,
+                    'ref'    => '',
+                    'office' => '',
+                ], ['stock_import_batch' => $runId, 'stock_import_order' => ++$order], true);
+                $result['temporary'][$product['name']] = $tempQty;
             }
         }
 
@@ -687,8 +702,9 @@ class StockcardImportService
 
     /**
      * A receipt: new batch (with barcode) + receipt transaction. Returns the batch for FIFO issues.
+     * $temporary marks it temporary stock (batch number T-…): used first, kept off the stock card.
      */
-    private function receive(int $productId, int $copyId, int $officeId, int $userId, array $movement, array $meta): array
+    private function receive(int $productId, int $copyId, int $officeId, int $userId, array $movement, array $meta, bool $temporary = false): array
     {
         $stamp       = $movement['date'] . ' 08:00:00';
         $referenceId = $this->referenceId($movement['ref'], $officeId);
@@ -696,7 +712,7 @@ class StockcardImportService
 
         $this->db->table('batch_table')->insert([
             'batch_no'       => (new InventoryService($this->db))->nextBatchNo(
-                'B-' . strtoupper($this->officeName($officeId)) . '-' . str_replace('-', '', $movement['date']) . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT)
+                ($temporary ? 'T-' : 'B-') . strtoupper($this->officeName($officeId)) . '-' . str_replace('-', '', $movement['date']) . '-' . str_pad((string) $productId, 4, '0', STR_PAD_LEFT)
             ),
             'product_id'     => $productId,
             'copy_id'        => $copyId,
@@ -704,6 +720,7 @@ class StockcardImportService
             'reference_id'   => $referenceId,
             'office_id'      => $destination,
             'current_qty'    => $movement['qty'],
+            'is_temporary'   => $temporary ? 1 : 0,
             'date_received'  => $movement['date'],
             'created_at'     => $stamp,
             'updated_at'     => $stamp,
@@ -787,7 +804,7 @@ class StockcardImportService
     }
 
     /**
-     * Batches of this sub-product that still have stock, oldest first.
+     * Batches of this sub-product that still have stock, oldest first (temporary stock left out).
      */
     private function openBatches(int $copyId, int $officeId): array
     {
@@ -796,6 +813,7 @@ class StockcardImportService
             ->where('copy_id', $copyId)
             ->where('user_office_id', $officeId)
             ->where('current_qty >', 0)
+            ->where('is_temporary', 0) // the file's issues stay on the stock card
             ->orderBy('date_received', 'ASC')
             ->orderBy('batch_id', 'ASC')
             ->get()->getResultArray();

@@ -206,7 +206,8 @@ async function reconcile() {
         <h1 class="hero-title">Physical Count</h1>
         <p class="hero-subtitle">
           Every count starts at the system quantity: change the ones that differ from the shelf and the system shows the difference. Reconciling records
-          an Adjust Out for shortages (expired batches first) and an Adjust In for overages, with the reason “Physical Count”.
+          an Adjust Out for shortages (expired batches first, then temporary stock) and an Adjust In for overages, with the reason “Physical Count”.
+          The System Qty includes temporary stock; it is counted here but never shows on the stock card or summary report.
         </p>
       </div>
     </div>
@@ -271,6 +272,7 @@ async function reconcile() {
             <tr>
               <th>Item</th>
               <th style="text-align: right;">System Qty</th>
+              <th style="text-align: right;" title="Part of the System Qty that is temporary stock: used first, not on the stock card or summary report">Temporary</th>
               <th style="width: 190px;">Counted Qty</th>
               <th style="text-align: right;">Difference</th>
             </tr>
@@ -291,6 +293,12 @@ async function reconcile() {
                 <span v-if="item.stock_no && item.stock_no !== item.product_no" class="pc-muted">{{ item.stock_no }}</span>
               </td>
               <td data-label="System Qty" class="pc-num">{{ qty(systemQty(item)) }} <span class="pc-unit">{{ item.unit }}</span></td>
+              <td data-label="Temporary" class="pc-num">
+                <template v-if="Number(item.temporary_stock) > 0">
+                  {{ qty(item.temporary_stock) }} <span class="pc-unit">{{ item.unit }}</span>
+                </template>
+                <span v-else class="pc-muted">—</span>
+              </td>
               <td data-label="Counted Qty">
                 <div class="pc-input">
                   <input

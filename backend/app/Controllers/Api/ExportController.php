@@ -323,8 +323,8 @@ class ExportController extends BaseApiController
             ->where('t.transaction_date >=', $dateFrom)
             ->where('t.transaction_date <',  $dateTo)
             ->whereIn('tt.transaction_type', array_merge(TransactionModel::STOCK_IN_TYPES, TransactionModel::STOCK_OUT_TYPES))
-            // Lending stays off the stock card (see TransactionModel::NOT_LENDING_SQL)
-            ->where(TransactionModel::NOT_LENDING_SQL, null, false);
+            // Lending and temporary stock stay off the stock card (see TransactionModel::ON_STOCK_CARD_SQL)
+            ->where(TransactionModel::ON_STOCK_CARD_SQL, null, false);
 
         if ($userOfficeId > 0) { $builder->where('t.user_office_id', $userOfficeId); }
         if ($productId    > 0) { $builder->where('b.product_id',     $productId); }
@@ -352,7 +352,7 @@ class ExportController extends BaseApiController
                     INNER JOIN batch_table b ON t.batch_id = b.batch_id
                     INNER JOIN transaction_type_table tt ON tt.transaction_type_id = t.transaction_type_id
                     WHERE t.transaction_date < ?
-                      AND ' . TransactionModel::NOT_LENDING_SQL . '
+                      AND ' . TransactionModel::ON_STOCK_CARD_SQL . '
                       AND b.product_id IN (' . $ph . ')'
                 . ($userOfficeId > 0 ? ' AND t.user_office_id = ' . (int) $userOfficeId : '')
                 . ' GROUP BY b.product_id';

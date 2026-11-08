@@ -23,6 +23,13 @@ class TransactionModel extends Model
      */
     public const NOT_LENDING_SQL = "NOT (tt.transaction_type = 'borrow' OR (tt.transaction_type = 'return' AND t.borrow_id IS NOT NULL))";
 
+    /**
+     * What the stock card and the summary report count: no lending (above), and nothing from
+     * temporary stock (a batch added with "Add temporary stock" on the stock card import, which
+     * stock-outs take from first). Use with the aliases "t", "tt" and the batch alias "b".
+     */
+    public const ON_STOCK_CARD_SQL = '(' . self::NOT_LENDING_SQL . ' AND b.is_temporary = 0)';
+
     protected $table                 = 'transaction_table';
     protected $primaryKey            = 'transaction_id';
     protected $returnType            = 'array';
@@ -170,7 +177,7 @@ class TransactionModel extends Model
                 LEFT JOIN entity_table et ON p.entity_id = et.entity_id
                 WHERE b.product_id = ? {$officeFilter}
                   AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
-                  AND " . self::NOT_LENDING_SQL . "
+                  AND " . self::ON_STOCK_CARD_SQL . "
             ) AS base
             WHERE 1=1 {$searchFilter} {$dateFilter}
             GROUP BY date, transaction_type_id, transaction_type, office, reference,
@@ -214,7 +221,7 @@ class TransactionModel extends Model
             LEFT JOIN reference_table r ON t.reference_id = r.reference_id
             WHERE b.product_id = ? {$countOfficeFilter}
               AND tt.transaction_type IN ('receipt','issue','adjust_out','borrow','return','adjust_in')
-              AND " . self::NOT_LENDING_SQL . "
+              AND " . self::ON_STOCK_CARD_SQL . "
               {$countSearchFilter}
               {$countDateFilter}
             GROUP BY t.transaction_date, t.transaction_type_id, t.office_id, t.reference_id,

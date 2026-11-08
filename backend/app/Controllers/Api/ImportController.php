@@ -140,7 +140,8 @@ class ImportController extends BaseApiController
     }
 
     /**
-     * POST /api/import/stockcards/commit   { token, mode: "replace"|"append", password, types: { productKey: type } }
+     * POST /api/import/stockcards/commit   { token, mode: "replace"|"append", password, types: { productKey: type },
+     *                                        temporary: { productKey: qty } }
      * Deleting the existing inventory first ("replace") needs the manager's own password.
      */
     public function commit(): ResponseInterface
@@ -153,6 +154,16 @@ class ImportController extends BaseApiController
         $token = (string) ($input['token'] ?? '');
         $mode  = (string) ($input['mode'] ?? '');
         $types = is_array($input['types'] ?? null) ? $input['types'] : [];
+        // "Add temporary stock": quantity per product key; blanks and zeros are ignored
+        $temporary = [];
+        foreach (is_array($input['temporary'] ?? null) ? $input['temporary'] : [] as $key => $qty) {
+            if (! is_numeric($qty) || (float) $qty < 0) {
+                return $this->respondError('Temporary stock must be a number of 0 or more.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            if ((float) $qty > 0) {
+                $temporary[(string) $key] = (float) $qty;
+            }
+        }
 
         if (! in_array($mode, ['replace', 'append'], true)) {
             return $this->respondError('Choose whether to delete the existing inventory first or keep it.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -204,7 +215,7 @@ class ImportController extends BaseApiController
         }
 
         try {
-            $result = $service->commit($plan, $mode === 'replace', $types, $this->currentUser() ?? [], $check['leave_out']);
+            $result = $service->commit($plan, $mode === 'replace', $types, $this->currentUser() ?? [], $check['leave_out'], $temporary);
         } catch (DomainException $e) {
             return $this->respondError($e->getMessage(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         } catch (Throwable $e) {
@@ -225,6 +236,7 @@ class ImportController extends BaseApiController
                 'receipts'         => $result['receipts'] ?? 0,
                 'issues'           => $result['issues'] ?? 0,
                 'adjustments'      => $result['adjustments'] ?? 0,
+                'temporary'        => $result['temporary'] ?? [],
                 'category_changes' => $this->categoryChanges($plan, $types),
                 'guesses_accepted' => $accepted,
                 'left_out'         => $result['left_out'] ?? [],

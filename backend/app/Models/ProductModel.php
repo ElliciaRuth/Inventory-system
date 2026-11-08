@@ -38,7 +38,10 @@ class ProductModel extends Model
         $builder = $this->select('product_table.product_id, product_table.product, product_table.product_no, product_table.stock_no, product_table.product_description, product_table.measurement, product_table.archived_at, unit_table.unit,
                 product_table.type_id, COALESCE(type_of_product.type, "") AS type_name,
                 (SELECT COALESCE(SUM(bt.current_qty), 0) FROM batch_table bt
-                    WHERE bt.product_id = product_table.product_id AND bt.user_office_id <=> product_table.user_office_id) AS stock_on_hand', false)
+                    WHERE bt.product_id = product_table.product_id AND bt.user_office_id <=> product_table.user_office_id) AS stock_on_hand,
+                (SELECT COALESCE(SUM(bt.current_qty), 0) FROM batch_table bt
+                    WHERE bt.product_id = product_table.product_id AND bt.user_office_id <=> product_table.user_office_id
+                      AND bt.is_temporary = 1) AS temporary_stock', false)
             ->join('unit_table', 'product_table.unit_id = unit_table.unit_id', 'left')
             ->join('type_of_product', 'product_table.type_id = type_of_product.type_id', 'left')
             ->groupStart()
@@ -143,7 +146,13 @@ class ProductModel extends Model
              COALESCE(au.username, "") AS archived_by_name,
              COALESCE(unit_table.unit, "Deleted Unit") AS unit_name,
              COALESCE(SUM(batch_table.current_qty), 0) AS total_stock,
-             COALESCE(type_of_product.type, "") AS type_name'
+             (SELECT COALESCE(SUM(br.quantity - br.returned_qty), 0) FROM borrow_table br
+               WHERE br.product_id = product_table.product_id AND br.status != "returned") AS borrowed_qty,
+             (SELECT COUNT(*) FROM borrow_table br
+               WHERE br.product_id = product_table.product_id AND br.status != "returned") AS borrow_count,
+             COALESCE(SUM(CASE WHEN batch_table.is_temporary = 1 THEN batch_table.current_qty ELSE 0 END), 0) AS temporary_stock,
+             COALESCE(type_of_product.type, "") AS type_name',
+            false
         );
         $builder->join('batch_table', 'product_table.product_id = batch_table.product_id', 'left');
         $builder->join('unit_table', 'product_table.unit_id = unit_table.unit_id', 'left');

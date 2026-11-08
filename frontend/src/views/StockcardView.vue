@@ -32,10 +32,12 @@ const itemInfo = ref({})
 const batches = ref([]) // this product's batches that have an expiration date
 // Lending is kept off the stock card's rows; the stock on hand still goes down while it is out
 const stockOnHand = ref(0)
+const temporaryStock = ref(0) // part of the stock on hand added as temporary stock on an import: used first, not on the card
 const borrowed = ref([]) // open borrows of this product: who has it, how much is still out
 const lentQty = computed(() => borrowed.value.reduce((sum, b) => sum + Number(b.outstanding_qty || 0), 0))
 const todayIso = new Date().toISOString().slice(0, 10)
 const isOverdue = (b) => b.due_date && String(b.due_date).slice(0, 10) < todayIso
+const overdueCount = computed(() => borrowed.value.filter(isOverdue).length)
 
 // ── Expiry warnings ──
 // Tiers follow the product's own settings; the last 3 days always count as critical
@@ -487,6 +489,7 @@ async function loadStockcard({ quiet = false } = {}) {
       itemInfo.value = res.data.itemInfo || {}
       batches.value = res.data.batches || []
       stockOnHand.value = Number(res.data.stockOnHand || 0)
+      temporaryStock.value = Number(res.data.temporaryStock || 0)
       borrowed.value = res.data.borrowed || []
       stockcard.value = deduplicateById(res.data.stockcard || [], 'transaction_id')
       totalPages.value = res.data.totalPages || 1
@@ -784,26 +787,26 @@ onMounted(() => {
         <div class="sc-onhand" :class="{ 'has-lent': borrowed.length }">
           <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Stock on Hand</span>
           <div class="sc-onhand-qty">{{ qtyText(stockOnHand) }} <span>{{ itemInfo.unit_name }}</span></div>
+          <p v-if="temporaryStock > 0" class="sc-temp-note" title="Added as temporary stock on a stock card import. Stock-outs use it up first, and it is not on the stock card or the summary report.">
+            <Clock :size="12" /> Includes {{ qtyText(temporaryStock) }} {{ itemInfo.unit_name }} temporary stock, used first; not on the stock card
+          </p>
 
-          <div v-if="borrowed.length" class="sc-lent">
+          <router-link
+            v-if="borrowed.length"
+            :to="{ path: '/stock/borrows', query: { q: itemInfo.item_name } }"
+            class="sc-lent"
+            title="Open Borrowed Items for this item"
+          >
             <p class="sc-lent-head">
               <Handshake :size="14" />
-              <strong>{{ qtyText(lentQty) }} {{ itemInfo.unit_name }} lent out</strong>
-              <router-link to="/stock/borrows" class="sc-lent-link">Borrowed Items</router-link>
+              <span>Total borrowed: <strong>{{ qtyText(lentQty) }} {{ itemInfo.unit_name }}</strong></span>
+              <span class="sc-lent-link">View <ChevronRight :size="13" /></span>
             </p>
-            <ul class="sc-lent-list">
-              <li v-for="b in borrowed" :key="b.borrow_id">
-                <span class="sc-lent-who">
-                  {{ b.borrower_name }}<template v-if="b.borrower_unit"> · {{ b.borrower_unit }}</template>
-                </span>
-                <span class="sc-lent-qty">{{ qtyText(b.outstanding_qty) }} {{ itemInfo.unit_name }}</span>
-                <span v-if="b.due_date" class="sc-lent-due" :class="{ 'is-overdue': isOverdue(b) }">
-                  <CalendarClock :size="12" /> {{ isOverdue(b) ? 'Overdue since' : 'Due' }} {{ shortDate(b.due_date) }}
-                </span>
-              </li>
-            </ul>
+            <p class="sc-lent-count">
+              {{ borrowed.length }} {{ borrowed.length === 1 ? 'borrow' : 'borrows' }} not yet returned<template v-if="overdueCount"> · <span class="is-overdue"><CalendarClock :size="12" /> {{ overdueCount }} overdue</span></template>
+            </p>
             <p class="sc-lent-note">Lent stock is not on the stock card below: its Balance still counts it.</p>
-          </div>
+          </router-link>
         </div>
 
         <div>
@@ -1488,6 +1491,7 @@ onMounted(() => {
 }
 
 .sc-lent {
+  display: block;
   margin-top: 0.5rem;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border-subtle);
@@ -1495,6 +1499,15 @@ onMounted(() => {
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   font-size: 0.82rem;
+  color: var(--text-main);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sc-lent:hover,
+.sc-lent:focus-visible {
+  border-color: var(--color-info);
+  background: var(--bg-surface, var(--bg-subtle));
 }
 
 .sc-lent-head {
@@ -1502,56 +1515,47 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.2rem;
   color: var(--color-info);
 }
 
-.sc-lent-head strong {
+.sc-lent-head > span:first-of-type {
   color: var(--text-main);
 }
 
 .sc-lent-link {
+  display: inline-flex;
+  align-items: center;
   margin-left: auto;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--color-primary);
 }
 
-.sc-lent-list {
-  display: grid;
-  gap: 0.25rem;
+.sc-lent:hover .sc-lent-link {
+  text-decoration: underline;
+}
+
+.sc-lent-count {
   margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sc-lent-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.2rem 0.6rem;
-}
-
-.sc-lent-who {
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.sc-lent-qty {
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.sc-lent-due {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
   color: var(--text-muted);
 }
 
-.sc-lent-due.is-overdue {
+.sc-lent-count .is-overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   color: var(--color-danger);
   font-weight: 600;
+}
+
+.sc-temp-note {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .sc-lent-note {

@@ -451,6 +451,7 @@ class SummaryImportService
             ->where('user_office_id', $officeId)
             ->where('current_qty >', 0)
             ->where('date_received <=', $onDate)
+            ->where('is_temporary', 0) // the report's figures are the stock card's, not temporary stock
             ->orderBy('date_received', 'ASC')
             ->orderBy('batch_id', 'ASC')
             ->get()->getResultArray();

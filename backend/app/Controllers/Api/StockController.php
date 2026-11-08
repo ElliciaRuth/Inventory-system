@@ -53,6 +53,7 @@ class StockController extends BaseApiController
         $batches    = [];
         $stockcard  = [];
         $onHand     = 0.0;
+        $temporary  = 0.0;
         $borrowed   = [];
         $totalPages = 1;
         $total      = 0;
@@ -69,6 +70,14 @@ class StockController extends BaseApiController
 
             // Lent stock is not on the card's rows, but it is not on the shelf either
             $onHand   = $this->transactionModel->currentStock($productId, $officeId);
+            // Temporary stock (from a stock card import) is on the shelf but not on the card either
+            $tempQuery = db_connect()->table('batch_table')->selectSum('current_qty', 'qty')
+                ->where('product_id', $productId)->where('is_temporary', 1);
+            if ($officeId > 0) {
+                $tempQuery->where('user_office_id', $officeId);
+            }
+            $tempRow   = $tempQuery->get()->getRowArray();
+            $temporary = (float) ($tempRow['qty'] ?? 0);
             $borrowed = array_map(static fn (array $b): array => [
                 'borrow_id'       => (int) $b['borrow_id'],
                 'borrower_name'   => $b['borrower_name'],
@@ -90,6 +99,7 @@ class StockController extends BaseApiController
             'items'      => $this->productModel->listForSelect($officeId, $productId),
             'stockcard'  => $stockcard,
             'stockOnHand' => $onHand,
+            'temporaryStock' => $temporary,
             'borrowed'   => $borrowed,
             'total'      => $total,
             'page'       => $page,
@@ -635,7 +645,7 @@ class StockController extends BaseApiController
         $reason  = ($result['reason'] ?? '') !== '' ? " ({$result['reason']})" : '';
 
         $summary = match ($result['type']) {
-            'receipt'    => "Stock in: {$what} as batch {$batches}",
+            'receipt'    => (! empty($result['temporary']) ? 'Temporary stock in' : 'Stock in') . ": {$what} as batch {$batches}",
             'issue'      => "Issued {$what} from {$batches}",
             'borrow'     => "Lent {$what} to " . ($result['borrower'] ?? 'borrower') . " from {$batches}",
             'return'     => "Returned {$what}" . (isset($result['borrower']) ? " from {$result['borrower']}" : '') . (! empty($result['settled']) ? ' (borrow settled)' : ''),
@@ -678,6 +688,7 @@ class StockController extends BaseApiController
             'reason'             => $result['reason'] ?? null,
             'sub_product'        => $subProduct ?: null,
             'unit_cost'          => $type === 'receipt' && isset($payload['unit_cost']) ? (float) $payload['unit_cost'] : null,
+            'temporary_stock'    => ! empty($result['temporary']) ? 'Yes: used first, not on the stock card or summary report' : null,
             'date_received'      => $type === 'receipt' ? ($text('transaction_date') ?: date('Y-m-d')) : null,
             'manufacturing_date' => $type === 'receipt' ? ($text('manufacturing_date') ?: null) : null,
             'expiration_date'    => $type === 'receipt' ? ($text('expiration_date') ?: null) : null,

@@ -13,6 +13,10 @@ import { toast, errorMessage } from '../composables/useToast'
 
 const authStore = useAuthStore()
 const route = useRoute()
+// Borrowed Items is for levels 2–3 (see the router); others see the count without a link
+const canOpenBorrows = computed(() => authStore.levelId >= 2 && authStore.levelId <= 3)
+// No., code, name, category, unit + (Total Stock, Borrowed, Temporary | Archived) + Actions
+const tableColumns = computed(() => 5 + (showingArchived.value ? 1 : 3) + (authStore.canManageStock ? 1 : 0))
 const products = ref([])
 const productTypes = ref([])
 const loading = ref(true)
@@ -307,6 +311,8 @@ onMounted(() => {
               <th>Category</th>
               <th>Unit</th>
               <th v-if="!showingArchived" style="text-align: right;">Total Stock</th>
+              <th v-if="!showingArchived" style="text-align: right;">Borrowed</th>
+              <th v-if="!showingArchived" style="text-align: right;" title="Part of Total Stock that is temporary stock: used first, not on the stock card or summary report">Temporary</th>
               <th v-else>Archived</th>
               <th v-if="authStore.canManageStock" style="width: 170px; text-align: center;">Actions</th>
             </tr>
@@ -347,6 +353,29 @@ onMounted(() => {
                 >
                   {{ p.total_stock }} {{ p.unit_name }}
                 </span>
+              </td>
+              <td v-if="!showingArchived" data-label="Borrowed" style="text-align: right;">
+                <template v-if="Number(p.borrowed_qty) > 0">
+                  <component
+                    :is="canOpenBorrows ? 'router-link' : 'span'"
+                    :to="canOpenBorrows ? { path: '/stock/borrows', query: { q: p.product } } : undefined"
+                    class="badge badge-info pv-borrowed"
+                    :title="`${p.borrow_count} ${Number(p.borrow_count) === 1 ? 'borrow' : 'borrows'} not yet returned`"
+                  >
+                    {{ Number(p.borrowed_qty) }} {{ p.unit_name }}
+                  </component>
+                </template>
+                <span v-else class="pv-borrowed-none">—</span>
+              </td>
+              <td v-if="!showingArchived" data-label="Temporary" style="text-align: right;">
+                <span
+                  v-if="Number(p.temporary_stock) > 0"
+                  class="badge badge-warning pv-borrowed"
+                  title="Temporary stock: used first, not on the stock card or summary report"
+                >
+                  {{ Number(p.temporary_stock) }} {{ p.unit_name }}
+                </span>
+                <span v-else class="pv-borrowed-none">—</span>
               </td>
               <td v-if="authStore.canManageStock && showingArchived" class="cell-actions" style="text-align: center;">
                 <div style="display: inline-flex; gap: 0.4rem;">
@@ -394,12 +423,12 @@ onMounted(() => {
             </tr>
 
             <tr v-if="loading">
-              <td :colspan="authStore.canManageStock ? 7 : 6" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td :colspan="tableColumns" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 Loading inventory catalog...
               </td>
             </tr>
             <tr v-else-if="!paginatedProducts.length">
-              <td :colspan="authStore.canManageStock ? 7 : 6" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+              <td :colspan="tableColumns" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 {{ showingArchived ? (searchQuery || selectedType ? 'No archived products match.' : 'No archived products.') : 'No matching products found.' }}
               </td>
             </tr>
@@ -528,6 +557,21 @@ onMounted(() => {
 .pv-archived-note svg {
   flex-shrink: 0;
   margin-top: 0.15rem;
+}
+
+.pv-borrowed {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+a.pv-borrowed:hover {
+  text-decoration: underline;
+}
+
+.pv-borrowed-none {
+  color: var(--text-subtle);
 }
 
 .pv-archived-when {

@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import {
   X, FileSpreadsheet, Upload, AlertTriangle, CheckCircle2, Info, Trash2, Plus, ShieldCheck, SpellCheck, PencilLine,
-  Lock, Eye, EyeOff, OctagonAlert, RotateCcw,
+  Lock, Eye, EyeOff, OctagonAlert, RotateCcw, Clock,
 } from 'lucide-vue-next'
 import { importApi } from '../api/import'
 import StockcardCardEditor from './StockcardCardEditor.vue'
@@ -35,6 +35,10 @@ const password = ref('')
 const showPassword = ref(false)
 const passwordError = ref('')
 const types = ref({}) // product key → type; starts as the detected type
+// "Add temporary stock": product key → quantity added after the file's entries. Stock-outs take it
+// first; it never shows on the stock card or the summary report.
+const addTemporary = ref(false)
+const temporary = ref({})
 const setAllType = ref('')
 const result = ref(null)
 
@@ -118,6 +122,27 @@ const productOfCard = computed(() => {
 const errorProductKeys = computed(() => new Set(errors.value.map((i) => productOfCard.value[i.card]).filter(Boolean)))
 const isLeftOut = (p) => skipErrors.value && errorProductKeys.value.has(p.key)
 const productsToImport = computed(() => okProducts.value.filter((p) => !isLeftOut(p)))
+
+// Only positive quantities of products that are imported are sent
+const temporaryToAdd = computed(() => {
+  if (!addTemporary.value) return {}
+  const out = {}
+  for (const p of productsToImport.value) {
+    const qty = Number(temporary.value[p.key])
+    if (Number.isFinite(qty) && qty > 0) out[p.key] = qty
+  }
+  return out
+})
+const temporaryInvalid = computed(() =>
+  addTemporary.value && okProducts.value.some((p) => {
+    const v = temporary.value[p.key]
+    return v !== undefined && v !== '' && v !== null && !(Number(v) >= 0)
+  })
+)
+const temporarySummary = computed(() => {
+  const n = Object.keys(temporaryToAdd.value).length
+  return n ? `${n} product${n === 1 ? '' : 's'}` : ''
+})
 
 const GROUPS = {
   date: { name: 'Date guesses', hint: 'A missing day, month or year was filled in from the rows around it.' },
@@ -253,6 +278,7 @@ const canImport = computed(() =>
   !busy.value &&
   !blocked.value &&
   productsToImport.value.length > 0 &&
+  !temporaryInvalid.value &&
   (mode.value === 'append' || mode.value === 'replace')
 )
 
@@ -268,6 +294,8 @@ function reset() {
   closePasswordPrompt(true)
   types.value = {}
   setAllType.value = ''
+  addTemporary.value = false
+  temporary.value = {}
   skipErrors.value = false
   accepted.value = {}
   showReportWarning.value = false
@@ -366,6 +394,7 @@ async function startImport() {
       ['Left out (problems)', okProducts.value.length - productsToImport.value.length || ''],
       ['Offices', officeList.value],
       ['Categories', typeSummary.value],
+      ['Temporary stock', temporarySummary.value],
     ],
     confirmText: 'Import',
   })
@@ -391,6 +420,7 @@ async function runImport() {
       mode: mode.value,
       password: mode.value === 'replace' ? password.value : undefined,
       types: types.value,
+      temporary: temporaryToAdd.value,
       accept: assumptionGroups.value.filter(isAccepted).map((g) => g.group),
       skip_errors: skipErrors.value,
     })
@@ -549,6 +579,16 @@ function num(value) {
               </datalist>
             </div>
           </div>
+          <label class="import-option import-temp-option" :class="{ 'is-selected': addTemporary }">
+            <input v-model="addTemporary" type="checkbox" />
+            <div>
+              <strong><Clock :size="14" /> Add temporary stock</strong>
+              <small>
+                Enter a quantity per product below. It is added after the file's entries, as of today.
+                Stock-outs use it up before the rest of the stock, and it does not show on the stock card or the summary report.
+              </small>
+            </div>
+          </label>
           <div class="import-hint">
             <PencilLine :size="13" />
             <span>
@@ -574,6 +614,7 @@ function num(value) {
                   <th style="text-align: right;">In</th>
                   <th style="text-align: right;">Out</th>
                   <th style="text-align: right;">Balance</th>
+                  <th v-if="addTemporary" style="text-align: right;">Temporary</th>
                   <th>Period</th>
                 </tr>
               </thead>
@@ -617,6 +658,20 @@ function num(value) {
                   <td style="text-align: right;">{{ p.receipts }}</td>
                   <td style="text-align: right;">{{ p.issues + (p.adjustments || 0) }}</td>
                   <td style="text-align: right; font-weight: 700;">{{ num(p.balance) }}</td>
+                  <td v-if="addTemporary" style="text-align: right;">
+                    <input
+                      v-model="temporary[p.key]"
+                      type="number"
+                      min="0"
+                      step="any"
+                      inputmode="decimal"
+                      class="form-input import-temp-input"
+                      :class="{ 'is-invalid': temporary[p.key] !== undefined && temporary[p.key] !== '' && !(Number(temporary[p.key]) >= 0) }"
+                      :disabled="isLeftOut(p)"
+                      placeholder="0"
+                      :aria-label="`Temporary stock for ${p.name}`"
+                    />
+                  </td>
                   <td class="import-muted" style="white-space: nowrap;">{{ p.first_date }} → {{ p.last_date }}</td>
                 </tr>
               </tbody>
@@ -773,6 +828,11 @@ function num(value) {
             <div><strong>{{ result.issues }}</strong><span>issues</span></div>
             <div v-if="result.adjustments"><strong>{{ result.adjustments }}</strong><span>count adjustments</span></div>
           </div>
+          <p v-if="Object.keys(result.temporary || {}).length" class="import-muted">
+            <Clock :size="13" /> Temporary stock added:
+            {{ Object.entries(result.temporary).map(([name, qty]) => `${name} (${num(qty)})`).join(', ') }}.
+            It is used up first and is not on the stock card or the summary report.
+          </p>
           <p v-if="result.already_imported" class="import-muted">
             {{ result.already_imported }} rows were already in the system from an earlier import and were skipped.
           </p>
@@ -802,6 +862,9 @@ function num(value) {
           </button>
           <span v-if="blocked" class="import-locked-note">
             <Lock :size="13" /> {{ lockReason }} to import
+          </span>
+          <span v-else-if="temporaryInvalid" class="import-locked-note">
+            <AlertTriangle :size="13" /> Temporary stock can't be negative
           </span>
           <button
             type="button"
@@ -1076,6 +1139,23 @@ function num(value) {
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
   font-size: 0.82rem;
+}
+
+.import-temp-option {
+  margin-bottom: 0.6rem;
+}
+
+.import-temp-input {
+  width: 90px;
+  margin-left: auto;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.import-temp-input.is-invalid {
+  border-color: var(--color-danger);
 }
 
 .import-type-select {
