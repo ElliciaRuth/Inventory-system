@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { Download, Upload, PencilLine, ExternalLink } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { Download, Upload, PencilLine, ExternalLink, FileDown } from 'lucide-vue-next'
 import { reportsApi } from '../api/reports'
 import { stockApi } from '../api/stock'
 import { useAuthStore } from '../stores/authStore'
@@ -23,6 +23,7 @@ const SECTIONS = ['purchase', 'used', 'spoiled']
 
 const authStore = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 const isImportOpen = ref(false)
 
 // Filters may come in the address (coming back from Export keeps the month and type that were open)
@@ -50,6 +51,21 @@ function exportLink(typeName) {
   if (Number(filters.type_id) > 0) query.back_type = Number(filters.type_id)
   return { name: 'export-summary', query }
 }
+
+// Export All: every product type card on screen in one file, one page per type
+// (type 0 = all types; a chosen Product Type filter or search narrows it the same as the page)
+function exportAll() {
+  const query = { type_id: Number(filters.type_id) || 0, month: `${filters.year}-${filters.month}` }
+  if (filters.search.trim()) query.search = filters.search.trim()
+  if (Number(filters.type_id) > 0) query.back_type = Number(filters.type_id)
+  router.push({ name: 'export-summary', query })
+}
+
+const exportAllTitle = computed(() =>
+  groups.value.length > 1
+    ? `Preview, edit and download all ${groups.value.length} product types for ${periodLabel.value} in one file (one page per type)`
+    : `Preview, edit and download the report for ${periodLabel.value}`
+)
 
 const periodLabel = computed(() => `${MONTH_NAMES[Number(filters.month) - 1]} ${filters.year}`)
 const narrowed = computed(() => filters.search.trim() !== '' || Number(filters.type_id) > 0)
@@ -273,7 +289,7 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
         <h1 class="hero-title">Inventory Report</h1>
         <p class="hero-subtitle">Beginning, purchase, usage, spoiled and ending balances for the selected month.</p>
       </div>
-      <div style="display:flex;gap:.5rem;">
+      <div class="report-hero-actions">
         <button
           v-if="authStore.levelId >= 2"
           class="btn btn-secondary"
@@ -281,6 +297,18 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
         >
           <Upload :size="15" />
           <span>Import from Excel</span>
+        </button>
+        <button
+          v-if="canEdit"
+          type="button"
+          class="btn btn-primary"
+          :disabled="!groups.length"
+          :title="groups.length ? exportAllTitle : `No reports for ${periodLabel} to export`"
+          @click="exportAll"
+        >
+          <FileDown :size="15" />
+          <span>Export All</span>
+          <span v-if="groups.length > 1" class="export-all-count">{{ groups.length }}</span>
         </button>
       </div>
     </div>
@@ -516,6 +544,27 @@ useAutoReload(() => (changeCount.value > 0 ? undefined : load()))
 </template>
 
 <style scoped>
+.report-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* How many product types (pages) Export All puts in the file */
+.export-all-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .report-table th,
 .report-table td {
   white-space: nowrap;

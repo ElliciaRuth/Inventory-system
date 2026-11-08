@@ -1,13 +1,13 @@
 # BSU Integrated Inventory Monitoring System
 
-[![Version](https://img.shields.io/badge/version-2.7.3-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
-[![Release](https://img.shields.io/badge/release-October%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)](https://github.com/ElliciaRuth/Inventory-system)
+[![Release](https://img.shields.io/badge/release-November%202026-green.svg)](https://github.com/ElliciaRuth/Inventory-system)
 [![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![CodeIgniter](https://img.shields.io/badge/CodeIgniter-4.7-EF4423.svg?logo=codeigniter&logoColor=white)](https://codeigniter.com/)
 [![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 
-> **Current Version:** `v2.7.3` (Production Release — October 2026)
+> **Current Version:** `v2.8.0` (Production Release — November 2026)
 
 An integrated inventory, stock-card, and stock-out monitoring system engineered specifically for Benguet State University (BSU) production and operating units, including the **Bakery Project**, the **Food Processing Center (FPC)**, and administrative offices.
 
@@ -147,6 +147,8 @@ graph TD
 
 The system enforces automated batch selection across all outgoing inventory movements (manual issues, approved staff requests, and borrowing).
 
+**Temporary stock first:** batches marked `batch_table.is_temporary = 1` (a Stock In ticked *Temporary stock*, or *Add temporary stock* on a stock card import; batch numbers `T-…`) come before every other batch in every mode, whatever price variant they were received at. Their movements are left out of the stock card and the Summary Report (`TransactionModel::ON_STOCK_CARD_SQL`), and returns and the report's cost overrides never land on them.
+
 #### 1. Depletion Modes (`planDepletion`)
 - **`MODE_ISSUE` (Standard Issuance & Staff Stock-Out):**
   - Selects only batches where `current_qty > 0` AND (`expiration_date IS NULL` OR `expiration_date >= CURDATE()`).
@@ -270,11 +272,12 @@ $$\text{Variance} = \text{Counted Quantity} - \text{System Book Balance}$$
 
 - **Zero Variance ($|\text{Variance}| < 0.0001$):** Ignored; no ledger entries generated.
 - **Shortage ($\text{Variance} < 0$):**
-  - Triggers automated `depleteBatches()` with quantity $|\text{Variance}|$ under `MODE_ADJUST` (expired batches depleted first).
+  - Triggers automated `depleteBatches()` with quantity $|\text{Variance}|$ under `MODE_ADJUST` (expired batches depleted first, then temporary stock).
   - Recorded as `adjust_out` with reason `"Physical Count"`.
 - **Overage ($\text{Variance} > 0$):**
   - Triggers automated `addToLatestBatch()` with quantity $\text{Variance}$.
   - Recorded as `adjust_in` with reason `"Physical Count"`.
+- **Temporary Stock:** the System Qty includes temporary stock (shown in its own *Temporary* column): it is counted like any stock but never shows on the stock card or the Summary Report.
 - **Session Reference:** All offsetting entries created during the reconciliation session share a unified reference string:
   $$\text{COUNT}-\{\text{YYYYMMDD}\}-\{\text{His}\}$$
 
@@ -513,7 +516,8 @@ The notification system computes dynamic alerts across 7 operational categories:
 - **Paper Sizing:** Configurable for A4, Philippine Long Bond (Folio 8.5" $\times$ 13"), and Short Letter (8.5" $\times$ 11").
 - **CSV Formula Injection Sanitization:** To prevent spreadsheet formula injection attacks, cells containing leading characters `=, +, -, @, \t, \r` are automatically escaped with a leading apostrophe (`'`).
 - **Summary Report Template:** Every page of the summary report (PDF, Word and the editor) carries the University Business Affairs Office heading: the logos from [`backend/public/report-logos/`](backend/public/report-logos/) (`bagong-pilipinas.png` and `bsu-seal.png` on the left, `bsu-food-products.png` on the right; a missing file is left out), *Republic of the Philippines / Benguet State University / La Trinidad, 2601 Benguet / University Business Affairs Office*, the project (`BAKERY PROJECT` or `FOOD PROCESSING CENTER`, from the user's office), *Inventory for the month of …* and the product type, then the table with a CODE (stock no.) column and, under it, the *Prepared by / Verified by / Noted by* signatures. Managers set the signatories of their office in **Settings → Report Signatories** (`GET/POST api/settings/signatories`, stored per office in `system_settings`); the Bakery starts with its form's names, other offices with blank lines to sign on. The heading uses the *Old English Text MT* and *Monotype Corsiva* fonts that Microsoft Office installs; the PDF takes them from the Windows font folder (registered once into `writable/dompdf-fonts`) and falls back to a serif font where they are missing. The Word download is a single-file web page (MHTML) so its logos show in Word.
-- **Edit Summary Report Before Export:** *Export Summary → Preview & Edit Report* loads the generated report into a TinyMCE editor so users can fix wording or add remarks, signatories and pictures, then download the edited copy as PDF or Word. The edited HTML is sanitized on the server (allow-listed tags and attributes only; pictures must be inline PNG/JPEG/GIF) before Dompdf renders it. TinyMCE is self-hosted: it is bundled from the `tinymce` npm package into its own chunk; its skin and the report's styles are linked as stylesheets (`GET api/export/summary/editor-style`), never injected as `<style>` blocks, which the server's Content-Security-Policy (`style-src 'self'`) blocks ([`ReportEditor.vue`](frontend/src/components/ReportEditor.vue)), loaded only when the editor is opened, so it works offline and needs no API key. It runs under TinyMCE's GPL v2+ license (`license_key: 'gpl'`).
+- **Where Exports Start:** there are no separate export pages in the menu. On the **Summary Report**, each product type table has its own **Export** button, and **Export All** in the page header exports every product type shown (one page per type, in one file; `type_id = 0`, narrowed by the page's product type filter and search). On the **Stockcard Ledger**, **Export** in the Stock Item bar exports the open item, and the button under the Item Navigator's search exports the chosen category (or all items). Both open a *Preview & Edit* page (`/export/summary`, `/export/stockcard`) with the period, order and filters of the page they came from; *Back to Report* / *Back to Stockcard* return to it unchanged.
+- **Edit Summary Report Before Export:** *Preview & Edit Report* loads the generated report into a TinyMCE editor so users can fix wording or add remarks, signatories and pictures, then download the edited copy as PDF or Word. The edited HTML is sanitized on the server (allow-listed tags and attributes only; pictures must be inline PNG/JPEG/GIF) before Dompdf renders it. TinyMCE is self-hosted: it is bundled from the `tinymce` npm package into its own chunk; its skin and the report's styles are linked as stylesheets (`GET api/export/summary/editor-style`), never injected as `<style>` blocks, which the server's Content-Security-Policy (`style-src 'self'`) blocks ([`ReportEditor.vue`](frontend/src/components/ReportEditor.vue)), loaded only when the editor is opened, so it works offline and needs no API key. It runs under TinyMCE's GPL v2+ license (`license_key: 'gpl'`).
 - **Save Before Export:** edits in the editor are kept as a draft until **Save Changes** (or Ctrl+S inside the editor); PDF Print and MS Word use the last saved version. Exporting with unsaved changes asks first (*Save and export* or *Keep editing*), and leaving the page with edits asks too, because edits live only on that page until downloaded. The edited report is sent back as one large text field, which the request guard allows on this route only (section 5.1).
 
 ---
@@ -686,6 +690,7 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 
 ### 4.2 Recording Stock In & Issuances
 - **Stock In (Receipt):** Custodian opens Stockcard $\rightarrow$ **Record Stock**. Selects *Stock In*. Specifies delivery date (can be backdated), quantity, unit cost, and optional expiration/manufacturing dates. System creates a price variant copy if needed, generates a unique batch code and SVG barcode, and updates ledger balances.
+- **Temporary Stock:** a Stock In can be ticked *Temporary stock*: it is used up before the other batches and never shows on the stock card or the Summary Report. The Product List (*Temporary* column), the Stockcard Ledger (under Stock on Hand) and Physical Count show how much there is.
 - **Stock Out (Issuance):** Custodian selects *Issue*, chooses price variant copy, enters quantity, and previews the real-time FIFO Batch Plan before confirming deduction.
 
 ### 4.3 Processing Staff Stock-Out Requests
@@ -716,7 +721,8 @@ To enable secure, warning-free HTTPS browsing across devices on your local netwo
 5. Select commit mode:
    - **Keep existing data:** Appends new lines while skipping existing rows via SHA-256 fingerprints.
    - **Delete existing inventory first:** Prompts for Manager password, creates pre-wipe safety backup, and replaces office records.
-6. The Stock Card refreshes once and stays on the open item (the first item if the import removed it).
+6. Optionally tick **Add temporary stock** and enter a quantity per product: it is added after the file's entries, as of today, used up first and kept off the stock card and the Summary Report (`temporary` on commit).
+7. The Stock Card refreshes once and stays on the open item (the first item if the import removed it).
 
 Closing the import window during the preview (the X, or a click outside it) asks **Discard this import?** first: nothing has been imported at that point, but the preview and any corrections made in it are lost.
 
@@ -725,12 +731,13 @@ Closing the import window during the preview (the X, or a click outside it) asks
 2. **Summary Report:** choose the month (the report reloads as soon as a filter changes; the filters are locked while there are unsaved edits), turn on **Edit Mode** and change a Purchase, Used or Spoiled quantity or cost. A product with several entries in the month shows one line per entry under it.
 3. Click **Save changes** in the bar at the bottom of the screen (or press Ctrl+S). Everything is saved together; if one change is not possible (stock would go below 0, a future date, a borrow-linked quantity), nothing is saved and the bar says why. The other page shows the change at once.
 
-### 4.8 Exporting the Summary Report
+### 4.8 Exporting the Summary Report & Stock Cards
 1. Managers set the names once in **Settings → Report Signatories** (Prepared by, Verified by, Noted by).
-2. Open **Export Summary**, choose the months, product type and paper size.
-3. To download as is, click **PDF Print** or **MS Word**.
-4. To change the report first, click **Preview & Edit Report**, edit it, click **Save Changes**, then download. Exporting with unsaved changes asks to save first.
-5. Edits in the editor change the downloaded copy only, never the stock: they are kept while the page is open and sent with the export. To correct a figure, use Edit Mode on the Summary Report or the Stock Card, then **Rebuild Report from Data**.
+2. Open **Summary Report** and choose the month and year (optionally a product type or a search).
+3. Click **Export** on a product type's table for that type alone, or **Export All** at the top of the page for every product type shown, one page each, in one file. The badge on Export All is the number of product types; it is disabled when the month has no reports.
+4. The **Preview & Edit Report** page opens with the report in the editor. Change it if needed, click **Save Changes**, then choose the paper size and click **PDF Print** or **MS Word**. Exporting with unsaved changes asks to save first.
+5. Edits in the editor change the downloaded copy only, never the stock: they are kept while the page is open and sent with the export. To correct a figure, use Edit Mode on the Summary Report or the Stock Card, then **Rebuild from Data**.
+6. Stock cards work the same way from the **Stockcard Ledger**: set the Period and Order, then **Export** in the Stock Item bar (one item) or the button under the Item Navigator's search (a category, or all items). A month of *All years* can't be exported.
 
 ### 4.9 Disaster Recovery: Backup & Restore
 1. Open **Office Settings $\rightarrow$ Data Backup & Restore**.
@@ -816,7 +823,7 @@ erDiagram
 - `user_office_table`: Operating units (BAKERY, FPC, administrative units).
 - `product_table`: Master catalog items, product number, stock number (`stock_no`, the stock code: typed or generated), unit, entity, reorder point, alert thresholds (`expiry_warning_days`, `expiry_danger_days`), archiving flags (`archived_at`, `archived_by`, `archive_reason`).
 - `product_copy_table`: Price-variant sub-products (`unit_cost`, `label`).
-- `batch_table`: Batch records, unique batch number (`batch_no`), Code 128 payload (`barcode_value`), current quantity (`current_qty`), manufacturing date, expiration date, date received.
+- `batch_table`: Batch records, unique batch number (`batch_no`), Code 128 payload (`barcode_value`), current quantity (`current_qty`), manufacturing date, expiration date, date received, `is_temporary` (temporary stock: used first, kept off the stock card and Summary Report; migration `AddTemporaryBatches`).
 - `transaction_table`: Core ledger movements, quantity (`transaction_qty`), unit cost (`transaction_unit_cost`), transaction date, linked batch ID, copy ID, reference ID, office ID, user ID, adjustment reason ID, borrow ID.
 - `temp_stockout` & `temp_stockout_item`: Stock-out request cart, status (`draft`, `pending`, `approved`, `rejected`), quantities, decision timestamps, decider ID, feedback reason.
 - `borrow_table`: Inter-unit lending tracking, borrower name, borrowing unit, quantity, returned quantity, status (`outstanding`, `partial`, `returned`), due date.
@@ -870,7 +877,7 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `POST api/products/barcodes/generate` | Level 2 | Generates barcode payload for finished goods. |
 | **Stockcard** | `GET api/stockcard` | Level 2 | Retrieves paginated stock card ledger rows with running balances. |
 | | `GET api/stock/options` | Level 2 | Returns stock form dropdowns: items, offices, references, adjustment reasons, copies. |
-| | `POST api/stock/add` | Level 2 | Records stock movements (receipt, issue, borrow, return, adjust in/out). |
+| | `POST api/stock/add` | Level 2 | Records stock movements (receipt, issue, borrow, return, adjust in/out). `temporary: true` on a receipt adds temporary stock. |
 | | `POST api/stock/edit-transaction` | Level 2 | Corrects transaction quantity, reference, or office with audit diff logging. |
 | | `POST api/stock/delete-transaction`| Level 2 | Reverses and deletes transaction if batch stock has not been depleted. |
 | | `POST api/stock/edit-report-cost` | Level 2 | Overrides unit cost on transaction for reporting purposes. |
@@ -890,7 +897,8 @@ Authentication is managed through secure HTTP session cookies (`ci_session`).
 | | `GET api/barcode/lookup` | Level 1 | Resolves product or batch details from hardware scanner value. |
 | **Exports** | `GET/POST api/export/stockcard` | Level 2 | Generates stockcard export in PDF, Microsoft Word, or CSV/Excel format. |
 | | `GET api/export/stockcard/options`| Level 2 | Product dropdowns and date range options for export. |
-| | `POST api/export/summary` | Level 2 | Streams inventory summary report in PDF or Word (or the edited `html`); `format: preview` returns the report pages for the editor. |
+| | `GET api/export/stockcard/editor-style` | Level 2 | The stock card's styles as a stylesheet, linked by the stock card editor. |
+| | `POST api/export/summary` | Level 2 | Streams inventory summary report in PDF or Word (or the edited `html`); `format: preview` returns the report pages for the editor. `type_id: 0` gives every product type, one page each (*Export All*). |
 | | `GET api/export/summary/options` | Level 2 | Options for summary report export. |
 | | `GET api/export/summary/editor-style` | Level 2 | The summary report's styles as a stylesheet, linked by the report editor. |
 | **Office Settings** | `GET api/settings` | Level 3 | Lists auxiliary records (entities, units, references, categories, users). |
@@ -984,7 +992,8 @@ The script stops before changing anything when the version is not higher than th
 
 | Version | Release Date | Summary of Major Changes |
 |---|---|---|
-| **`v2.7.3`** *(Current)* | October 2026 | **Stock Card Import:**<br>• Dates that would make the stock negative are caught before import. A card can add up row by row while a mistyped date (e.g. an issue dated before the receipt it takes from) makes the stock card balance and the Summary Report's beginning qty negative, because those count the entries by date. Such rows are now *Problems to fix* (correct the date or leave the product out), and a **Recheck these dates** pop-up lists each card with the rows and dates to check.<br>**Help:** the *Import stock cards from Excel* guide topic and the user manual (`docs/`) explain the pop-up. |
+| **`v2.8.0`** *(Current)* | November 2026 | **Summary Report — Export All:**<br>• **Export All** at the top of the Summary Report exports every product type shown in one file, one page per type, through the same *Preview & Edit Report* page (PDF Print or MS Word). A badge shows how many product types it holds; it follows the page's product type filter and search, and is disabled for a month with no reports. The per-table **Export** buttons stay.<br>**Exports start where the report is read:**<br>• *Export Stockcard* and *Export Summary* left the menu. Stock cards are exported from the **Stockcard Ledger** (Export in the Stock Item bar for one item, or under the Item Navigator's search for a category or all items); the Summary Report from its product type tables. Both open a *Preview & Edit* page with the period and filters already chosen; *Back to Report* / *Back to Stockcard* return to the same view.<br>• The stock card can be edited before download like the Summary Report (*Preview & Edit Stock Card*, `GET api/export/stockcard/editor-style`).<br>**Temporary Stock:**<br>• A Stock In can be marked *Temporary stock*, and a stock card import can *Add temporary stock* per product. Temporary batches (`T-…`) are used up before all other stock and never show on the stock card or the Summary Report. Migration `AddTemporaryBatches` adds `batch_table.is_temporary`.<br>• The Product List shows **Borrowed** (links to Borrowed Items) and **Temporary** columns; Physical Count shows the temporary part of the System Qty; the Stockcard Ledger shows lent and temporary stock under Stock on Hand.<br>• Borrows and returns are no longer counted as *Used* on the Summary Report (lending stays off the report, as on the stock card).<br>**Audit Log:**<br>• Stock movements log every detail (movement, stock no., quantity, sub-product, dates, borrower, office, reference, stock before and after).<br>• Blocked requests (`security.*`) are worded for office staff, with the technical message kept for IT.<br>**Fixes:**<br>• Exporting an edited stock card or Summary Report could fail with an error once the report was long: the request check now reads JSON bodies as JSON instead of as form fields (`App\Filters\InvalidChars`).<br>**Help:** guide topics and the user manual (`docs/`) describe Export All, the new export flow and temporary stock.<br>**Installer:** one new migration (`AddTemporaryBatches`); update over 2.7.3 with the new `BSU-Inventory-Setup.exe`. |
+| **`v2.7.3`** | October 2026 | **Stock Card Import:**<br>• Dates that would make the stock negative are caught before import. A card can add up row by row while a mistyped date (e.g. an issue dated before the receipt it takes from) makes the stock card balance and the Summary Report's beginning qty negative, because those count the entries by date. Such rows are now *Problems to fix* (correct the date or leave the product out), and a **Recheck these dates** pop-up lists each card with the rows and dates to check.<br>**Help:** the *Import stock cards from Excel* guide topic and the user manual (`docs/`) explain the pop-up. |
 | **`v2.7.2`** | October 2026 | **Safeguards:**<br>• Every form window asks *Discard your changes?* before Cancel, the X or a click outside throws away what was entered: Stock Movement / Transaction (once anything is typed, picked or scanned), Edit Stockcard Entry, the stock card editor in the import preview, both Excel imports (once a file is chosen), the Settings and Admin office add / edit windows, and the archive and reject windows (once a reason is typed). Nothing is asked when nothing was changed.<br>**Removed:**<br>• Closing the tab or window while signed in no longer asks first (the browser's *Leave site?* dialog added in 2.7.1). |
 | **`v2.7.1`** | October 2026 | **Fixes & Safeguards:**<br>• Stock card import: a card that opens by carrying forward another card's balance (e.g. "Pbrittle 1", "Balance forwarded") is a continuation of that card even when the dates overlap. It was treated as a separate lot, and its balance check reported a false problem (e.g. *Excel balance is 59, the entries add up to -36*); the stock imported is unchanged.<br>• Stock card import: the *Accept* buttons of the guess groups stay on the right of their text.<br>• Product form: Cancel, the X or a click outside asks *Discard your changes?* when something was changed; *Add New Product* opens empty each time.<br>• Closing the tab or window while signed in asks first (the browser's own *Leave site?* dialog), a reminder to sign out on shared computers. |
 | **`v2.7.0`** | October 2026 | **Live Updates & Speed:**<br>• Pages and the bell refresh by themselves within seconds of anyone's change (`GET api/sync` change counters, table `sync_version`); new stock-out requests, decisions and sign-ups pop up. The full background reloads run once a minute as a safety net, and background refreshes no longer flash "Loading".<br>• Each page is downloaded the first time it is opened: the first load is about half the size.<br>**Stock Card Import:**<br>• *Problems to fix* (negative stock, balances that don't add up, unreadable cards) are separated from *Guesses to confirm* (date guesses, dates out of order, values in the wrong column, merged cards, stock corrections, units filled in). Guesses are accepted with one click per group or *Accept all guesses*; products with problems can be left out and the rest imported. The server checks the same rules (`accept`, `skip_errors`).<br>• Dates written as `2026-09-02` are read.<br>**Stock Codes:**<br>• The product's Stock Code is one field (`product_no`, text). Migration `UseStockCodeAsProductNo` copies each existing product's stock code into it. Editing a product never rewrites its stock code unless the code itself is changed (it was overwritten with the old number before).<br>• Batch Barcodes searches by stock code; a code is shown once where product number and stock code are the same.<br>**Fixes:**<br>• Adding a product with a text stock code failed.<br>• Technical staff: the dead *Settings* menu link is gone; waiting sign-ups show on User Management.<br>• The browser tab shows the BSU seal instead of the default Vite icon.<br>• Conflict markers left by a merge in the product form, the Summary Report and its import window.<br>**Help:** new guide topics for importing a Summary Report and editing it before download; user manual (`docs/`) updated with screenshots.<br>**Installer:** three new migrations (`ChangeProductNoToVarchar`, `CreateSyncVersion`, `UseStockCodeAsProductNo`); update over 2.6.0 with the new `BSU-Inventory-Setup.exe`. |
@@ -1001,4 +1010,4 @@ The script stops before changing anything when the version is not higher than th
 
 ---
 
-*Benguet State University Integrated Inventory Monitoring System v2.7.3 · Engineered for BSU Operating & Production Units.*
+*Benguet State University Integrated Inventory Monitoring System v2.8.0 · Engineered for BSU Operating & Production Units.*

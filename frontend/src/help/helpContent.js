@@ -222,6 +222,7 @@ export const TOPICS = [
     tips: [
       'To fix a mistake, use the edit button on the ledger row. Every edit and deletion is kept in the audit log with the before and after values.',
       'To fix several rows at once, turn on "Edit Mode": the date, reference, office, quantity, price and expiry cells become editable, and the trash button marks a row for deletion. Click "Save changes" in the bar at the bottom of the screen (or press Ctrl+S). Everything is saved together, or nothing is if a change is not possible.',
+      'On a Stock In, tick "Temporary stock" for stock that should be used up first. Stock-outs take it before the other batches, and it never shows on the stock card or the Summary Report.',
     ],
     to: '/stockcard',
   },
@@ -243,6 +244,7 @@ export const TOPICS = [
     tips: [
       'Products left out can be imported later: correct the file and import it again with "Keep existing data". Rows already imported are skipped.',
       'Replacing the existing inventory of your office before importing needs a manager\'s password.',
+      'To add temporary stock with the import, tick "Add temporary stock" and enter a quantity per product. It is added as of today, used up before the rest of the stock, and kept off the stock card and the Summary Report.',
     ],
     to: '/stockcard',
   },
@@ -260,7 +262,7 @@ export const TOPICS = [
     ],
     tips: [
       'Lending lowers the Stock on Hand right away, but the borrow and its return are not written on the stock card (on screen or exported): its Balance keeps counting lent stock as the office’s.',
-      'On the Stockcard Ledger, the item details show the Stock on Hand with the borrows still out listed under it: who has it, how much, and when it is due.',
+      'On the Stockcard Ledger, the item details show the total still borrowed under the Stock on Hand, with how many borrows are open or overdue. Click it to open Borrowed Items for that item; the Product List has a Borrowed column too.',
     ],
     to: '/stock/borrows',
   },
@@ -274,8 +276,9 @@ export const TOPICS = [
     steps: [
       'Count what is actually on the shelf.',
       'Open Menu → Physical Count. Each counted quantity starts at the system quantity; change only the products that differ from the shelf.',
-      'The system shows the difference. Reconcile to record an Adjust Out for shortages (expired batches first) or an Adjust In for overages, with the reason "Physical Count".',
+      'The system shows the difference. Reconcile to record an Adjust Out for shortages (expired batches first, then temporary stock) or an Adjust In for overages, with the reason "Physical Count".',
     ],
+    tips: ['The System Qty includes temporary stock, shown in its own column: it is counted here, but never shows on the stock card or the Summary Report.'],
     to: '/stock/count',
   },
 
@@ -337,7 +340,7 @@ export const TOPICS = [
     summary: 'Beginning, purchases, usage, spoilage and ending balance.',
     steps: [
       'Open Menu → Summary Report and choose the product type, month and year. The report updates as soon as you change a filter.',
-      'To download it, click "Export" at the top right of the product type table you need (see "Edit the Summary Report before downloading").',
+      'To download it, click "Export" at the top right of the product type table you need, or "Export All" at the top of the page to get every product type in one file, one page per type (see "Edit the Summary Report before downloading").',
       'To bring in a summary kept in Excel, click "Import from Excel" (see "Import a Summary Report from Excel").',
     ],
     tips: [
@@ -373,7 +376,7 @@ export const TOPICS = [
     title: 'Edit the Summary Report before downloading',
     summary: 'Change wording, add remarks or page breaks, then download PDF or Word.',
     steps: [
-      'Open Menu → Summary Report, choose the month and year, and click "Export" at the top right of the table for that product type.',
+      'Open Menu → Summary Report, choose the month and year, and click "Export" at the top right of the table for that product type, or "Export All" at the top of the page for every product type at once.',
       'The "Preview & Edit Report" page opens with that product type and month in an editor, laid out like the printed copy.',
       'Change the wording, add remarks, or adjust the signatories. Each dashed line is a new page; use the page-break button to start a page yourself.',
       'Click "Save Changes" (or press Ctrl+S). Downloads use the saved version.',
